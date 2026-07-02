@@ -1,7 +1,7 @@
 <div align="center">
 
 # 💬 ChatConnect
-
+ 
 **A modern, premium real-time messaging platform — built on the MERN stack with an entirely original UI.**
 
 Talk · Meet · Connect — one-to-one chat, groups, audio/video calls, scheduled meetings, status stories, and a full admin dashboard.
