@@ -6,8 +6,8 @@ import {
   login,
   logout,
   getMe,
-  forgotPassword,
-  resetPassword,
+  forgotPassword ,
+  resetPassword ,
   changePassword,
 } from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
