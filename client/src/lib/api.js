@@ -38,6 +38,16 @@ api.interceptors.response.use(
 // calls all ran on mock data even with the backend running.)
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 
+// A production build with no backend URL means every /api call hits the static
+// host (Vercel answers POSTs with 405). Fail loudly so this is obvious.
+if (import.meta.env.PROD && !DEMO_MODE && !import.meta.env.VITE_API_URL) {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[ChatConnect] VITE_API_URL is not set in this production build — API calls will fail. ' +
+      'Set VITE_API_URL (e.g. https://your-backend.onrender.com/api) and VITE_SOCKET_URL in your host\'s env vars, then rebuild/redeploy.'
+  );
+}
+
 // ── Authenticated media ──────────────────────────────────────────
 // /uploads is no longer public: it requires a short-lived, media-only token.
 // We fetch one after auth and cache it, then append it to media URLs. The

@@ -32,14 +32,27 @@ export function verifyToken(token) {
   return jwt.verify(token, process.env.JWT_SECRET);
 }
 
+/**
+ * Cookie attributes for the session token. In production the frontend and API
+ * usually live on different sites (e.g. vercel.app ↔ onrender.com), where
+ * SameSite=Lax cookies are never sent — cross-site needs SameSite=None+Secure.
+ * In dev (same-origin via the Vite proxy, plain http) Lax is correct.
+ */
+export function sessionCookieOptions() {
+  const isProd = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+  };
+}
+
 /** Sends the JWT as an httpOnly cookie AND in the JSON body (for header-based clients). */
 export function sendTokenResponse(res, user, statusCode = 200, extra = {}) {
   const token = signToken(user);
   const days = Number(process.env.JWT_COOKIE_EXPIRES_DAYS || 30);
   res.cookie('token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    ...sessionCookieOptions(),
     maxAge: days * 24 * 60 * 60 * 1000,
   });
   res.status(statusCode).json({

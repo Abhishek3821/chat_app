@@ -19,6 +19,7 @@ import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { LogoFull, LogoMark } from '@/components/brand/Logo';
 import { useAuth } from '@/store/useAuth';
+import { DEMO_MODE } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 /* Shared animation presets ------------------------------------------------- */
@@ -280,13 +281,15 @@ export default function Login() {
           </motion.div>
         </form>
 
-        <motion.p
-          variants={rise}
-          className="mt-5 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 text-center text-xs text-content-muted"
-        >
-          <Sparkles size={13} className="text-brand-500" />
-          Explore instantly — any email &amp; password works in demo mode.
-        </motion.p>
+        {DEMO_MODE && (
+          <motion.p
+            variants={rise}
+            className="mt-5 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 text-center text-xs text-content-muted"
+          >
+            <Sparkles size={13} className="text-brand-500" />
+            Explore instantly — any email &amp; password works in demo mode.
+          </motion.p>
+        )}
 
         <motion.p variants={rise} className="mt-6 text-center text-sm text-content-muted">
           New to ChatConnect?{' '}

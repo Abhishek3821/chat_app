@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { sendTokenResponse, generateOTP } from '../utils/token.js';
+import { sendTokenResponse, sessionCookieOptions, generateOTP } from '../utils/token.js';
 import { sendEmail, otpEmailTemplate } from '../utils/sendEmail.js';
 import { securityEvent } from '../utils/securityLog.js';
 
@@ -204,7 +204,7 @@ export const login = asyncHandler(async (req, res) => {
 
 // POST /api/auth/logout
 export const logout = asyncHandler(async (req, res) => {
-  res.cookie('token', '', { httpOnly: true, expires: new Date(0) });
+  res.cookie('token', '', { ...sessionCookieOptions(), expires: new Date(0) });
   if (req.user) {
     req.user.isOnline = false;
     req.user.lastSeen = new Date();

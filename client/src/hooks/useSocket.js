@@ -6,6 +6,24 @@ import { useChat } from '../store/useChat';
 import { useUI } from '../store/useUI';
 
 /**
+ * Resolve the Socket.IO server URL.
+ * - Explicit VITE_SOCKET_URL wins.
+ * - An absolute VITE_API_URL (prod) → use its origin.
+ * - Otherwise in dev, connect STRAIGHT to the backend on :5000 rather than
+ *   same-origin. Routing the socket through Vite's `/socket.io` proxy makes the
+ *   WebSocket upgrade flaky and spams `ws proxy socket error: write ECONNABORTED`
+ *   on every reconnect. Socket.IO does its own CORS, and the backend already
+ *   allows localhost/LAN origins in dev, so a direct connection is clean.
+ */
+function resolveSocketUrl() {
+  if (import.meta.env.VITE_SOCKET_URL) return import.meta.env.VITE_SOCKET_URL;
+  const api = import.meta.env.VITE_API_URL || '';
+  if (/^https?:\/\//i.test(api)) return api.replace(/\/api\/?$/, '');
+  if (import.meta.env.DEV) return `${window.location.protocol}//${window.location.hostname}:5000`;
+  return undefined; // prod: same-origin
+}
+
+/**
  * Establishes the Socket.IO connection once the user is authenticated and
  * wires real-time events into the chat store. A no-op in demo mode.
  */
