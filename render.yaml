@@ -1,0 +1,29 @@
+# Render blueprint for the ChatConnect backend.
+# In Render: New → Blueprint → point at this repo. Set the "sync: false" vars
+# (MONGO_URI, CLIENT_URL) in the dashboard after the first deploy.
+services:
+  - type: web
+    name: chatconnect-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true # Render generates a strong secret
+      - key: JWT_EXPIRES_IN
+        value: 30d
+      - key: MONGO_URI
+        sync: false # set in dashboard (MongoDB Atlas SRV string incl. /chatconnect)
+      - key: CLIENT_URL
+        sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
+      - key: ENABLE_EMAIL_VERIFICATION
+        value: "false"
+      # Optional: comma-separated additional allowed origins
+      # - key: EXTRA_CORS_ORIGINS
+      #   value: https://staging.yourdomain.com

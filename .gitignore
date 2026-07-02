@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Env
+.env
+.env.local
+*/.env
+*/.env.local
+
+# Build output
+client/dist/
+client/.vite/
+
+# Uploads (local storage driver)
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db

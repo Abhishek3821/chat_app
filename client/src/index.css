@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────
+   ChatConnect — semantic design tokens
+   Light & dark are driven by CSS variables so every component
+   automatically adapts. Values are "R G B" for Tailwind's
+   rgb(var(--x) / <alpha>) syntax.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --surface: 255 255 255;
+  --surface-2: 248 250 252; /* slate-50 */
+  --border: 226 232 240; /* slate-200 */
+  --content: 15 23 42; /* slate-900 */
+  --content-muted: 100 116 139; /* slate-500 */
+  --app-bg: 244 246 251;
+}
+
+.dark {
+  --surface: 20 27 45; /* navy-800-ish */
+  --surface-2: 15 23 42; /* navy-900 */
+  --border: 40 51 74;
+  --content: 226 232 240; /* slate-200 */
+  --content-muted: 148 163 184; /* slate-400 */
+  --app-bg: 10 15 30; /* navy-950 */
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-[rgb(var(--app-bg))] text-content font-sans antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    @apply bg-brand-500/30;
+  }
+}
+
+@layer components {
+  /* Glassmorphism surfaces */
+  .glass {
+    @apply bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl border border-white/40 dark:border-white/10;
+  }
+  .glass-strong {
+    @apply bg-white/80 dark:bg-white/[0.09] backdrop-blur-2xl border border-white/50 dark:border-white/10;
+  }
+  .card {
+    @apply bg-surface border border-border rounded-2xl shadow-soft;
+  }
+  .gradient-text {
+    @apply bg-brand-gradient bg-clip-text text-transparent;
+  }
+  .btn-gradient {
+    @apply bg-brand-gradient text-white shadow-glow hover:shadow-glow-cyan transition-shadow;
+  }
+  /* Focus ring used across inputs / buttons */
+  .ring-brand {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-0;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-content-muted/30 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .drag-none {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+  /* Thin animated shimmer used by skeletons */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+}
+
+/* Emoji picker (light/dark friendly container) */
+.EmojiPickerReact {
+  --epr-bg-color: rgb(var(--surface)) !important;
+  --epr-category-label-bg-color: rgb(var(--surface)) !important;
+  border: 1px solid rgb(var(--border)) !important;
+  border-radius: 1rem !important;
+}

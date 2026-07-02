@@ -1,0 +1,36 @@
+import mongoose from 'mongoose';
+
+const rsvpSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    response: { type: String, enum: ['going', 'maybe', 'not_going', 'pending'], default: 'pending' },
+  },
+  { _id: false }
+);
+
+const meetingSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 120 },
+    description: { type: String, default: '', maxlength: 1000 },
+    host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    participants: [rsvpSchema],
+    chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat' },
+
+    startAt: { type: Date, required: true },
+    durationMinutes: { type: Number, default: 30 },
+    timezone: { type: String, default: 'UTC' },
+
+    type: { type: String, enum: ['audio', 'video'], default: 'video' },
+    link: { type: String },
+    recurrence: { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
+    reminderMinutes: { type: Number, default: 10 },
+
+    status: { type: String, enum: ['scheduled', 'ongoing', 'completed', 'cancelled'], default: 'scheduled' },
+  },
+  { timestamps: true }
+);
+
+meetingSchema.index({ startAt: 1 });
+
+const Meeting = mongoose.model('Meeting', meetingSchema);
+export default Meeting;
