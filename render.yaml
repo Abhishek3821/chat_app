@@ -23,7 +23,19 @@ services:
       - key: CLIENT_URL
         sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
       - key: ENABLE_EMAIL_VERIFICATION
-        value: "false"
+        value: "true" # verify email via OTP before first login (secure default)
+      # SMTP is REQUIRED when email verification is on, otherwise signups can't
+      # receive their code. Set these in the dashboard (never commit them).
+      - key: EMAIL_HOST
+        sync: false # e.g. smtp.sendgrid.net / smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        value: ChatConnect <no-reply@chatconnect.app>
       # Optional: comma-separated additional allowed origins
       # - key: EXTRA_CORS_ORIGINS
       #   value: https://staging.yourdomain.com

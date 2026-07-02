@@ -1,11 +1,19 @@
 /**
  * Seeds the database with demo users, a group and some messages so you can
- * log in and explore immediately.  Run with:  npm run seed  (from /server)
+ * log in and explore immediately.  DESTRUCTIVE — it deletes all data first.
  *
- * Demo login:  aria@chatconnect.app  /  password123   (all demo users share it)
- * Admin login: admin@chatconnect.app /  password123
+ *   SEED_CONFIRM=yes npm run seed        (from /server)   — or add --yes
+ *
+ * Safety: refuses to run when NODE_ENV=production, and refuses to wipe any
+ * database without the explicit confirmation flag (because your local .env may
+ * point MONGO_URI at a real/shared cluster).
+ *
+ * Demo (non-privileged) users share the password below. The ADMIN account gets
+ * a RANDOM password printed ONCE at the end — no hardcoded admin credentials.
+ * To create/manage an admin outside the seed, use:  node utils/createAdmin.js
  */
 import 'dotenv/config';
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import { connectDB } from '../config/db.js';
 import User from '../models/User.js';
@@ -14,7 +22,9 @@ import Message from '../models/Message.js';
 import ContactRequest from '../models/ContactRequest.js';
 import Status from '../models/Status.js';
 
-const PASSWORD = 'password123';
+const DEMO_PASSWORD = 'password123'; // non-privileged demo accounts only
+const ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url'); // strong, printed once
+const CONFIRMED = process.env.SEED_CONFIRM === 'yes' || process.argv.includes('--yes');
 
 const demoUsers = [
   { name: 'Aria Vance', username: 'aria', email: 'aria@chatconnect.app', bio: 'Product designer • coffee first ☕' },
@@ -26,9 +36,23 @@ const demoUsers = [
 ];
 
 async function run() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ Refusing to run the seed with NODE_ENV=production (it deletes all data).');
+    process.exit(1);
+  }
+
   await connectDB();
   if (mongoose.connection.readyState !== 1) {
     console.error('❌ Could not connect to MongoDB. Set MONGO_URI in server/.env first.');
+    process.exit(1);
+  }
+
+  const { host, name } = mongoose.connection;
+  console.log(`⚠️  About to DELETE ALL DATA in:  ${host}/${name}`);
+  if (!CONFIRMED) {
+    console.error('   Refusing to wipe without confirmation.');
+    console.error('   Re-run with:  SEED_CONFIRM=yes npm run seed   (or add --yes)');
+    await mongoose.disconnect();
     process.exit(1);
   }
 
@@ -47,7 +71,7 @@ async function run() {
     // create() runs the pre-save hook so passwords are hashed.
     const user = await User.create({
       ...u,
-      password: PASSWORD,
+      password: u.role === 'admin' ? ADMIN_PASSWORD : DEMO_PASSWORD,
       isVerified: true,
       avatar: `https://api.dicebear.com/9.x/glass/svg?seed=${u.username}`,
     });
@@ -125,8 +149,12 @@ async function run() {
   await group.save();
 
   console.log('\n✅ Seed complete!');
-  console.log('   Users (password for all):', PASSWORD);
-  demoUsers.forEach((u) => console.log(`   • ${u.email}${u.role === 'admin' ? '  (admin)' : ''}`));
+  console.log('   Demo users password:', DEMO_PASSWORD);
+  demoUsers.filter((u) => u.role !== 'admin').forEach((u) => console.log(`   • ${u.email}`));
+  console.log('\n   🔑 ADMIN (save this — shown only once):');
+  const admin = demoUsers.find((u) => u.role === 'admin');
+  console.log(`   • ${admin.email}   password: ${ADMIN_PASSWORD}`);
+  console.log('   Change it after first login, or manage admins with:  node utils/createAdmin.js');
   await mongoose.connection.close();
   process.exit(0);
 }

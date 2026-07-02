@@ -58,6 +58,13 @@ function validateEnv() {
   if (!isProd) {
     console.warn('⚠️  NODE_ENV is not "production": CORS is permissive, cookies are not Secure, and dev OTPs may be returned in API responses. Set NODE_ENV=production before deploying.');
   }
+  // Email verification with no mail transport = users can never receive their
+  // code (in production the OTP is not returned in the response). Surface it.
+  if (process.env.ENABLE_EMAIL_VERIFICATION === 'true' && !process.env.EMAIL_HOST) {
+    const msg = 'ENABLE_EMAIL_VERIFICATION=true but no EMAIL_HOST is configured — signups cannot receive their verification code.';
+    if (isProd) console.error(`❌ ${msg} Configure SMTP (EMAIL_*) or disable verification.`);
+    else console.warn(`⚠️  ${msg} (dev: the code is returned in the API response instead.)`);
+  }
 }
 
 const app = express();

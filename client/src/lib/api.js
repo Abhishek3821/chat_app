@@ -1,6 +1,21 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_URL || '/api';
+/**
+ * Resolve the API base URL, tolerant of how VITE_API_URL is set:
+ *  - blank            → '/api' (local dev proxy / same-origin)
+ *  - backend origin   → 'https://api.example.com'      → '…/api'
+ *  - full API base    → 'https://api.example.com/api'  → unchanged
+ * Always ends with '/api'. This prevents the classic production bug where the
+ * env var is set to the bare backend origin and every request 404s with
+ * "Route not found: /auth/login" (the /api prefix is missing).
+ */
+function resolveApiBase() {
+  const raw = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+  if (!raw) return '/api';
+  return /\/api$/i.test(raw) ? raw : `${raw}/api`;
+}
+
+const baseURL = resolveApiBase();
 
 export const api = axios.create({
   baseURL,

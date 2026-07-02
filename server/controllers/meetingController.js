@@ -51,7 +51,10 @@ export const updateMeeting = asyncHandler(async (req, res) => {
   const meeting = await Meeting.findById(req.params.id);
   if (!meeting) throw new ApiError(404, 'Meeting not found.');
   if (String(meeting.host) !== String(req.user._id)) throw new ApiError(403, 'Only the host can edit this meeting.');
-  Object.assign(meeting, req.body);
+  // Whitelist editable fields — never let the body reassign host/participants/
+  // link/chat/status via mass assignment.
+  const ALLOWED = ['title', 'description', 'startAt', 'durationMinutes', 'timezone', 'type', 'recurrence', 'reminderMinutes'];
+  for (const k of ALLOWED) if (req.body[k] !== undefined) meeting[k] = req.body[k];
   await meeting.save();
   res.json({ success: true, meeting: await populate(Meeting.findById(meeting._id)) });
 });
