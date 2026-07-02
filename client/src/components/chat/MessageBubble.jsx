@@ -8,12 +8,13 @@ import { mediaUrl } from '../../lib/api';
 const QUICK = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
 
 function Ticks({ status }) {
-  if (status === 'read') return <CheckCheck size={14} className="text-cyan-300" />;
-  if (status === 'delivered') return <CheckCheck size={14} className="text-white/70" />;
-  return <Check size={14} className="text-white/70" />;
+  if (status === 'failed') return <span title="Failed to send" className="text-[11px] font-bold text-rose-300">!</span>;
+  if (status === 'read') return <CheckCheck size={14} className="text-cyan-300" />; // coloured — read
+  if (status === 'delivered') return <CheckCheck size={14} className="text-white/70" />; // grey — delivered
+  return <Check size={14} className="text-white/70" />; // single — sent
 }
 
-export default function MessageBubble({ message, isMine, showAvatar, isGroup, onReact, onReply }) {
+export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply }) {
   const [showActions, setShowActions] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -79,7 +80,7 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, on
           <div className={cn('mt-0.5 flex items-center justify-end gap-1', isMine ? 'text-white/80' : 'text-content-muted')}>
             {message.isEdited && <span className="text-[10px] italic">edited</span>}
             <span className="text-[10px]">{formatTime(message.createdAt)}</span>
-            {isMine && <Ticks status={message.status} />}
+            {isMine && <Ticks status={status || message.status} />}
           </div>
 
           {/* reactions */}

@@ -1,6 +1,7 @@
 import { verifyToken } from '../utils/token.js';
 import User from '../models/User.js';
 import Chat from '../models/Chat.js';
+import Message from '../models/Message.js';
 import { transitionCall } from '../utils/callService.js';
 
 let ioRef = null;
@@ -120,6 +121,36 @@ export function initSocket(io) {
     // ── Live reactions (also persisted via REST) ──────────────────
     socket.on('message-reaction', (payload) => {
       if (payload?.chatId) socket.to(`chat:${payload.chatId}`).emit('message-reaction', payload);
+    });
+
+    // ── Delivery / read receipts (persist + broadcast — drives the ticks) ──
+    // delivered: the recipient's device received a specific message → ✓✓ (grey)
+    socket.on('message:delivered', async ({ chatId, messageId }) => {
+      if (!chatId || !messageId || !(await isChatMember(chatId, userId))) return;
+      try {
+        const r = await Message.updateOne(
+          { _id: messageId, chat: chatId, sender: { $ne: userId }, deliveredTo: { $ne: userId } },
+          { $addToSet: { deliveredTo: userId } }
+        );
+        if (r.modifiedCount) emitToChat(chatId, 'message:status', { chatId, messageId, userId, status: 'delivered' });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // read: the recipient opened/looked at the chat → ✓✓ (coloured). Marks all
+    // of the other side's messages in this chat as read in one shot.
+    socket.on('message:read', async ({ chatId }) => {
+      if (!chatId || !(await isChatMember(chatId, userId))) return;
+      try {
+        const r = await Message.updateMany(
+          { chat: chatId, sender: { $ne: userId }, 'readBy.user': { $ne: userId } },
+          { $push: { readBy: { user: userId, at: new Date() } } }
+        );
+        if (r.modifiedCount) emitToChat(chatId, 'message:read', { chatId, userId });
+      } catch {
+        /* ignore */
+      }
     });
 
     // ── WebRTC signaling (audio / video calls) ────────────────────

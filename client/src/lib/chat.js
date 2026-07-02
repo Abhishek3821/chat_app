@@ -14,6 +14,35 @@ export function getChatDisplay(chat, currentUser) {
   return { name: other?.name || 'Unknown', avatar: other?.avatar, isOnline: other?.isOnline, lastSeen: other?.lastSeen, peer: other, isGroup: false };
 }
 
+/** The other participants' ids (everyone but me). Works for API + demo shapes. */
+export function chatPeerIds(chat, currentUser) {
+  const meId = String(currentUser?._id);
+  if (!chat) return [];
+  if (chat.peer) return [String(chat.peer._id)]; // demo 1:1
+  return (chat.participants || [])
+    .map((p) => String(p.user?._id ?? p.user))
+    .filter((id) => id && id !== meId);
+}
+
+/**
+ * Delivery status of one of MY messages, for the tick indicator:
+ *   'sent'      → ✓   server has it, not yet on the recipient's device
+ *   'delivered' → ✓✓  reached a recipient's device (grey)
+ *   'read'      → ✓✓  all recipients have read it (coloured)
+ * Derived from the message's deliveredTo / readBy arrays vs the other participants.
+ */
+export function messageStatus(m, currentUser, peerIds) {
+  if (m.status === 'failed') return 'failed';
+  if (m.optimistic) return 'sent';
+  const others = peerIds || [];
+  if (!others.length) return m.status || 'sent';
+  const readers = new Set((m.readBy || []).map((r) => String(r.user?._id ?? r.user)));
+  const delivered = new Set((m.deliveredTo || []).map((u) => String(u?._id ?? u)));
+  if (others.every((id) => readers.has(id))) return 'read';
+  if (others.some((id) => delivered.has(id) || readers.has(id))) return 'delivered';
+  return 'sent';
+}
+
 /** Preview text for a chat's last message. */
 export function lastMessagePreview(chat) {
   const m = chat?.lastMessage;

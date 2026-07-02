@@ -121,6 +121,32 @@ export const useChat = create((set, get) => ({
     }
   },
 
+  // Mark a specific message delivered to a user (adds them to deliveredTo).
+  markDelivered: (chatId, messageId, userId) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId && !(m.deliveredTo || []).some((u) => String(u?._id ?? u) === String(userId))
+            ? { ...m, deliveredTo: [...(m.deliveredTo || []), userId] }
+            : m
+        ),
+      },
+    })),
+
+  // Mark every message in a chat as read by a user (adds them to readBy).
+  markReadBy: (chatId, userId) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          (m.readBy || []).some((r) => String(r.user?._id ?? r.user) === String(userId))
+            ? m
+            : { ...m, readBy: [...(m.readBy || []), { user: userId, at: new Date().toISOString() }] }
+        ),
+      },
+    })),
+
   reactToMessage: (chatId, messageId, emoji) =>
     set((s) => ({
       messagesByChat: {

@@ -49,10 +49,28 @@ export function useSocket() {
 
     const { appendMessage, setTyping } = useChat.getState();
 
-    socket.on('receive-message', ({ chatId, message }) => appendMessage(chatId, message));
+    socket.on('receive-message', ({ chatId, message }) => {
+      appendMessage(chatId, message);
+      const chat = useChat.getState();
+      const senderId = message.sender?._id || message.sender;
+      if (String(senderId) !== String(userId)) {
+        // Acknowledge delivery (✓✓ on the sender's side)...
+        socket.emit('message:delivered', { chatId, messageId: message._id });
+        // ...and if I'm actively viewing this chat, mark it read (coloured ✓✓).
+        if (chat.activeChatId === chatId && document.visibilityState === 'visible') {
+          socket.emit('message:read', { chatId });
+        }
+      }
+    });
     socket.on('typing-start', ({ chatId, userId }) => setTyping(chatId, userId, true));
     socket.on('typing-stop', ({ chatId, userId }) => setTyping(chatId, userId, false));
     socket.on('chat-updated', () => useChat.getState().loadChats());
+
+    // Delivery / read receipts → update tick state for my messages.
+    socket.on('message:status', ({ chatId, messageId, userId: uid, status }) => {
+      if (status === 'delivered') useChat.getState().markDelivered(chatId, messageId, uid);
+    });
+    socket.on('message:read', ({ chatId, userId: uid }) => useChat.getState().markReadBy(chatId, uid));
 
     // Live presence
     socket.on('presence-snapshot', ({ online }) => useChat.getState().setPresenceSnapshot(online));

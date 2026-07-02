@@ -65,8 +65,12 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   message = await populateMessage(Message.findById(message._id));
 
-  // Realtime fan-out to everyone in the chat room + personal rooms (for chat-list updates).
-  emitToChat(chatId, 'receive-message', { chatId, message });
+  // Realtime fan-out. Deliver to every participant's PERSONAL room (not just the
+  // chat room) so online users receive it instantly even if they don't have this
+  // chat open — this is what drives delivered ticks and low-latency delivery.
+  for (const p of chat.participants) {
+    emitToUser(String(p.user), 'receive-message', { chatId, message });
+  }
   for (const p of chat.participants) {
     const uid = String(p.user);
     if (uid === String(req.user._id)) continue;

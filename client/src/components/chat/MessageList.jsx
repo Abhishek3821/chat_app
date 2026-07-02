@@ -4,6 +4,7 @@ import MessageBubble from './MessageBubble';
 import TypingIndicator from './TypingIndicator';
 import { MessageSkeleton } from '../ui/Skeleton';
 import { formatDateSeparator } from '../../lib/utils';
+import { messageStatus } from '../../lib/chat';
 import { isSameDay } from 'date-fns';
 
 function DateSeparator({ date }) {
@@ -16,7 +17,7 @@ function DateSeparator({ date }) {
   );
 }
 
-export default function MessageList({ messages, loading, isGroup, currentUser, typingUser, onReact, onReply }) {
+export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, onReact, onReply }) {
   const bottomRef = useRef(null);
   const meId = currentUser?._id || 'me';
 
@@ -44,6 +45,7 @@ export default function MessageList({ messages, loading, isGroup, currentUser, t
               isMine={isMine}
               isGroup={isGroup}
               showAvatar={showAvatar}
+              status={isMine ? messageStatus(m, currentUser, peerIds) : undefined}
               onReact={onReact}
               onReply={onReply}
             />

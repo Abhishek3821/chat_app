@@ -5,7 +5,7 @@ import MessageComposer from './MessageComposer';
 import RightPanel from './RightPanel';
 import { useChat } from '../../store/useChat';
 import { useAuth } from '../../store/useAuth';
-import { getChatDisplay } from '../../lib/chat';
+import { getChatDisplay, chatPeerIds } from '../../lib/chat';
 import { emitSocket } from '../../hooks/useSocket';
 import { DEMO_MODE } from '../../lib/api';
 
@@ -18,13 +18,20 @@ export default function ChatArea({ chat }) {
 
   const messages = messagesByChat[chat._id] || [];
   const d = getChatDisplay(chat, currentUser);
+  const peerIds = chatPeerIds(chat, currentUser);
   const typingIds = typing[chat._id] || [];
   const typingUser = typingIds.length && !d.isGroup ? d.peer : typingIds.length ? { name: 'Someone', avatar: '' } : null;
 
   useEffect(() => {
     emitSocket('join-chat', chat._id);
+    emitSocket('message:read', { chatId: chat._id }); // opening the chat = read
     return () => emitSocket('leave-chat', chat._id);
   }, [chat._id]);
+
+  // Re-mark read when new messages land while I'm looking at this chat.
+  useEffect(() => {
+    if (messages.length) emitSocket('message:read', { chatId: chat._id });
+  }, [messages.length, chat._id]);
 
   const handleSend = async (payload) => {
     await sendMessage({ chatId: chat._id, ...payload });
@@ -56,6 +63,7 @@ export default function ChatArea({ chat }) {
           loading={loadingMessages}
           isGroup={d.isGroup}
           currentUser={currentUser}
+          peerIds={peerIds}
           typingUser={typingUser}
           onReact={(id, emoji) => reactToMessage(chat._id, id, emoji)}
           onReply={setReplyTo}
