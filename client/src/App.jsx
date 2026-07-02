@@ -87,8 +87,8 @@ export default function App() {
             <Route path="/meetings" element={<MeetingsPage />} />
             <Route path="/status" element={<StatusPage />} />
             <Route path="/groups" element={<GroupsPage />} />
-            <Route path="/contacts" element={<ContactsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/contacts" element={<ContactsPage  />} />
+            <Route path="/settings" element={<SettingsPage  />} />
             <Route
               path="/admin"
               element={
