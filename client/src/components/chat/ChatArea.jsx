@@ -13,8 +13,9 @@ const DEMO_REPLIES = ['Absolutely! ðŸ™Œ', 'Sounds perfect.', 'Haha love that ðŸ˜
 
 export default function ChatArea({ chat }) {
   const currentUser = useAuth((s) => s.user);
-  const { messagesByChat, loadingMessages, sendMessage, appendMessage, reactToMessage, setTyping, typing } = useChat();
+  const { messagesByChat, loadingMessages, sendMessage, appendMessage, reactToMessage, setTyping, typing, deleteMessage, toggleStarMessage, togglePinMessage } = useChat();
   const [replyTo, setReplyTo] = useState(null);
+  const [search, setSearch] = useState('');
 
   const messages = messagesByChat[chat._id] || [];
   const d = getChatDisplay(chat, currentUser);
@@ -23,6 +24,7 @@ export default function ChatArea({ chat }) {
   const typingUser = typingIds.length && !d.isGroup ? d.peer : typingIds.length ? { name: 'Someone', avatar: '' } : null;
 
   useEffect(() => {
+    setSearch(''); // reset in-chat search when switching conversations
     emitSocket('join-chat', chat._id);
     emitSocket('message:read', { chatId: chat._id }); // opening the chat = read
     return () => emitSocket('leave-chat', chat._id);
@@ -57,7 +59,7 @@ export default function ChatArea({ chat }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ChatHeader chat={chat} currentUser={currentUser} />
+        <ChatHeader chat={chat} currentUser={currentUser} search={search} onSearch={setSearch} />
         <MessageList
           messages={messages}
           loading={loadingMessages}
@@ -65,8 +67,12 @@ export default function ChatArea({ chat }) {
           currentUser={currentUser}
           peerIds={peerIds}
           typingUser={typingUser}
+          searchQuery={search}
           onReact={(id, emoji) => reactToMessage(chat._id, id, emoji)}
           onReply={setReplyTo}
+          onStar={(m) => toggleStarMessage(chat._id, m._id)}
+          onPin={(m) => togglePinMessage(chat._id, m._id)}
+          onDelete={(m) => deleteMessage(chat._id, m._id)}
         />
         <MessageComposer chatId={chat._id} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={handleSend} />
       </div>

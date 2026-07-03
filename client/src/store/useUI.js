@@ -26,6 +26,10 @@ export const useUI = create((set, get) => ({
   openModal: (activeModal, modalData = null) => set({ activeModal, modalData }),
   closeModal: () => set({ activeModal: null, modalData: null }),
 
-  startCall: (call) => set({ call }),
+  startCall: (call) => set({ call: { minimized: false, ...call } }),
   endCall: () => set({ call: null }),
+  // Minimize keeps the call ALIVE (media + peer connection) — the overlay just
+  // collapses to a floating pill so the user can browse/chat during the call.
+  minimizeCall: () => set((s) => (s.call ? { call: { ...s.call, minimized: true } } : {})),
+  restoreCall: () => set((s) => (s.call ? { call: { ...s.call, minimized: false } } : {})),
 }));

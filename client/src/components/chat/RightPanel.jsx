@@ -1,21 +1,56 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import Avatar from '../ui/Avatar';
 import { ToggleRow } from '../ui/Switch';
 import { useUI } from '../../store/useUI';
+import { useChat } from '../../store/useChat';
 import { useState } from 'react';
 import { getChatDisplay } from '../../lib/chat';
 import { USER_MAP } from '../../lib/demoData';
 import { cn } from '../../lib/utils';
+import api, { DEMO_MODE } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 const MEDIA = Array.from({ length: 6 }).map((_, i) => `https://picsum.photos/seed/cc${i}/200/200`);
 
 export default function RightPanel({ chat, currentUser }) {
   const { rightPanelOpen, setRightPanel } = useUI();
+  const deleteChat = useChat((s) => s.deleteChat);
+  const navigate = useNavigate();
   const [muted, setMuted] = useState(chat?.muted || false);
   const d = getChatDisplay(chat, currentUser);
   const members = chat?.isGroup ? (chat.members || []).map((id) => USER_MAP[id] || currentUser).filter(Boolean) : [];
+
+  const openStarred = async () => {
+    if (DEMO_MODE) return toast('⭐ Starred messages show up here in the full app.');
+    try {
+      const { data } = await api.get('/messages/starred');
+      const list = Array.isArray(data) ? data : data.messages || data.starred || [];
+      toast(list.length ? `You have ${list.length} starred message${list.length === 1 ? '' : 's'}.` : 'No starred messages yet.', { icon: '⭐' });
+    } catch {
+      toast.error('Couldn’t load starred messages.');
+    }
+  };
+
+  const copyInvite = async () => {
+    const link = `${window.location.origin}/join/${chat?._id}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success('Invite link copied');
+    } catch {
+      toast(link);
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    const group = chat?.isGroup;
+    if (!window.confirm(group ? 'Leave and remove this group from your list?' : 'Delete this conversation?')) return;
+    await deleteChat(chat._id);
+    toast.success(group ? 'You left the group' : 'Chat deleted');
+    setRightPanel(false);
+    navigate('/');
+  };
 
   const panel = (
     <div className="flex h-full w-full flex-col bg-surface/70 backdrop-blur-xl">
@@ -42,7 +77,7 @@ export default function RightPanel({ chat, currentUser }) {
         </div>
 
         {/* Shared media */}
-        <Section title="Shared media" icon={ImageIcon} action="See all">
+        <Section title="Shared media" icon={ImageIcon}>
           <div className="grid grid-cols-3 gap-1.5">
             {MEDIA.map((src, i) => (
               <motion.img key={i} whileHover={{ scale: 1.05 }} src={src} alt="" className="aspect-square w-full rounded-xl object-cover" />
@@ -51,7 +86,7 @@ export default function RightPanel({ chat, currentUser }) {
         </Section>
 
         {/* Starred */}
-        <button className="flex w-full items-center gap-3 px-6 py-3 hover:bg-content/5">
+        <button onClick={openStarred} className="flex w-full items-center gap-3 px-6 py-3 hover:bg-content/5">
           <Star size={18} className="text-amber-500" />
           <span className="text-sm font-medium text-content">Starred messages</span>
           <ChevronRight size={16} className="ml-auto text-content-muted" />
@@ -59,7 +94,7 @@ export default function RightPanel({ chat, currentUser }) {
 
         {chat?.isGroup && (
           <>
-            <button className="flex w-full items-center gap-3 px-6 py-3 hover:bg-content/5">
+            <button onClick={copyInvite} className="flex w-full items-center gap-3 px-6 py-3 hover:bg-content/5">
               <Link2 size={18} className="text-brand-500" />
               <span className="text-sm font-medium text-content">Invite via link</span>
               <ChevronRight size={16} className="ml-auto text-content-muted" />
@@ -84,11 +119,13 @@ export default function RightPanel({ chat, currentUser }) {
         {/* Danger actions */}
         <div className="space-y-1 px-4 py-4">
           {[
-            { icon: Ban, label: 'Block', danger: true },
-            { icon: Flag, label: 'Report', danger: true },
-            chat?.isGroup ? { icon: LogOut, label: 'Exit group', danger: true } : { icon: Trash2, label: 'Delete chat', danger: true },
-          ].map(({ icon: Icon, label, danger }) => (
-            <button key={label} onClick={() => toast.success(`${label} — done`)} className={cn('flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-content/5', danger ? 'text-red-500' : 'text-content')}>
+            { icon: Ban, label: 'Block', onClick: () => toast(`${d.name} won’t be able to reach you. (Blocking review coming soon.)`, { icon: '🚫' }) },
+            { icon: Flag, label: 'Report', onClick: () => toast.success('Reported — our team will review this conversation.') },
+            chat?.isGroup
+              ? { icon: LogOut, label: 'Exit group', onClick: handleDeleteChat }
+              : { icon: Trash2, label: 'Delete chat', onClick: handleDeleteChat },
+          ].map(({ icon: Icon, label, onClick }) => (
+            <button key={label} onClick={onClick} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-red-500 hover:bg-content/5">
               <Icon size={18} /> {label}
             </button>
           ))}

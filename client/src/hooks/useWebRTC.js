@@ -6,7 +6,7 @@ import { useAuth } from '../store/useAuth';
 import { emitSocket } from './useSocket';
 
 /**
- * Real WebRTC audio/video calling.
+ * Real WebRTC audio/video calling — 1:1 and small group ("add people").
  *
  * Flow (signaling relayed by the backend Socket.IO server):
  *   Caller: getUserMedia → POST /api/calls/start (creates the history record,
@@ -16,11 +16,17 @@ import { emitSocket } from './useSocket';
  *   Reject / cancel / end are all signaled AND persisted server-side, so call
  *   history (missed / rejected / completed) stays correct for both users.
  *
- * Media (audio+video) is peer-to-peer. With no socket/peer (e.g. demo mode) it
- * still captures your real camera/mic so you can preview the call experience.
+ * GROUP: every remote party is a separate peer connection keyed by user id, so
+ * the exact same, proven negotiation runs once per leg. `addParticipants()`
+ * rings extra contacts into the SAME call; when they accept, a new leg is
+ * negotiated and their tile appears. Everyone added is connected to the person
+ * who added them (the host), so all parties can see/hear the host.
  *
- * NOTE: getUserMedia only works on secure origins — https:// or http://localhost.
- * Over a plain-http LAN IP the browser blocks it; use https or the deployed app.
+ * Media (audio+video) is peer-to-peer. With no socket/peer (e.g. demo mode) it
+ * still captures your real camera/mic (and screen) so you can preview the UX.
+ *
+ * NOTE: getUserMedia/getDisplayMedia only work on secure origins — https:// or
+ * http://localhost. Over a plain-http LAN IP the browser blocks it.
  */
 const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
@@ -33,8 +39,8 @@ if (import.meta.env.VITE_TURN_URL) {
   });
 }
 
-const RING_TIMEOUT_MS = 35000; // caller gives up ringing
-const INCOMING_TIMEOUT_MS = 45000; // callee popup safety net (caller cancel normally lands first)
+const RING_TIMEOUT_MS = 35000; // caller gives up ringing a leg
+const INCOMING_TIMEOUT_MS = 45000; // callee popup safety net
 const CONNECT_TIMEOUT_MS = 25000; // accepted but media never connected
 
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
@@ -44,18 +50,24 @@ export function useWebRTC(call) {
   const me = useAuth((s) => s.user);
 
   const [localStream, setLocalStream] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState([]); // [{ id, stream, user }]
   // incoming | calling | connecting | connected | demo | declined | noanswer |
   // unavailable | missed | ended | error
   const [status, setStatus] = useState(call?.direction === 'incoming' ? 'incoming' : 'calling');
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
+  const [sharingScreen, setSharingScreen] = useState(false);
   const [mediaError, setMediaError] = useState(null);
 
-  const pcRef = useRef(null);
+  const peersRef = useRef(new Map()); // remoteId -> RTCPeerConnection
   const localStreamRef = useRef(null);
-  const remoteCandidates = useRef([]);
-  const timersRef = useRef([]);
+  const cameraTrackRef = useRef(null); // original camera track (to restore after screen share)
+  const screenTrackRef = useRef(null);
+  const candBufRef = useRef(new Map()); // remoteId -> [RTCIceCandidate] buffered until remoteDescription
+  const participantsRef = useRef(new Map()); // remoteId -> { _id, name, avatar }
+  const timersRef = useRef([]); // primary-call timers
+  const legTimersRef = useRef(new Map()); // remoteId -> ring timeout for an added leg
   const closedRef = useRef(false);
   const connectedAtRef = useRef(null);
   const statusRef = useRef(status);
@@ -65,7 +77,7 @@ export function useWebRTC(call) {
   // from POST /api/calls/start (fallback id keeps demo/offline flows working).
   const callIdRef = useRef(call?.callId || `local-${Math.random().toString(36).slice(2, 10)}`);
 
-  const peerId = call?.peer?._id;
+  const peerId = call?.peer?._id ? String(call.peer._id) : null; // primary peer
   const wantVideo = call?.type === 'video';
   // Demo users have ids like "u1"; real users have Mongo ObjectIds → P2P only for real peers.
   const hasSocketPeer = Boolean(getSocket() && peerId && !DEMO_MODE && !String(peerId).startsWith('u'));
@@ -76,18 +88,64 @@ export function useWebRTC(call) {
     return t;
   };
 
+  const upsertRemote = useCallback((id, stream) => {
+    const key = String(id);
+    setRemoteStreams((prev) => {
+      const user = participantsRef.current.get(key) || { _id: key };
+      return [...prev.filter((r) => r.id !== key), { id: key, stream, user }];
+    });
+  }, []);
+
+  const dropRemote = useCallback((id) => {
+    const key = String(id);
+    setRemoteStreams((prev) => prev.filter((r) => r.id !== key));
+  }, []);
+
+  const closePeer = useCallback(
+    (id) => {
+      const key = String(id);
+      const pc = peersRef.current.get(key);
+      if (pc) {
+        try {
+          pc.close();
+        } catch {
+          /* noop */
+        }
+        peersRef.current.delete(key);
+      }
+      candBufRef.current.delete(key);
+      const lt = legTimersRef.current.get(key);
+      if (lt) {
+        clearTimeout(lt);
+        legTimersRef.current.delete(key);
+      }
+      dropRemote(key);
+    },
+    [dropRemote]
+  );
+
   const cleanup = useCallback(() => {
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
+    legTimersRef.current.forEach(clearTimeout);
+    legTimersRef.current.clear();
+    peersRef.current.forEach((pc) => {
+      try {
+        pc.close();
+      } catch {
+        /* noop */
+      }
+    });
+    peersRef.current.clear();
+    candBufRef.current.clear();
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current = null;
     try {
-      pcRef.current?.close();
+      screenTrackRef.current?.stop();
     } catch {
       /* noop */
     }
-    pcRef.current = null;
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    localStreamRef.current = null;
-    remoteCandidates.current = [];
+    screenTrackRef.current = null;
   }, []);
 
   /**
@@ -117,6 +175,7 @@ export function useWebRTC(call) {
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     localStreamRef.current = stream;
+    cameraTrackRef.current = stream.getVideoTracks()[0] || null;
     setLocalStream(stream);
     return stream;
   }, [wantVideo]);
@@ -134,57 +193,73 @@ export function useWebRTC(call) {
   }, []);
 
   const createPeer = useCallback(
-    (stream) => {
+    (remoteId, stream) => {
+      const key = String(remoteId);
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      // If a screen share is already live, send the screen (not the camera) on this new leg.
+      if (screenTrackRef.current) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(screenTrackRef.current).catch(() => {});
+      }
       pc.onicecandidate = (e) => {
-        if (e.candidate && peerId) {
-          emitSocket('call:ice-candidate', { to: peerId, candidate: e.candidate, callId: callIdRef.current });
+        if (e.candidate) {
+          emitSocket('call:ice-candidate', { to: key, candidate: e.candidate, callId: callIdRef.current });
         }
       };
-      pc.ontrack = (e) => setRemoteStream(e.streams[0]);
+      pc.ontrack = (e) => upsertRemote(key, e.streams[0]);
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         if (st === 'connected') {
+          const lt = legTimersRef.current.get(key);
+          if (lt) {
+            clearTimeout(lt);
+            legTimersRef.current.delete(key);
+          }
           timersRef.current.forEach(clearTimeout);
           timersRef.current = [];
           if (!connectedAtRef.current) connectedAtRef.current = Date.now();
           setStatus('connected');
         } else if (st === 'failed' || st === 'closed') {
-          // Terminal — release media and close the overlay so nothing leaks.
-          teardown('ended');
+          // This leg died — drop just its tile; end the whole call only when none
+          // remain AND either the call had connected or the PRIMARY leg is the one
+          // that failed (a primary that never connects must not hang the overlay).
+          const wasPrimary = key === String(peerId);
+          closePeer(key);
+          if (peersRef.current.size === 0 && (connectedAtRef.current || wasPrimary)) teardown('ended');
         }
       };
-      pcRef.current = pc;
+      peersRef.current.set(key, pc);
       return pc;
     },
-    [peerId, teardown]
+    [closePeer, teardown, upsertRemote]
   );
 
-  const flushBufferedCandidates = useCallback(async () => {
-    const pc = pcRef.current;
+  const flushCandidates = useCallback(async (remoteId) => {
+    const key = String(remoteId);
+    const pc = peersRef.current.get(key);
     if (!pc?.remoteDescription) return;
-    for (const c of remoteCandidates.current) {
+    const buf = candBufRef.current.get(key) || [];
+    for (const c of buf) {
       try {
         await pc.addIceCandidate(c);
       } catch {
         /* noop */
       }
     }
-    remoteCandidates.current = [];
+    candBufRef.current.set(key, []);
   }, []);
 
-  // ── OUTGOING: media → create call record → ring; SDP offer is created
-  //    only after the callee accepts (spec: call-user → incoming-call →
-  //    accept-call → webrtc-offer → webrtc-answer → ICE). ──────────────
+  // ── OUTGOING (primary peer): media → create call record → ring; SDP offer is
+  //    created only after the callee accepts. ─────────────────────────────────
   useEffect(() => {
     if (!call || call.direction !== 'outgoing') return undefined;
+    if (call.peer?._id) participantsRef.current.set(String(call.peer._id), call.peer);
     let cancelled = false;
     (async () => {
       try {
-        const stream = await getMedia();
+        await getMedia();
         if (cancelled) return;
-        void stream;
 
         if (!hasSocketPeer) {
           // No real peer (demo / group preview) — simulate a short ring.
@@ -223,7 +298,7 @@ export function useWebRTC(call) {
 
         // No answer in time → cancel (server logs it as missed for both sides).
         addTimer(() => {
-          if (pcRef.current?.connectionState === 'connected' || statusRef.current === 'connected') return;
+          if (statusRef.current === 'connected' || peersRef.current.get(peerId)?.connectionState === 'connected') return;
           emitSocket('call:cancel', { to: peerId, callId: callIdRef.current });
           toast(`${call.peer?.name || 'User'} didn't answer.`, { icon: '📵' });
           teardown('noanswer', { linger: 1600 });
@@ -241,6 +316,7 @@ export function useWebRTC(call) {
   // ── INCOMING: safety net if the caller vanished without cancelling. ──
   useEffect(() => {
     if (!call || call.direction !== 'incoming') return undefined;
+    if (call.peer?._id) participantsRef.current.set(String(call.peer._id), call.peer);
     const t = addTimer(() => {
       if (statusRef.current === 'incoming') teardown('missed');
     }, INCOMING_TIMEOUT_MS);
@@ -277,98 +353,212 @@ export function useWebRTC(call) {
 
   const hangUp = useCallback(() => {
     if (hasSocketPeer) {
-      if (connectedAtRef.current) {
-        emitSocket('call:end', { to: peerId, callId: callIdRef.current, duration: liveDuration() });
-      } else if (call?.direction === 'outgoing') {
-        // Hanging up while it's still ringing = cancel → missed call.
-        emitSocket('call:cancel', { to: peerId, callId: callIdRef.current });
-      } else {
-        emitSocket('call:end', { to: peerId, callId: callIdRef.current });
-      }
+      // End every leg: the primary peer + everyone added + anyone still connected.
+      const ids = new Set([peerId, ...participantsRef.current.keys(), ...peersRef.current.keys()].filter(Boolean));
+      ids.forEach((id) => {
+        if (connectedAtRef.current) {
+          emitSocket('call:end', { to: id, callId: callIdRef.current, duration: liveDuration() });
+        } else if (call?.direction === 'outgoing') {
+          emitSocket('call:cancel', { to: id, callId: callIdRef.current });
+        } else {
+          emitSocket('call:end', { to: id, callId: callIdRef.current });
+        }
+      });
     }
     teardown('ended');
   }, [peerId, hasSocketPeer, call, teardown]);
+
+  /** Ring extra contacts into this call (they connect to you, the host). */
+  const addParticipants = useCallback(
+    (users = []) => {
+      if (!hasSocketPeer) {
+        toast('Group calling needs a live connection.');
+        return;
+      }
+      const added = [];
+      users.forEach((u) => {
+        const id = u?._id ? String(u._id) : null;
+        if (!id || id === String(me?._id) || peersRef.current.has(id) || legTimersRef.current.has(id)) return;
+        participantsRef.current.set(id, u);
+        emitSocket('call:invite', {
+          to: id,
+          callId: callIdRef.current,
+          type: call.type,
+          caller: { _id: me?._id, name: me?.name, avatar: me?.avatar },
+        });
+        const t = setTimeout(() => {
+          legTimersRef.current.delete(id);
+          if (!peersRef.current.has(id)) {
+            toast(`${u.name || 'They'} didn't answer.`, { icon: '📵' });
+          }
+        }, RING_TIMEOUT_MS);
+        legTimersRef.current.set(id, t);
+        added.push(u);
+      });
+      if (added.length) {
+        toast.success(`Ringing ${added.length} ${added.length === 1 ? 'person' : 'people'}…`);
+      }
+    },
+    [hasSocketPeer, me, call]
+  );
+
+  // ── Screen share (video calls): swap the outgoing video track on every leg ──
+  const stopShare = useCallback(() => {
+    const cam = cameraTrackRef.current || null;
+    peersRef.current.forEach((pc) => {
+      const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+      if (sender) sender.replaceTrack(cam).catch(() => {});
+    });
+    try {
+      screenTrackRef.current?.stop();
+    } catch {
+      /* noop */
+    }
+    screenTrackRef.current = null;
+    setScreenStream(null);
+    setSharingScreen(false);
+  }, []);
+
+  const toggleScreenShare = useCallback(async () => {
+    if (!wantVideo) return;
+    if (sharingScreen) {
+      stopShare();
+      return;
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      const track = display.getVideoTracks()[0];
+      if (!track) return;
+      screenTrackRef.current = track;
+      peersRef.current.forEach((pc) => {
+        const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(track).catch(() => {});
+      });
+      setScreenStream(display);
+      setSharingScreen(true);
+      track.onended = () => stopShare(); // user hit the browser's "Stop sharing"
+    } catch (err) {
+      if (err?.name !== 'NotAllowedError') toast.error('Could not start screen share.');
+    }
+  }, [wantVideo, sharingScreen, stopShare]);
 
   // ── Signaling listeners ──
   useEffect(() => {
     const s = getSocket();
     if (!s) return undefined;
     const mine = (cid) => !cid || cid === callIdRef.current;
+    const isPrimary = (id) => String(id) === String(peerId);
+    const nameFor = (id) => participantsRef.current.get(String(id))?.name || call?.peer?.name || 'User';
 
-    // Caller side: callee accepted → NOW create the peer + SDP offer.
-    const onAccepted = async ({ callId: cid }) => {
-      if (!mine(cid) || pcRef.current || !localStreamRef.current) return;
+    // A party accepted → create the peer + SDP offer for THAT party.
+    const onAccepted = async ({ from, callId: cid }) => {
+      if (!mine(cid) || !localStreamRef.current) return;
+      const remote = String(from || peerId);
+      if (peersRef.current.has(remote)) return;
       try {
-        setStatus('connecting');
-        const pc = createPeer(localStreamRef.current);
+        if (statusRef.current !== 'connected') setStatus('connecting');
+        const pc = createPeer(remote, localStreamRef.current);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        emitSocket('call:offer', { to: peerId, offer, callId: callIdRef.current });
+        emitSocket('call:offer', { to: remote, offer, callId: callIdRef.current });
       } catch {
-        teardown('error');
+        closePeer(remote);
+        if (isPrimary(remote) && !connectedAtRef.current) teardown('error');
       }
     };
 
-    // Callee side: the caller's offer arrived → answer it.
-    const onOffer = async ({ callId: cid, offer }) => {
-      if (!mine(cid) || !offer || pcRef.current || !localStreamRef.current) return;
+    // An offer arrived (we're the callee for this leg) → answer it.
+    const onOffer = async ({ from, callId: cid, offer }) => {
+      if (!mine(cid) || !offer || !localStreamRef.current) return;
+      const remote = String(from || peerId);
+      if (peersRef.current.has(remote)) return;
       try {
-        const pc = createPeer(localStreamRef.current);
+        const pc = createPeer(remote, localStreamRef.current);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        await flushBufferedCandidates();
+        await flushCandidates(remote);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        emitSocket('call:answer', { to: peerId, answer, callId: callIdRef.current });
+        emitSocket('call:answer', { to: remote, answer, callId: callIdRef.current });
       } catch {
-        teardown('error');
+        closePeer(remote);
+        if (isPrimary(remote) && !connectedAtRef.current) teardown('error');
       }
     };
 
-    const onAnswer = async ({ callId: cid, answer }) => {
-      if (!mine(cid) || !pcRef.current || !answer) return;
+    const onAnswer = async ({ from, callId: cid, answer }) => {
+      const remote = String(from || peerId);
+      const pc = peersRef.current.get(remote);
+      if (!mine(cid) || !pc || !answer) return;
       try {
-        await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-        await flushBufferedCandidates();
+        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        await flushCandidates(remote);
       } catch {
         /* noop */
       }
     };
 
-    const onCandidate = async ({ callId: cid, candidate }) => {
+    const onCandidate = async ({ from, callId: cid, candidate }) => {
       if (!mine(cid) || !candidate) return;
+      const remote = String(from || peerId);
       const c = new RTCIceCandidate(candidate);
-      if (pcRef.current?.remoteDescription) {
+      const pc = peersRef.current.get(remote);
+      if (pc?.remoteDescription) {
         try {
-          await pcRef.current.addIceCandidate(c);
+          await pc.addIceCandidate(c);
         } catch {
           /* noop */
         }
       } else {
-        remoteCandidates.current.push(c);
+        const buf = candBufRef.current.get(remote) || [];
+        buf.push(c);
+        candBufRef.current.set(remote, buf);
       }
     };
 
-    const onRejected = ({ callId: cid }) => {
+    const onRejected = ({ from, callId: cid }) => {
       if (!mine(cid)) return;
-      toast(`${call?.peer?.name || 'User'} declined the call.`, { icon: '🚫' });
-      teardown('declined', { linger: 1600 });
+      const remote = String(from || peerId);
+      if (isPrimary(remote) && !connectedAtRef.current) {
+        toast(`${nameFor(remote)} declined the call.`, { icon: '🚫' });
+        teardown('declined', { linger: 1600 });
+      } else {
+        toast(`${nameFor(remote)} declined.`, { icon: '🚫' });
+        closePeer(remote);
+      }
     };
 
-    const onCancelled = ({ callId: cid }) => {
+    const onCancelled = ({ from, callId: cid }) => {
       if (!mine(cid) || connectedAtRef.current) return;
-      // Caller hung up before we answered → missed call.
-      toast(`Missed ${call?.type === 'video' ? 'video ' : ''}call from ${call?.peer?.name || 'someone'}.`, { icon: '📵' });
-      teardown('missed');
+      const remote = String(from || peerId);
+      if (isPrimary(remote)) {
+        toast(`Missed ${call?.type === 'video' ? 'video ' : ''}call from ${nameFor(remote)}.`, { icon: '📵' });
+        teardown('missed');
+      } else {
+        closePeer(remote);
+      }
     };
 
-    const onUnavailable = ({ callId: cid }) => {
+    const onUnavailable = ({ to, from, callId: cid }) => {
       if (!mine(cid)) return;
-      toast(`${call?.peer?.name || 'This user'} is offline.`, { icon: '📴' });
-      teardown('unavailable', { linger: 1600 });
+      const remote = String(to || from || peerId);
+      if (isPrimary(remote)) {
+        toast(`${nameFor(remote)} is offline.`, { icon: '📴' });
+        teardown('unavailable', { linger: 1600 });
+      } else {
+        toast(`${nameFor(remote)} is offline.`, { icon: '📴' });
+        closePeer(remote);
+      }
     };
 
-    const onEnded = ({ callId: cid }) => {
-      if (mine(cid)) teardown('ended');
+    const onEnded = ({ from, callId: cid }) => {
+      if (!mine(cid)) return;
+      const remote = String(from || peerId);
+      if (peersRef.current.has(remote)) {
+        closePeer(remote);
+        if (peersRef.current.size === 0) teardown('ended');
+      } else if (isPrimary(remote)) {
+        teardown('ended');
+      }
     };
 
     // Another of MY tabs/devices already accepted or rejected this call.
@@ -397,7 +587,7 @@ export function useWebRTC(call) {
       s.off('call:handled', onHandled);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createPeer, flushBufferedCandidates, teardown, peerId]);
+  }, [createPeer, flushCandidates, closePeer, teardown, peerId]);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
@@ -419,5 +609,21 @@ export function useWebRTC(call) {
     setCamOff((c) => !c);
   }, [camOff]);
 
-  return { localStream, remoteStream, status, muted, camOff, mediaError, accept, reject, hangUp, toggleMute, toggleCamera };
+  return {
+    localStream,
+    screenStream,
+    remoteStreams,
+    status,
+    muted,
+    camOff,
+    sharingScreen,
+    mediaError,
+    accept,
+    reject,
+    hangUp,
+    toggleMute,
+    toggleCamera,
+    toggleScreenShare,
+    addParticipants,
+  };
 }

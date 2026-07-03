@@ -200,4 +200,112 @@ export const useChat = create((set, get) => ({
     get().setActiveChat(data.chat._id);
     return data.chat;
   },
+
+  /** Get-or-create the 1:1 chat with a user and make it active. Returns the chat. */
+  openDirectChat: async (userId) => {
+    if (!userId) return null;
+    // Already have a direct chat with this user open in the list? Use it.
+    const existing = get().chats.find(
+      (c) => !c.isGroup && (c.participants || []).some((p) => String(p.user?._id || p.user) === String(userId))
+    );
+    if (DEMO_MODE) {
+      if (existing) get().setActiveChat(existing._id);
+      return existing || null;
+    }
+    if (existing) {
+      get().setActiveChat(existing._id);
+      return existing;
+    }
+    const { data } = await api.post(`/chats/direct/${userId}`);
+    get().addChat(data.chat);
+    get().setActiveChat(data.chat._id);
+    return data.chat;
+  },
+
+  /** Delete a message for everyone — optimistic local removal + API. */
+  deleteMessage: async (chatId, messageId) => {
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).filter((m) => m._id !== messageId),
+      },
+    }));
+    if (!DEMO_MODE) {
+      try {
+        await api.delete(`/messages/${messageId}`);
+      } catch {
+        /* already gone locally */
+      }
+    }
+  },
+
+  /** Star / unstar a message — optimistic local toggle + API. */
+  toggleStarMessage: async (chatId, messageId) => {
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, starred: !m.starred } : m
+        ),
+      },
+    }));
+    if (!DEMO_MODE) {
+      try {
+        await api.post(`/messages/${messageId}/star`);
+      } catch {
+        /* noop */
+      }
+    }
+  },
+
+  /** Pin / unpin a message — optimistic local toggle + API. */
+  togglePinMessage: async (chatId, messageId) => {
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, pinned: !m.pinned } : m
+        ),
+      },
+    }));
+    if (!DEMO_MODE) {
+      try {
+        await api.post(`/messages/${messageId}/pin`);
+      } catch {
+        /* noop */
+      }
+    }
+  },
+
+  /** Empty a conversation (keeps the chat) — local + API. */
+  clearChat: async (chatId) => {
+    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: [] } }));
+    if (!DEMO_MODE) {
+      try {
+        await api.delete(`/chats/${chatId}/clear`);
+      } catch {
+        /* noop */
+      }
+    }
+  },
+
+  /** Delete a conversation entirely — removes it from the list + API. */
+  deleteChat: async (chatId) => {
+    set((s) => {
+      const messagesByChat = { ...s.messagesByChat };
+      delete messagesByChat[chatId];
+      return {
+        chats: s.chats.filter((c) => c._id !== chatId),
+        activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
+        messagesByChat,
+      };
+    });
+    if (!DEMO_MODE) {
+      try {
+        await api.delete(`/chats/${chatId}`);
+      } catch {
+        /* noop */
+      }
+    }
+  },
 }));

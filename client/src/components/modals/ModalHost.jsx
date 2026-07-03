@@ -361,7 +361,18 @@ function NewStatusModal({ open, onClose }) {
 
 function ProfileModal({ open, onClose, user }) {
   const { startCall } = useUI();
+  const openDirectChat = useChat((s) => s.openDirectChat);
+  const navigate = useNavigate();
   if (!user) return null;
+  const message = async () => {
+    onClose();
+    try {
+      if (user._id) await openDirectChat(user._id);
+    } catch {
+      /* still navigate to the chat home */
+    }
+    navigate('/');
+  };
   return (
     <Modal open={open} onClose={onClose} size="sm">
       <div className="flex flex-col items-center gap-3 pb-4 pt-2 text-center">
@@ -373,7 +384,7 @@ function ProfileModal({ open, onClose, user }) {
         <p className="text-sm text-content">{user.bio}</p>
         {user.email && <p className="text-xs text-content-muted">{user.email}</p>}
         <div className="mt-2 flex gap-2">
-          <Button variant="subtle" size="sm" onClick={onClose}><MessageSquare size={16} /> Message</Button>
+          <Button variant="subtle" size="sm" onClick={message}><MessageSquare size={16} /> Message</Button>
           <Button variant="glass" size="icon-sm" onClick={() => { startCall({ type: 'audio', peer: user, direction: 'outgoing' }); onClose(); }}><Phone size={16} /></Button>
           <Button variant="glass" size="icon-sm" onClick={() => { startCall({ type: 'video', peer: user, direction: 'outgoing' }); onClose(); }}><Video size={16} /></Button>
         </div>

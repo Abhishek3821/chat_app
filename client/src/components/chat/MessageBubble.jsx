@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { formatTime, formatBytes, formatDuration, cn } from '../../lib/utils';
@@ -14,7 +15,7 @@ function Ticks({ status }) {
   return <Check size={14} className="text-white/70" />; // single — sent
 }
 
-export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply }) {
+export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete }) {
   const [showActions, setShowActions] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -117,16 +118,24 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
               <AnimatePresence>
                 {showMenu && (
                   <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className={cn('absolute top-9 z-20 w-40 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg', isMine ? 'right-0' : 'left-0')}>
-                    {[
-                      { icon: Star, label: 'Star' },
-                      { icon: Pin, label: 'Pin' },
-                      { icon: Copy, label: 'Copy' },
-                      { icon: Trash2, label: 'Delete', danger: true },
-                    ].map(({ icon: Icon, label, danger }) => (
-                      <button key={label} className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-content/5', danger ? 'text-red-500' : 'text-content')}>
-                        <Icon size={15} /> {label}
-                      </button>
-                    ))}
+                    <MenuItem icon={Star} label={message.starred ? 'Unstar' : 'Star'} onClick={() => { onStar?.(message); setShowMenu(false); }} />
+                    <MenuItem icon={Pin} label={message.pinned ? 'Unpin' : 'Pin'} onClick={() => { onPin?.(message); setShowMenu(false); }} />
+                    {message.content && (
+                      <MenuItem
+                        icon={Copy}
+                        label="Copy"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(message.content || '');
+                            toast.success('Copied');
+                          } catch {
+                            toast.error('Couldn’t copy');
+                          }
+                          setShowMenu(false);
+                        }}
+                      />
+                    )}
+                    {isMine && <MenuItem icon={Trash2} label="Delete" danger onClick={() => { onDelete?.(message); setShowMenu(false); }} />}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -135,6 +144,14 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+function MenuItem({ icon: Icon, label, danger, onClick }) {
+  return (
+    <button onClick={onClick} className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-content/5', danger ? 'text-red-500' : 'text-content')}>
+      <Icon size={15} /> {label}
+    </button>
   );
 }
 

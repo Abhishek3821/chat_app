@@ -17,21 +17,28 @@ function DateSeparator({ date }) {
   );
 }
 
-export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, onReact, onReply }) {
+export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, searchQuery, onReact, onReply, onStar, onPin, onDelete }) {
   const bottomRef = useRef(null);
   const meId = currentUser?._id || 'me';
 
+  const q = (searchQuery || '').trim().toLowerCase();
+  const visible = q ? messages.filter((m) => (m.content || '').toLowerCase().includes(q)) : messages;
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingUser]);
+    if (!q) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, typingUser, q]);
 
   if (loading) return <MessageSkeleton />;
 
+  if (q && visible.length === 0) {
+    return <div className="grid min-h-0 flex-1 place-items-center px-6 text-center text-sm text-content-muted">No messages match “{searchQuery}”.</div>;
+  }
+
   return (
     <div className="scrollbar-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-4 sm:px-6">
-      {messages.map((m, i) => {
-        const prev = messages[i - 1];
-        const next = messages[i + 1];
+      {visible.map((m, i) => {
+        const prev = visible[i - 1];
+        const next = visible[i + 1];
         const senderId = m.sender?._id || m.sender;
         const isMine = String(senderId) === String(meId);
         const newDay = !prev || !isSameDay(new Date(prev.createdAt), new Date(m.createdAt));
@@ -48,6 +55,9 @@ export default function MessageList({ messages, loading, isGroup, currentUser, p
               status={isMine ? messageStatus(m, currentUser, peerIds) : undefined}
               onReact={onReact}
               onReply={onReply}
+              onStar={onStar}
+              onPin={onPin}
+              onDelete={onDelete}
             />
           </div>
         );
