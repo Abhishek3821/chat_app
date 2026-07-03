@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { format, isToday, isTomorrow, isSameDay, addDays } from 'date-fns';
 import {
@@ -18,7 +18,8 @@ import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
-import { MEETINGS } from '@/lib/demoData';
+import { useAuth } from '@/store/useAuth';
+import { useMeetings } from '@/store/useMeetings';
 
 const container = {
   hidden: { opacity: 0 },
@@ -74,15 +75,21 @@ function TypeChip({ type }) {
   );
 }
 
-function MeetingCard({ meeting }) {
+function MeetingCard({ meeting, me }) {
   const startCall = useUI((s) => s.startCall);
   const start = new Date(meeting.startAt);
-  const end = new Date(start.getTime() + meeting.durationMinutes * 60 * 1000);
+  const end = new Date(start.getTime() + (meeting.durationMinutes || 30) * 60 * 1000);
   const soon = isToday(start);
+  // Real meetings store participants as { user, response }; normalise to user objects.
+  const participantUsers = (meeting.participants || []).map((p) => p.user || p).filter(Boolean);
+  const people = [meeting.host, ...participantUsers].filter(Boolean);
 
   const join = () => {
-    // Join opens the call overlay with the host as the peer.
-    startCall({ type: meeting.type, peer: meeting.host, direction: 'outgoing' });
+    // Join opens the call overlay with the other side (host, or first invitee if I host).
+    const amHost = String(meeting.host?._id) === String(me?._id);
+    const peer = amHost ? participantUsers[0] : meeting.host;
+    if (!peer) return toast('No one else to connect to yet.', { icon: '👤' });
+    startCall({ type: meeting.type, peer, direction: 'outgoing' });
     toast.success(`Joining “${meeting.title}”`);
   };
 
@@ -140,15 +147,15 @@ function MeetingCard({ meeting }) {
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Users size={15} className="text-brand-500" />
-          {meeting.participants.length + 1}
+          {(meeting.participants?.length || 0) + 1}
         </span>
       </div>
 
       <div className="relative mt-5 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <ParticipantStack people={[meeting.host, ...meeting.participants]} />
+          <ParticipantStack people={people} />
           <p className="min-w-0 truncate text-xs text-content-muted">
-            Hosted by <span className="font-semibold text-content">{meeting.host.name}</span>
+            Hosted by <span className="font-semibold text-content">{meeting.host?.name || 'You'}</span>
           </p>
         </div>
 
@@ -163,11 +170,18 @@ function MeetingCard({ meeting }) {
 
 export default function MeetingsPage() {
   const openModal = useUI((s) => s.openModal);
+  const meetings = useMeetings((s) => s.meetings);
+  const loadMeetings = useMeetings((s) => s.load);
+  const me = useAuth((s) => s.user);
   const [selectedDay, setSelectedDay] = useState(null); // Date | null (null = show all upcoming)
 
+  useEffect(() => {
+    loadMeetings();
+  }, [loadMeetings]);
+
   const sorted = useMemo(
-    () => [...MEETINGS].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)),
-    []
+    () => [...meetings].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)),
+    [meetings]
   );
 
   // The next 7 days for the calendar strip.
@@ -304,7 +318,7 @@ export default function MeetingsPage() {
               )}
               <div className="grid gap-4 lg:grid-cols-2">
                 {group.items.map((m) => (
-                  <MeetingCard key={m._id} meeting={m} />
+                  <MeetingCard key={m._id} meeting={m} me={me} />
                 ))}
               </div>
             </section>

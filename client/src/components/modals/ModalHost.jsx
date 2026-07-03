@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus } from 'lucide-react';
 import Modal from '../ui/Modal';
@@ -10,6 +11,7 @@ import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useAuth } from '../../store/useAuth';
 import { useContacts } from '../../store/useContacts';
+import { useMeetings } from '../../store/useMeetings';
 import { useStatus } from '../../store/useStatus';
 import { USERS } from '../../lib/demoData';
 import { cn } from '../../lib/utils';
@@ -85,31 +87,37 @@ function NewChatModal({ open, onClose }) {
 }
 
 function CreateGroupModal({ open, onClose }) {
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [members, setMembers] = useState([]);
-  const { addChat, setActiveChat } = useChat();
+  const [saving, setSaving] = useState(false);
+  const createGroup = useChat((s) => s.createGroup);
+  const { contacts, load } = useContacts();
+  const { setChatListOpen } = useUI();
+
+  useEffect(() => {
+    if (open) load();
+    if (!open) { setName(''); setDesc(''); setMembers([]); }
+  }, [open, load]);
 
   const toggle = (id) => setMembers((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
 
-  const create = () => {
+  const create = async () => {
     if (!name.trim()) return toast.error('Give your group a name');
     if (members.length === 0) return toast.error('Add at least one member');
-    const chat = {
-      _id: `g-${Date.now()}`,
-      isGroup: true,
-      name,
-      description: desc,
-      avatar: `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(name)}`,
-      members: ['me', ...members],
-      unreadCount: 0,
-      lastMessage: { content: 'Group created', createdAt: new Date().toISOString(), sender: 'me' },
-    };
-    addChat(chat);
-    setActiveChat(chat._id);
-    toast.success(`“${name}” created 🎉`);
-    setName(''); setDesc(''); setMembers([]);
-    onClose();
+    setSaving(true);
+    try {
+      await createGroup({ name: name.trim(), description: desc.trim(), members });
+      toast.success(`“${name.trim()}” created 🎉`);
+      setChatListOpen?.(false);
+      onClose();
+      navigate('/');
+    } catch (err) {
+      toast.error(err.message || 'Could not create the group');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -118,7 +126,7 @@ function CreateGroupModal({ open, onClose }) {
       onClose={onClose}
       title="Create group"
       subtitle="Bring your people together"
-      footer={<Button className="w-full" onClick={create}><Users size={16} /> Create group</Button>}
+      footer={<Button className="w-full" onClick={create} disabled={saving}><Users size={16} /> {saving ? 'Creating…' : 'Create group'}</Button>}
     >
       <div className="space-y-4 pb-2">
         <div className="flex items-center gap-3">
@@ -133,7 +141,8 @@ function CreateGroupModal({ open, onClose }) {
         <div>
           <p className="mb-2 text-sm font-medium text-content">Add members <span className="text-content-muted">({members.length})</span></p>
           <div className="scrollbar-thin max-h-56 space-y-0.5 overflow-y-auto">
-            {USERS.map((u) => (
+            {contacts.length === 0 && <p className="py-6 text-center text-sm text-content-muted">No contacts yet — add people in Contacts first.</p>}
+            {contacts.map((u) => (
               <UserPickRow key={u._id} user={u} multi selected={members.includes(u._id)} onToggle={() => toggle(u._id)} />
             ))}
           </div>
@@ -145,14 +154,34 @@ function CreateGroupModal({ open, onClose }) {
 
 function ScheduleMeetingModal({ open, onClose }) {
   const [form, setForm] = useState({ title: '', date: '', time: '', type: 'video', recurrence: 'none' });
+  const [invitees, setInvitees] = useState([]);
+  const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const createMeeting = useMeetings((s) => s.create);
+  const { contacts, load } = useContacts();
 
-  const schedule = () => {
+  useEffect(() => {
+    if (open) load();
+    if (!open) { setForm({ title: '', date: '', time: '', type: 'video', recurrence: 'none' }); setInvitees([]); }
+  }, [open, load]);
+
+  const toggleInvitee = (id) => setInvitees((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+
+  const schedule = async () => {
     if (!form.title.trim()) return toast.error('Add a meeting title');
     if (!form.date || !form.time) return toast.error('Pick a date and time');
-    toast.success('Meeting scheduled 📅');
-    onClose();
-    setForm({ title: '', date: '', time: '', type: 'video', recurrence: 'none' });
+    const startAt = new Date(`${form.date}T${form.time}`);
+    if (Number.isNaN(startAt.getTime())) return toast.error('That date/time looks off');
+    setSaving(true);
+    try {
+      await createMeeting({ title: form.title.trim(), startAt: startAt.toISOString(), type: form.type, recurrence: form.recurrence, participants: invitees });
+      toast.success('Meeting scheduled 📅');
+      onClose();
+    } catch (err) {
+      toast.error(err.message || 'Could not schedule the meeting');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -161,7 +190,7 @@ function ScheduleMeetingModal({ open, onClose }) {
       onClose={onClose}
       title="Schedule meeting"
       subtitle="Plan an audio or video meeting"
-      footer={<Button className="w-full" onClick={schedule}><Calendar size={16} /> Schedule</Button>}
+      footer={<Button className="w-full" onClick={schedule} disabled={saving}><Calendar size={16} /> {saving ? 'Scheduling…' : 'Schedule'}</Button>}
     >
       <div className="space-y-4 pb-2">
         <Field label="Title"><Input placeholder="e.g. Design review" value={form.title} onChange={set('title')} /></Field>
@@ -182,6 +211,15 @@ function ScheduleMeetingModal({ open, onClose }) {
             ))}
           </div>
         </Field>
+        <div>
+          <p className="mb-2 text-sm font-medium text-content">Invite <span className="text-content-muted">({invitees.length})</span></p>
+          <div className="scrollbar-thin max-h-40 space-y-0.5 overflow-y-auto">
+            {contacts.length === 0 && <p className="py-4 text-center text-xs text-content-muted">Add contacts to invite them.</p>}
+            {contacts.map((u) => (
+              <UserPickRow key={u._id} user={u} multi selected={invitees.includes(u._id)} onToggle={() => toggleInvitee(u._id)} />
+            ))}
+          </div>
+        </div>
       </div>
     </Modal>
   );

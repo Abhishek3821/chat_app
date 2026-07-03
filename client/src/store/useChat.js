@@ -177,4 +177,27 @@ export const useChat = create((set, get) => ({
     set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, muted: !c.muted } : c)) })),
 
   addChat: (chat) => set((s) => (s.chats.some((c) => c._id === chat._id) ? {} : { chats: [chat, ...s.chats] })),
+
+  /** Create a group chat with the given members (real API or demo). Returns the chat. */
+  createGroup: async ({ name, description = '', members = [] }) => {
+    if (DEMO_MODE) {
+      const chat = {
+        _id: `g-${Date.now()}`,
+        isGroup: true,
+        name,
+        description,
+        avatar: `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(name)}`,
+        participants: [],
+        unreadCount: 0,
+        lastMessage: { content: 'Group created', createdAt: new Date().toISOString() },
+      };
+      get().addChat(chat);
+      get().setActiveChat(chat._id);
+      return chat;
+    }
+    const { data } = await api.post('/groups', { name, description, members });
+    get().addChat(data.chat);
+    get().setActiveChat(data.chat._id);
+    return data.chat;
+  },
 }));

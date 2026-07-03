@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
 
 import { useUI } from './store/useUI';
@@ -65,8 +64,9 @@ export default function App() {
 
   return (
     <ErrorBoundary resetKey={location.pathname}>
-      <AnimatePresence mode="wait">
-        <Routes location={location} key={location.pathname.split('/')[1] || 'root'}>
+      {/* Route swaps are instant + reliable; page transitions live in AppLayout
+          around the Outlet, so the shell (nav/socket) never remounts. */}
+      <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
@@ -100,8 +100,7 @@ export default function App() {
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AnimatePresence>
+      </Routes>
 
       <Toaster
         position="top-center"

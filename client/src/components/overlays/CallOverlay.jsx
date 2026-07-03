@@ -27,10 +27,12 @@ function CallSession({ call }) {
   const connected = status === 'connected' || status === 'demo';
   const incoming = status === 'incoming';
 
-  // Attach streams to media elements.
+  // Attach streams to media elements. Depend on remoteStream/camOff too: the local
+  // <video> element is remounted when the view flips between main and PiP (or when
+  // the camera toggles), and the new element needs the stream re-assigned.
   useEffect(() => {
     if (localRef.current && localStream) localRef.current.srcObject = localStream;
-  }, [localStream]);
+  }, [localStream, remoteStream, camOff, status]);
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream;
     if (remoteAudioRef.current && remoteStream) remoteAudioRef.current.srcObject = remoteStream;
