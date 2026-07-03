@@ -22,20 +22,23 @@ services:
         sync: false # set in dashboard (MongoDB Atlas SRV string incl. /chatconnect)
       - key: CLIENT_URL
         sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
+      # Email verification is OFF until an SMTP provider is configured — otherwise
+      # new users could never receive their code. TO ENABLE (recommended before a
+      # real launch): set this to "true" AND set EMAIL_HOST/USER/PASS below in the
+      # dashboard. The mail pipeline is already built and verified.
       - key: ENABLE_EMAIL_VERIFICATION
-        value: "true" # verify email via OTP before first login (secure default)
-      # SMTP is REQUIRED when email verification is on, otherwise signups can't
-      # receive their code. Set these in the dashboard (never commit them).
-      - key: EMAIL_HOST
-        sync: false # e.g. smtp.sendgrid.net / smtp.gmail.com
-      - key: EMAIL_PORT
-        value: "587"
-      - key: EMAIL_USER
-        sync: false
-      - key: EMAIL_PASS
-        sync: false
-      - key: EMAIL_FROM
-        value: ChatConnect <no-reply@chatconnect.app>
+        value: "false"
+      # SMTP (uncomment/set in the dashboard when you turn verification on):
+      # - key: EMAIL_HOST      # e.g. smtp-relay.brevo.com / smtp.gmail.com / smtp.sendgrid.net
+      #   sync: false
+      # - key: EMAIL_PORT
+      #   value: "587"
+      # - key: EMAIL_USER
+      #   sync: false
+      # - key: EMAIL_PASS
+      #   sync: false
+      # - key: EMAIL_FROM
+      #   value: ChatConnect <no-reply@chatconnect.app>
       # Optional: comma-separated additional allowed origins
       # - key: EXTRA_CORS_ORIGINS
       #   value: https://staging.yourdomain.com

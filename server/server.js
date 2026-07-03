@@ -13,6 +13,7 @@ import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { mongoSanitize } from './middleware/sanitize.js';
 import { serveUpload } from './controllers/mediaController.js';
+import { verifyEmailTransport } from './utils/sendEmail.js';
 import { initSocket } from './socket/index.js';
 
 const PORT = process.env.PORT || 5000;
@@ -104,6 +105,14 @@ app.set('io', io);
 async function start() {
   validateEnv();
   await connectDB();
+
+  // Report SMTP status at boot so "why isn't the OTP email arriving?" is obvious.
+  if (process.env.ENABLE_EMAIL_VERIFICATION === 'true') {
+    const r = await verifyEmailTransport();
+    if (r.ok) console.log('✅ SMTP verified — OTP / verification emails will send.');
+    else console.warn(`⚠️  SMTP NOT ready: ${r.reason}\n   → OTP emails will not be delivered until EMAIL_HOST/USER/PASS are set correctly.`);
+  }
+
   server.listen(PORT, () => {
     console.log(`\n🚀 ChatConnect API listening on http://localhost:${PORT}`);
     console.log(`🔌 Socket.IO ready • CORS origin: ${CLIENT_URL}\n`);

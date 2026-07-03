@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
+import { isEmailConfigured } from '../utils/sendEmail.js';
 import authRoutes from './authRoutes.js';
 import userRoutes from './userRoutes.js';
 import chatRoutes from './chatRoutes.js';
@@ -15,7 +17,16 @@ import adminRoutes from './adminRoutes.js';
 
 const router = Router();
 
-router.get('/health', (req, res) => res.json({ success: true, service: 'ChatConnect API', time: new Date() }));
+router.get('/health', (req, res) => {
+  const dbUp = mongoose.connection.readyState === 1; // 1 = connected
+  res.status(dbUp ? 200 : 503).json({
+    success: dbUp,
+    service: 'ChatConnect API',
+    db: dbUp ? 'connected' : 'disconnected',
+    email: isEmailConfigured() ? 'configured' : 'not_configured',
+    time: new Date(),
+  });
+});
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);

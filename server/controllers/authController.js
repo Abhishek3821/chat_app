@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { sendTokenResponse, sessionCookieOptions, generateOTP } from '../utils/token.js';
-import { sendEmail, otpEmailTemplate } from '../utils/sendEmail.js';
+import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
 import { securityEvent } from '../utils/securityLog.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
@@ -95,21 +95,32 @@ export const signup = asyncHandler(async (req, res) => {
   }
 
   if (EMAIL_VERIFY_ON) {
-    await sendEmail({
-      to: user.email,
-      subject: 'Verify your ChatConnect account',
-      html: otpEmailTemplate(name, otp),
-      text: `Your ChatConnect verification code is ${otp}`,
-    });
-    const emailConfigured = Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER);
+    const emailConfigured = isEmailConfigured();
+    let emailSent = false;
+    try {
+      const r = await sendEmail({
+        to: user.email,
+        subject: 'Verify your ChatConnect account',
+        html: otpEmailTemplate(name, otp),
+        text: `Your ChatConnect verification code is ${otp}`,
+      });
+      emailSent = !!r?.sent;
+    } catch (err) {
+      // Don't fail signup on a mail hiccup — the account exists and the user can
+      // request a new code once SMTP is healthy.
+      console.error('❌ OTP email send failed:', err.message);
+      securityEvent('otp.email.failed', req, { email: user.email });
+    }
     return res.status(201).json({
       success: true,
       requiresVerification: true,
-      message: emailConfigured
+      message: emailSent
         ? 'Account created. Check your email for the verification code.'
-        : 'Account created. Email is not configured — the code is shown below (development only).',
+        : emailConfigured
+          ? 'Account created, but we could not send the code. Please use “Resend code”.'
+          : 'Account created. Email is not configured — the code is shown below (development only).',
       email: user.email,
-      // Dev convenience: when SMTP isn't set up, surface the OTP so signup is testable.
+      // Dev convenience only: surface the OTP when SMTP isn't set up.
       ...(!emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
     });
   }
@@ -162,13 +173,17 @@ export const resendOtp = asyncHandler(async (req, res) => {
   user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
   user.otpAttempts = 0; // fresh code → reset the lockout counter
   await user.save();
-  await sendEmail({
-    to: user.email,
-    subject: 'Your new ChatConnect code',
-    html: otpEmailTemplate(user.name, otp),
-    text: `Your ChatConnect verification code is ${otp}`,
-  });
-  const emailConfigured = Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER);
+  const emailConfigured = isEmailConfigured();
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: 'Your new ChatConnect code',
+      html: otpEmailTemplate(user.name, otp),
+      text: `Your ChatConnect verification code is ${otp}`,
+    });
+  } catch (err) {
+    console.error('❌ OTP resend email failed:', err.message);
+  }
   res.json({
     success: true,
     message: 'A new code has been sent.',
@@ -230,12 +245,16 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
-    await sendEmail({
-      to: user.email,
-      subject: 'Reset your ChatConnect password',
-      html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
-      text: `Reset your password: ${resetUrl}`,
-    });
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: 'Reset your ChatConnect password',
+        html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+        text: `Reset your password: ${resetUrl}`,
+      });
+    } catch (err) {
+      console.error('❌ Password-reset email failed:', err.message);
+    }
   }
   res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
 });

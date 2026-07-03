@@ -1,34 +1,65 @@
 import nodemailer from 'nodemailer';
 
 /**
- * Sends an email via Nodemailer. If SMTP is not configured, it logs the
- * message to the console instead (handy for local dev / OTP testing).
+ * Email delivery via Nodemailer/SMTP.
+ *
+ * SMTP is considered configured only when HOST, USER and PASS are ALL set — a
+ * host with blank credentials (the old default) silently failed to send. When
+ * not configured, sendEmail logs the message instead so dev/OTP flows still work.
+ */
+export function isEmailConfigured() {
+  return Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+}
+
+let transporter = null;
+function getTransport() {
+  if (transporter) return transporter;
+  const port = Number(process.env.EMAIL_PORT) || 587;
+  transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port,
+    secure: port === 465, // 465 = implicit TLS; 587/2525 = STARTTLS
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+    // Fail fast instead of hanging a request if the SMTP host is unreachable.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+  return transporter;
+}
+
+/** Verify SMTP connectivity/credentials. Used at boot and by /api/health. */
+export async function verifyEmailTransport() {
+  if (!isEmailConfigured()) return { ok: false, reason: 'EMAIL_HOST / EMAIL_USER / EMAIL_PASS are not all set' };
+  try {
+    await getTransport().verify();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err.message };
+  }
+}
+
+/**
+ * Send an email. Returns { sent: true } on success, { sent: false, logged: true }
+ * when SMTP isn't configured (dev fallback). Throws only on a real send failure
+ * so callers can decide how to surface it.
  */
 export async function sendEmail({ to, subject, html, text }) {
-  const { EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM } = process.env;
-
-  if (!EMAIL_HOST || !EMAIL_USER) {
-    console.log('\n📧 [Email disabled — logging instead]');
+  if (!isEmailConfigured()) {
+    console.log('\n📧 [Email not configured — logging instead]');
     console.log(`   To:      ${to}`);
     console.log(`   Subject: ${subject}`);
     console.log(`   Body:    ${text || html}\n`);
-    return { logged: true };
+    return { sent: false, logged: true };
   }
-
-  const transporter = nodemailer.createTransport({
-    host: EMAIL_HOST,
-    port: Number(EMAIL_PORT) || 587,
-    secure: Number(EMAIL_PORT) === 465,
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-  });
-
-  return transporter.sendMail({
-    from: EMAIL_FROM || 'ChatConnect <no-reply@chatconnect.app>',
+  const info = await getTransport().sendMail({
+    from: process.env.EMAIL_FROM || 'ChatConnect <no-reply@chatconnect.app>',
     to,
     subject,
     text,
     html,
   });
+  return { sent: true, messageId: info.messageId };
 }
 
 export function otpEmailTemplate(name, otp) {
