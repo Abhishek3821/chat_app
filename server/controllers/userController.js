@@ -42,6 +42,18 @@ export const updateProfile = asyncHandler(async (req, res) => {
   const updates = {};
   for (const key of allowed) if (req.body[key] !== undefined) updates[key] = req.body[key];
 
+  // Validate avatar: a small image data-URL, an https URL, or empty. Guards
+  // against document bloat and junk values.
+  if (updates.avatar !== undefined) {
+    const a = updates.avatar;
+    const ok =
+      typeof a === 'string' &&
+      (a === '' ||
+        (/^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(a) && a.length <= 500_000) ||
+        (/^https:\/\/\S+$/.test(a) && a.length <= 2048));
+    if (!ok) throw new ApiError(400, 'Invalid avatar image.');
+  }
+
   if (updates.username) {
     const clash = await User.findOne({ username: updates.username.toLowerCase(), _id: { $ne: req.user._id } });
     if (clash) throw new ApiError(409, 'That username is taken.');

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus } from 'lucide-react';
 import Modal from '../ui/Modal';
@@ -195,31 +195,78 @@ function TypeChip({ active, onClick, icon: Icon, label }) {
   );
 }
 
+/** Downscale a picked image to a small JPEG data URL (avatars stay tiny + render
+ *  everywhere without a media token). */
+function imageToAvatarDataURL(file, max = 256) {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+    img.src = url;
+  });
+}
+
 function EditProfileModal({ open, onClose }) {
-  const { user, updateUser } = useAuth();
-  const [form, setForm] = useState({ name: user?.name || '', username: user?.username || '', bio: user?.bio || '' });
+  const { user, updateProfile } = useAuth();
+  const [form, setForm] = useState({ name: '', username: '', bio: '', avatar: '' });
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   // ModalHost stays mounted for the whole session, so re-sync the form from the
   // live user each time the modal opens (otherwise it shows stale/abandoned data).
   useEffect(() => {
-    if (open) setForm({ name: user?.name || '', username: user?.username || '', bio: user?.bio || '' });
+    if (open) setForm({ name: user?.name || '', username: user?.username || '', bio: user?.bio || '', avatar: user?.avatar || '' });
   }, [open, user]);
 
-  const save = () => {
-    updateUser(form);
-    toast.success('Profile updated');
-    onClose();
+  const pickPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast.error('Please choose an image.');
+    try {
+      const avatar = await imageToAvatarDataURL(file);
+      setForm((f) => ({ ...f, avatar }));
+    } catch {
+      toast.error('Could not read that image.');
+    }
+  };
+
+  const save = async () => {
+    if (!form.name.trim()) return toast.error('Name is required');
+    setSaving(true);
+    try {
+      await updateProfile({ name: form.name.trim(), username: form.username.trim(), bio: form.bio, avatar: form.avatar });
+      toast.success('Profile updated');
+      onClose();
+    } catch (err) {
+      toast.error(err.message || 'Could not update profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit profile" footer={<Button className="w-full" onClick={save}>Save changes</Button>}>
+    <Modal open={open} onClose={onClose} title="Edit profile" footer={<Button className="w-full" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>}>
       <div className="space-y-4 pb-2">
         <div className="flex flex-col items-center gap-2 py-2">
           <div className="relative">
-            <Avatar src={user?.avatar} name={form.name} size="2xl" ring />
-            <button className="absolute bottom-0 right-0 grid h-8 w-8 place-items-center rounded-full bg-brand-gradient text-white shadow-glow"><ImageIcon size={15} /></button>
+            <Avatar src={form.avatar} name={form.name} size="2xl" ring />
+            <input ref={fileRef} type="file" accept="image/*" hidden onChange={pickPhoto} />
+            <button onClick={() => fileRef.current?.click()} className="absolute bottom-0 right-0 grid h-8 w-8 place-items-center rounded-full bg-brand-gradient text-white shadow-glow" aria-label="Change photo"><ImageIcon size={15} /></button>
           </div>
+          <button onClick={() => fileRef.current?.click()} className="text-xs font-medium text-brand-500 hover:text-brand-400">Change photo</button>
         </div>
         <Field label="Name"><Input value={form.name} onChange={set('name')} /></Field>
         <Field label="Username"><Input value={form.username} onChange={set('username')} /></Field>

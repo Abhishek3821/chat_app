@@ -7,16 +7,24 @@ export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
+/** Parse to a valid Date or null — NEVER lets an invalid date reach date-fns
+ *  (which throws "Invalid time value" and would crash a render). */
+function safeDate(input) {
+  if (!input) return null;
+  const d = input instanceof Date ? input : new Date(input);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Short time like 3:04 PM */
 export function formatTime(date) {
-  if (!date) return '';
-  return format(new Date(date), 'h:mm a');
+  const d = safeDate(date);
+  return d ? format(d, 'h:mm a') : '';
 }
 
 /** Chat-list style relative label. */
 export function formatChatTime(date) {
-  if (!date) return '';
-  const d = new Date(date);
+  const d = safeDate(date);
+  if (!d) return '';
   if (isToday(d)) return format(d, 'h:mm a');
   if (isYesterday(d)) return 'Yesterday';
   return format(d, 'dd/MM/yy');
@@ -24,15 +32,22 @@ export function formatChatTime(date) {
 
 /** "Today" / "Yesterday" / "12 June 2026" for date separators. */
 export function formatDateSeparator(date) {
-  const d = new Date(date);
+  const d = safeDate(date);
+  if (!d) return '';
   if (isToday(d)) return 'Today';
   if (isYesterday(d)) return 'Yesterday';
   return format(d, 'd MMMM yyyy');
 }
 
 export function formatLastSeen(date) {
-  if (!date) return 'offline';
-  return `last seen ${formatDistanceToNowStrict(new Date(date))} ago`;
+  const d = safeDate(date);
+  return d ? `last seen ${formatDistanceToNowStrict(d)} ago` : 'offline';
+}
+
+/** Safe "5 min ago" style relative label ('' if the date is missing/invalid). */
+export function formatRelative(date) {
+  const d = safeDate(date);
+  return d ? `${formatDistanceToNowStrict(d)} ago` : '';
 }
 
 export function initials(name = '') {

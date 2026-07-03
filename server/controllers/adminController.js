@@ -61,6 +61,10 @@ export const listUsers = asyncHandler(async (req, res) => {
 export const setUserStatus = asyncHandler(async (req, res) => {
   const { accountStatus } = req.body;
   if (!['active', 'suspended', 'banned'].includes(accountStatus)) throw new ApiError(400, 'Invalid status.');
+  // Don't let an admin lock themselves out by suspending/banning their own account.
+  if (String(req.params.id) === String(req.user._id) && accountStatus !== 'active') {
+    throw new ApiError(400, 'You cannot suspend or ban your own account.');
+  }
   // Bump tokenVersion so a ban/suspend also kills any live session/token immediately.
   const update = accountStatus === 'active' ? { accountStatus } : { accountStatus, $inc: { tokenVersion: 1 } };
   const user = await User.findByIdAndUpdate(req.params.id, update, { new: true });

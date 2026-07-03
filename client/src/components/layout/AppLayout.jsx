@@ -5,6 +5,7 @@ import TopBar from './TopBar';
 import MobileNav from './MobileNav';
 import ModalHost from '../modals/ModalHost';
 import CallOverlay from '../overlays/CallOverlay';
+import ErrorBoundary from '../ErrorBoundary';
 import { useChat } from '../../store/useChat';
 import { useSocket } from '../../hooks/useSocket';
 
@@ -29,7 +30,11 @@ export default function AppLayout() {
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
           <main className={isChat ? 'min-h-0 flex-1' : 'scrollbar-thin min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0'}>
-            <Outlet />
+            {/* Page-level boundary: a render error in one screen keeps the nav/topbar
+                alive and resets when you navigate (resetKey = pathname). */}
+            <ErrorBoundary resetKey={pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
       </div>

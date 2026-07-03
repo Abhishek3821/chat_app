@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, Bell, Sun, Moon, Plus, Check } from 'lucide-react';
@@ -8,9 +8,8 @@ import Button from '../ui/Button';
 import { CountBadge } from '../ui/Badge';
 import { useUI } from '../../store/useUI';
 import { useAuth } from '../../store/useAuth';
-import { NOTIFICATIONS } from '../../lib/demoData';
-import { formatDistanceToNowStrict } from 'date-fns';
-import { cn } from '../../lib/utils';
+import { useNotifications } from '../../store/useNotifications';
+import { formatRelative, cn } from '../../lib/utils';
 
 const titles = {
   '/': 'Messages',
@@ -27,9 +26,15 @@ export default function TopBar() {
   const { pathname } = useLocation();
   const { theme, toggleTheme, openModal } = useUI();
   const user = useAuth((s) => s.user);
+  const notifs = useNotifications((s) => s.items);
+  const loadNotifs = useNotifications((s) => s.load);
+  const markAllRead = useNotifications((s) => s.markAllRead);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifs, setNotifs] = useState(NOTIFICATIONS);
   const unread = notifs.filter((n) => !n.isRead).length;
+
+  useEffect(() => {
+    loadNotifs();
+  }, [loadNotifs]);
 
   return (
     <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/60 px-4 backdrop-blur-xl md:px-6">
@@ -87,13 +92,16 @@ export default function TopBar() {
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <p className="font-semibold text-content">Notifications</p>
                     <button
-                      onClick={() => setNotifs((n) => n.map((x) => ({ ...x, isRead: true })))}
+                      onClick={markAllRead}
                       className="flex items-center gap-1 text-xs font-medium text-brand-500 hover:text-brand-400"
                     >
                       <Check size={13} /> Mark all read
                     </button>
                   </div>
                   <div className="scrollbar-thin max-h-96 overflow-y-auto">
+                    {notifs.length === 0 && (
+                      <p className="px-4 py-8 text-center text-sm text-content-muted">You're all caught up 🎉</p>
+                    )}
                     {notifs.map((n) => (
                       <div key={n._id} className={cn('flex gap-3 px-4 py-3 transition-colors hover:bg-content/5', !n.isRead && 'bg-brand-500/5')}>
                         {n.from ? (
@@ -104,7 +112,7 @@ export default function TopBar() {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-content">{n.title}</p>
                           <p className="truncate text-xs text-content-muted">{n.body}</p>
-                          <p className="mt-0.5 text-[10px] text-content-muted">{formatDistanceToNowStrict(new Date(n.createdAt))} ago</p>
+                          <p className="mt-0.5 text-[10px] text-content-muted">{formatRelative(n.createdAt)}</p>
                         </div>
                         {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />}
                       </div>

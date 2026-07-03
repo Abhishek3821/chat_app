@@ -85,6 +85,15 @@ export function clearMediaToken() {
   mediaToken = null;
 }
 
+/** Upload one or more files (multipart) → returns [{ url, name, size, mime }]. */
+export async function uploadFiles(files) {
+  const form = new FormData();
+  [...files].forEach((f) => form.append('files', f));
+  const { data } = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  await ensureMediaToken(); // make sure we can render the media we just uploaded
+  return data.attachments || [];
+}
+
 /** Build a loadable URL for an uploaded file (leaves absolute/data/blob URLs untouched). */
 export function mediaUrl(u) {
   if (!u) return '';

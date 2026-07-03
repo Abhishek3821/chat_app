@@ -1,9 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import toast from 'react-hot-toast';
 import { DEMO_MODE } from '../lib/api';
 import { useAuth } from '../store/useAuth';
 import { useChat } from '../store/useChat';
 import { useUI } from '../store/useUI';
+import { useNotifications } from '../store/useNotifications';
+
+/** Short preview of a message for notifications. */
+function preview(m) {
+  if (m?.content) return m.content;
+  return { image: '📷 Photo', video: '🎬 Video', voice: '🎤 Voice message', audio: '🎤 Audio', document: '📎 Document', location: '📍 Location' }[m?.type] || 'New message';
+}
 
 /**
  * Resolve the Socket.IO server URL.
@@ -56,15 +64,38 @@ export function useSocket() {
       if (String(senderId) !== String(userId)) {
         // Acknowledge delivery (✓✓ on the sender's side)...
         socket.emit('message:delivered', { chatId, messageId: message._id });
-        // ...and if I'm actively viewing this chat, mark it read (coloured ✓✓).
         if (chat.activeChatId === chatId && document.visibilityState === 'visible') {
+          // ...and if I'm actively viewing this chat, mark it read (coloured ✓✓).
           socket.emit('message:read', { chatId });
+        } else {
+          // Otherwise surface it in the notification bell.
+          useNotifications.getState().pushLocal({
+            type: 'message',
+            title: message.sender?.name || 'New message',
+            body: preview(message),
+            from: message.sender,
+            data: { chatId },
+          });
         }
       }
     });
     socket.on('typing-start', ({ chatId, userId }) => setTyping(chatId, userId, true));
     socket.on('typing-stop', ({ chatId, userId }) => setTyping(chatId, userId, false));
     socket.on('chat-updated', () => useChat.getState().loadChats());
+
+    // ── Contact + status notifications (bell + toast) ─────────────
+    socket.on('contact-request', ({ from }) => {
+      useNotifications.getState().pushLocal({ type: 'contact_request', title: 'New contact request', body: `${from?.name || 'Someone'} wants to connect`, from });
+      toast(`${from?.name || 'Someone'} sent you a contact request`, { icon: '👋' });
+    });
+    socket.on('contact-accepted', ({ by }) => {
+      useNotifications.getState().pushLocal({ type: 'contact_accepted', title: 'Request accepted', body: `${by || 'Someone'} accepted your request` });
+      toast.success(`${by || 'Someone'} accepted your contact request`);
+    });
+    socket.on('status-reply', ({ from, text }) => {
+      useNotifications.getState().pushLocal({ type: 'status_reply', title: 'Status reply', body: `${from || 'Someone'}: ${text || ''}` });
+      toast(`${from || 'Someone'} replied to your status`);
+    });
 
     // Delivery / read receipts → update tick state for my messages.
     socket.on('message:status', ({ chatId, messageId, userId: uid, status }) => {

@@ -64,7 +64,7 @@ export default function App() {
   }, [init]);
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={location.pathname}>
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname.split('/')[1] || 'root'}>
           {/* Public */}

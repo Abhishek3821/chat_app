@@ -73,6 +73,17 @@ export const useAuth = create((set, get) => ({
 
   updateUser: (patch) => set((s) => ({ user: { ...s.user, ...patch } })),
 
+  /** Persist profile changes (name, username, bio, avatar) to the backend. */
+  updateProfile: async (updates) => {
+    if (DEMO_MODE) {
+      set((s) => ({ user: { ...s.user, ...updates } }));
+      return get().user;
+    }
+    const { data } = await api.patch('/users/me', updates);
+    set({ user: data.user });
+    return data.user;
+  },
+
   /** Local-only session teardown (used when the API says our token is dead). */
   forceLogout: () => {
     localStorage.removeItem('cc_token');

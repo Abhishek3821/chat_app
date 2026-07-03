@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin } from 'lucide-react';
+import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin } from 'lucide-react';
 import Avatar from '../ui/Avatar';
-import { formatTime, cn } from '../../lib/utils';
+import { formatTime, formatBytes, formatDuration, cn } from '../../lib/utils';
 import { mediaUrl } from '../../lib/api';
 
 const QUICK = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
@@ -70,10 +70,7 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
             </div>
           )}
 
-          {message.type === 'voice' && <VoiceBubble mine={isMine} duration={message.attachments?.[0]?.duration || 8} />}
-          {message.type === 'image' && message.attachments?.[0] && (
-            <img src={mediaUrl(message.attachments[0].url)} alt="" className="mb-1 max-h-64 rounded-xl object-cover" />
-          )}
+          <MessageMedia message={message} isMine={isMine} />
 
           {message.content && <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
 
@@ -141,18 +138,104 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
   );
 }
 
-function VoiceBubble({ mine, duration }) {
+/** Renders whatever media a message carries (image/video/voice/document/location). */
+function MessageMedia({ message, isMine }) {
+  const atts = message.attachments || [];
+
+  if (message.type === 'voice' || message.type === 'audio') {
+    return <VoiceBubble mine={isMine} url={atts[0]?.url} duration={atts[0]?.duration} />;
+  }
+
+  if (message.type === 'location' && message.location) {
+    const { lat, lng, label } = message.location;
+    return (
+      <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noreferrer" className={cn('mb-1 flex items-center gap-2 rounded-xl px-3 py-2', isMine ? 'bg-white/15' : 'bg-content/5')}>
+        <MapPin size={18} className={isMine ? 'text-white' : 'text-emerald-500'} />
+        <span className="text-sm underline">{label || 'Shared location'}</span>
+      </a>
+    );
+  }
+
+  if (message.type === 'document') {
+    return atts.map((a, i) => (
+      <a key={i} href={mediaUrl(a.url)} target="_blank" rel="noreferrer" download={a.name} className={cn('mb-1 flex items-center gap-3 rounded-xl px-3 py-2.5', isMine ? 'bg-white/15' : 'bg-content/5')}>
+        <span className={cn('grid h-10 w-10 shrink-0 place-items-center rounded-lg', isMine ? 'bg-white/20' : 'bg-brand-500/15')}>
+          <FileText size={18} className={isMine ? 'text-white' : 'text-brand-500'} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{a.name || 'Document'}</span>
+          <span className={cn('text-[11px]', isMine ? 'text-white/70' : 'text-content-muted')}>{formatBytes(a.size)}</span>
+        </span>
+        <Download size={16} className={isMine ? 'text-white/80' : 'text-content-muted'} />
+      </a>
+    ));
+  }
+
+  if (message.type === 'video') {
+    return atts.map((a, i) => <video key={i} src={mediaUrl(a.url)} controls className="mb-1 max-h-72 w-full rounded-xl" />);
+  }
+
+  if (message.type === 'image') {
+    if (atts.length <= 1) {
+      const a = atts[0];
+      return a ? (
+        <a href={mediaUrl(a.url)} target="_blank" rel="noreferrer">
+          <img src={mediaUrl(a.url)} alt="" className="mb-1 max-h-64 rounded-xl object-cover" loading="lazy" />
+        </a>
+      ) : null;
+    }
+    return (
+      <div className="mb-1 grid grid-cols-2 gap-1">
+        {atts.map((a, i) => (
+          <a key={i} href={mediaUrl(a.url)} target="_blank" rel="noreferrer">
+            <img src={mediaUrl(a.url)} alt="" className="h-32 w-full rounded-lg object-cover" loading="lazy" />
+          </a>
+        ))}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+/** A real, playable voice-note bubble. */
+function VoiceBubble({ mine, url, duration }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const src = url ? mediaUrl(url) : null;
+
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) a.play().catch(() => {});
+    else a.pause();
+  };
+
   return (
     <div className="flex items-center gap-2 py-1">
-      <span className={cn('grid h-8 w-8 place-items-center rounded-full', mine ? 'bg-white/20' : 'bg-brand-500/15')}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={mine ? 'text-white' : 'text-brand-500'}><path d="M8 5v14l11-7z" fill="currentColor" /></svg>
-      </span>
+      {src && (
+        <audio
+          ref={audioRef}
+          src={src}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => { setPlaying(false); setElapsed(0); }}
+          onTimeUpdate={(e) => setElapsed(Math.floor(e.target.currentTime))}
+        />
+      )}
+      <button onClick={toggle} disabled={!src} className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-full', mine ? 'bg-white/20 text-white' : 'bg-brand-500/15 text-brand-500')}>
+        {playing ? <Pause size={14} /> : <Play size={14} />}
+      </button>
       <div className="flex items-end gap-0.5">
         {[6, 12, 8, 16, 10, 14, 7, 12, 9, 5].map((h, i) => (
           <span key={i} className={cn('w-0.5 rounded-full', mine ? 'bg-white/60' : 'bg-brand-500/50')} style={{ height: h }} />
         ))}
       </div>
-      <span className={cn('text-[11px]', mine ? 'text-white/80' : 'text-content-muted')}>0:{String(duration).padStart(2, '0')}</span>
+      <span className={cn('text-[11px] tabular-nums', mine ? 'text-white/80' : 'text-content-muted')}>
+        {formatDuration((playing || elapsed) ? elapsed : duration || 0)}
+      </span>
     </div>
   );
 }
