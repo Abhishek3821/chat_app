@@ -14,6 +14,8 @@ import contactRoutes from './contactRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import uploadRoutes from './uploadRoutes.js';
 import adminRoutes from './adminRoutes.js';
+import keyRoutes from './keyRoutes.js';
+import v1Routes from './v1Routes.js';
 
 const router = Router();
 
@@ -41,5 +43,7 @@ router.use('/contacts', contactRoutes);
 router.use('/reports', reportRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/admin', adminRoutes);
+router.use('/keys', keyRoutes); // manage your own API keys (JWT)
+router.use('/v1', v1Routes); // public third-party API (X-API-Key)
 
 export default router;

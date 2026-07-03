@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -27,6 +27,9 @@ import {
   LogOut,
   Trash2,
   AlertTriangle,
+  KeyRound,
+  Copy,
+  Plus,
 } from 'lucide-react';
 
 import Switch, { ToggleRow } from '@/components/ui/Switch';
@@ -34,9 +37,11 @@ import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { Chip } from '@/components/ui/Badge';
-import { cn } from '@/lib/utils';
+import { cn, formatRelative } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
+import { useApiKeys } from '@/store/useApiKeys';
+import { DEMO_MODE } from '@/lib/api';
 import { ME } from '@/lib/demoData';
 
 /* Motion presets — matched to the app's existing feel */
@@ -57,6 +62,7 @@ const TABS = [
   { id: 'privacy', label: 'Privacy', icon: ShieldCheck },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'developer', label: 'Developer', icon: KeyRound },
   { id: 'account', label: 'Account', icon: Settings2 },
 ];
 
@@ -375,6 +381,115 @@ function AppearancePanel() {
   );
 }
 
+/* ── Developer / API keys ─────────────────────────────────────── */
+const SCOPE_LABELS = {
+  'chat:read': 'Read chats & messages',
+  'chat:write': 'Send messages / open chats',
+  'contacts:read': 'Read contacts & search users',
+  'calls:write': 'Start calls',
+  'meetings:read': 'Read meetings',
+  'meetings:write': 'Schedule meetings',
+};
+const DEFAULT_SCOPES = ['chat:read', 'chat:write', 'contacts:read', 'calls:write', 'meetings:read', 'meetings:write'];
+
+function DeveloperPanel() {
+  const { keys, scopes, load, create, revoke } = useApiKeys();
+  const [label, setLabel] = useState('');
+  const [picked, setPicked] = useState(['chat:read', 'chat:write', 'contacts:read']);
+  const [creating, setCreating] = useState(false);
+  const [newKey, setNewKey] = useState(null); // plaintext, shown once
+
+  useEffect(() => {
+    if (!DEMO_MODE) load();
+  }, [load]);
+
+  const available = scopes.length ? scopes : DEFAULT_SCOPES;
+  const toggle = (s) => setPicked((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
+
+  const onCreate = async () => {
+    if (picked.length === 0) return toast.error('Select at least one scope');
+    setCreating(true);
+    try {
+      const secret = await create(label.trim() || 'API key', picked);
+      setNewKey(secret);
+      setLabel('');
+      toast.success('API key created');
+    } catch (err) {
+      toast.error(err.message || 'Could not create key');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const copy = (text) => {
+    navigator.clipboard?.writeText(text).then(() => toast.success('Copied'), () => toast.error('Copy failed'));
+  };
+
+  if (DEMO_MODE) {
+    return (
+      <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+        <Section title="Developer / API keys" description="Integrate ChatConnect into another platform.">
+          <p className="mt-2 text-sm text-content-muted">API keys require the live backend. Turn off demo mode to create keys.</p>
+        </Section>
+      </motion.div>
+    );
+  }
+
+  return (
+    <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+      <Section title="Developer / API keys" description="Create keys to use the ChatConnect API (v1) from another platform. A key acts as your account, limited to the scopes you grant.">
+        {newKey && (
+          <div className="mt-3 rounded-2xl border border-brand-500/40 bg-brand-500/5 p-4">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this key now — it won't be shown again.</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{newKey}</code>
+              <Button size="sm" variant="subtle" onClick={() => copy(newKey)}><Copy size={14} /> Copy</Button>
+            </div>
+            <button onClick={() => setNewKey(null)} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Done</button>
+          </div>
+        )}
+
+        <div className="mt-4 space-y-3">
+          <Field label="Label"><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. My integration" /></Field>
+          <div>
+            <p className="mb-2 text-sm font-medium text-content">Scopes</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {available.map((s) => (
+                <button key={s} onClick={() => toggle(s)} className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors', picked.includes(s) ? 'border-brand-500 bg-brand-500/10 text-content' : 'border-border text-content-muted hover:bg-content/5')}>
+                  <span className={cn('grid h-4 w-4 shrink-0 place-items-center rounded border', picked.includes(s) ? 'border-brand-500 bg-brand-gradient text-white' : 'border-border')}>{picked.includes(s) && <Check size={11} />}</span>
+                  <span className="min-w-0"><span className="block truncate font-medium">{SCOPE_LABELS[s] || s}</span><span className="block truncate text-[11px] opacity-70">{s}</span></span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <Button onClick={onCreate} disabled={creating}><Plus size={16} /> {creating ? 'Creating…' : 'Create API key'}</Button>
+        </div>
+      </Section>
+
+      <Section title="Your keys" description={`${keys.length} active`}>
+        {keys.length === 0 ? (
+          <p className="mt-2 text-sm text-content-muted">No API keys yet.</p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {keys.map((k) => (
+              <div key={k.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500"><KeyRound size={18} /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-content">{k.label}</p>
+                  <p className="truncate text-xs text-content-muted"><code>{k.prefix}…</code> · {k.scopes.join(', ')}</p>
+                  <p className="text-[11px] text-content-muted">{k.lastUsedAt ? `Last used ${formatRelative(k.lastUsedAt)}` : 'Never used'}</p>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="shrink-0 text-red-500 hover:bg-red-500/10"><Trash2 size={15} /> Revoke</Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <a href="https://github.com" onClick={(e) => e.preventDefault()} className="mt-3 inline-block text-xs font-medium text-brand-500">See docs/API_V1.md for endpoints & examples</a>
+      </Section>
+    </motion.div>
+  );
+}
+
 /* ── Account ──────────────────────────────────────────────────── */
 function AccountPanel() {
   const { logout } = useAuth();
@@ -542,6 +657,8 @@ export default function SettingsPage() {
         return <NotificationsPanel />;
       case 'appearance':
         return <AppearancePanel />;
+      case 'developer':
+        return <DeveloperPanel />;
       case 'account':
         return <AccountPanel />;
       default:
