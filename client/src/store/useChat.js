@@ -147,18 +147,44 @@ export const useChat = create((set, get) => ({
       },
     })),
 
-  reactToMessage: (chatId, messageId, emoji) =>
+  reactToMessage: async (chatId, messageId, emoji) => {
+    const meId = useAuth.getState().user?._id || 'me';
+    const isMine = (r) => r.user === 'me' || String(r.user?._id ?? r.user) === String(meId);
+    // Optimistic toggle (WhatsApp: one reaction per person; tapping the same emoji clears it).
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,
         [chatId]: (s.messagesByChat[chatId] || []).map((m) => {
           if (m._id !== messageId) return m;
           const reactions = m.reactions || [];
-          const mine = reactions.find((r) => r.user === 'me' || r.user?._id === 'me');
+          const mine = reactions.find(isMine);
           if (mine && mine.emoji === emoji) return { ...m, reactions: reactions.filter((r) => r !== mine) };
           if (mine) return { ...m, reactions: reactions.map((r) => (r === mine ? { ...r, emoji } : r)) };
-          return { ...m, reactions: [...reactions, { emoji, user: 'me' }] };
+          return { ...m, reactions: [...reactions, { emoji, user: meId }] };
         }),
+      },
+    }));
+    if (!DEMO_MODE) {
+      try {
+        const { data } = await api.post(`/messages/${messageId}/react`, { emoji });
+        set((s) => ({
+          messagesByChat: {
+            ...s.messagesByChat,
+            [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === messageId ? { ...m, reactions: data.message.reactions } : m)),
+          },
+        }));
+      } catch {
+        /* keep the optimistic reaction */
+      }
+    }
+  },
+
+  /** Apply a reaction update that arrived over the socket (from another user). */
+  applyReaction: (chatId, messageId, reactions) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === messageId ? { ...m, reactions } : m)),
       },
     })),
 
@@ -222,22 +248,101 @@ export const useChat = create((set, get) => ({
     return data.chat;
   },
 
-  /** Delete a message for everyone — optimistic local removal + API. */
-  deleteMessage: async (chatId, messageId) => {
+  /**
+   * Delete a message. scope 'me' removes it from my view only; scope 'everyone'
+   * replaces it with a "this message was deleted" tombstone for all participants
+   * (WhatsApp-style). Optimistic local update + API.
+   */
+  deleteMessage: async (chatId, messageId, scope = 'me') => {
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,
-        [chatId]: (s.messagesByChat[chatId] || []).filter((m) => m._id !== messageId),
+        [chatId]: (s.messagesByChat[chatId] || []).flatMap((m) => {
+          if (m._id !== messageId) return [m];
+          return scope === 'everyone' ? [{ ...m, isDeleted: true, content: '', attachments: [] }] : [];
+        }),
       },
     }));
     if (!DEMO_MODE) {
       try {
-        await api.delete(`/messages/${messageId}`);
+        await api.delete(`/messages/${messageId}?scope=${scope}`);
       } catch {
-        /* already gone locally */
+        /* already applied locally */
       }
     }
   },
+
+  /** Edit a message's text — optimistic local update + API. */
+  editMessage: async (chatId, messageId, content) => {
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, content, isEdited: true } : m
+        ),
+      },
+    }));
+    if (!DEMO_MODE) {
+      try {
+        await api.patch(`/messages/${messageId}`, { content });
+      } catch {
+        /* noop */
+      }
+    }
+  },
+
+  /** Forward a message to one or more chats (server rebroadcasts to participants). */
+  forwardMessage: async (message, targetChatIds = []) => {
+    const payload = {
+      content: message.content || '',
+      type: message.type || 'text',
+      attachments: message.attachments || [],
+      location: message.location,
+      forwardedFrom: message.sender?._id || message.sender,
+    };
+    if (DEMO_MODE) {
+      const me = useAuth.getState().user;
+      targetChatIds.forEach((cid, i) =>
+        get().appendMessage(cid, {
+          ...payload,
+          _id: `fwd-${Date.now()}-${i}`,
+          sender: me,
+          forwarded: true,
+          createdAt: new Date().toISOString(),
+          status: 'sent',
+        })
+      );
+      return;
+    }
+    for (const chatId of targetChatIds) {
+      try {
+        await api.post('/messages', { chatId, ...payload });
+      } catch {
+        /* skip this target */
+      }
+    }
+  },
+
+  /** Apply an edit that arrived over the socket. */
+  applyEditedMessage: (chatId, message) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === message._id ? { ...m, ...message } : m)),
+      },
+    })),
+
+  /** Apply a delete that arrived over the socket (scope 'everyone' → tombstone). */
+  applyDeletedMessage: (chatId, messageId, scope = 'everyone') =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).flatMap((m) => {
+          if (m._id !== messageId) return [m];
+          return scope === 'everyone' ? [{ ...m, isDeleted: true, content: '', attachments: [] }] : [];
+        }),
+      },
+    })),
 
   /** Star / unstar a message — optimistic local toggle + API. */
   toggleStarMessage: async (chatId, messageId) => {

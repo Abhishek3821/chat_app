@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin } from 'lucide-react';
+import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { formatTime, formatBytes, formatDuration, cn } from '../../lib/utils';
 import { mediaUrl } from '../../lib/api';
@@ -15,10 +15,12 @@ function Ticks({ status }) {
   return <Check size={14} className="text-white/70" />; // single — sent
 }
 
-export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete }) {
+export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
   const [showActions, setShowActions] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content || '');
 
   if (message.type === 'system') {
     return (
@@ -30,6 +32,16 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
 
   const sender = message.sender || {};
   const reactions = message.reactions || [];
+  const deleted = Boolean(message.isDeleted);
+  const forwarded = Boolean(message.forwardedFrom || message.forwarded);
+  const canEdit = isMine && !deleted && (message.type === 'text' || !message.type) && message.content;
+
+  const saveEdit = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== message.content) onEdit?.(message, next);
+    else setDraft(message.content || '');
+  };
 
   return (
     <div
@@ -63,22 +75,53 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
               : 'glass rounded-[20px] rounded-bl-md text-content'
           )}
         >
-          {/* reply preview */}
-          {message.replyTo && (
-            <div className={cn('mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs', isMine ? 'border-white/60 bg-white/15' : 'border-brand-500 bg-content/5')}>
-              <p className={cn('font-semibold', isMine ? 'text-white/90' : 'text-brand-500')}>{message.replyTo.sender?.name || 'You'}</p>
-              <p className={cn('truncate', isMine ? 'text-white/75' : 'text-content-muted')}>{message.replyTo.content}</p>
+          {deleted ? (
+            <p className={cn('flex items-center gap-1.5 py-0.5 text-sm italic', isMine ? 'text-white/70' : 'text-content-muted')}>
+              <Ban size={14} /> This message was deleted
+            </p>
+          ) : editing ? (
+            <div className="flex items-end gap-1.5 py-0.5">
+              <textarea
+                autoFocus
+                rows={1}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+                  if (e.key === 'Escape') { setEditing(false); setDraft(message.content || ''); }
+                }}
+                className={cn('min-w-[140px] flex-1 resize-none rounded-lg px-2 py-1 text-sm outline-none', isMine ? 'bg-white/20 text-white placeholder:text-white/50' : 'bg-content/5 text-content')}
+              />
+              <button onClick={() => { setEditing(false); setDraft(message.content || ''); }} className={cn('grid h-7 w-7 place-items-center rounded-full', isMine ? 'text-white/80 hover:bg-white/15' : 'text-content-muted hover:bg-content/10')}><X size={14} /></button>
+              <button onClick={saveEdit} className={cn('grid h-7 w-7 place-items-center rounded-full', isMine ? 'bg-white/25 text-white' : 'bg-brand-500 text-white')}><Send size={14} /></button>
             </div>
+          ) : (
+            <>
+              {/* forwarded label */}
+              {forwarded && (
+                <p className={cn('mb-0.5 flex items-center gap-1 text-xs italic', isMine ? 'text-white/70' : 'text-content-muted')}>
+                  <Forward size={12} /> Forwarded
+                </p>
+              )}
+
+              {/* reply preview */}
+              {message.replyTo && (
+                <div className={cn('mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs', isMine ? 'border-white/60 bg-white/15' : 'border-brand-500 bg-content/5')}>
+                  <p className={cn('font-semibold', isMine ? 'text-white/90' : 'text-brand-500')}>{message.replyTo.sender?.name || 'You'}</p>
+                  <p className={cn('truncate', isMine ? 'text-white/75' : 'text-content-muted')}>{message.replyTo.content}</p>
+                </div>
+              )}
+
+              <MessageMedia message={message} isMine={isMine} />
+
+              {message.content && <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
+            </>
           )}
 
-          <MessageMedia message={message} isMine={isMine} />
-
-          {message.content && <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
-
           <div className={cn('mt-0.5 flex items-center justify-end gap-1', isMine ? 'text-white/80' : 'text-content-muted')}>
-            {message.isEdited && <span className="text-[10px] italic">edited</span>}
+            {message.isEdited && !deleted && <span className="text-[10px] italic">edited</span>}
             <span className="text-[10px]">{formatTime(message.createdAt)}</span>
-            {isMine && <Ticks status={status || message.status} />}
+            {isMine && !deleted && <Ticks status={status || message.status} />}
           </div>
 
           {/* reactions */}
@@ -94,7 +137,7 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
 
         {/* hover action bar */}
         <AnimatePresence>
-          {showActions && (
+          {showActions && !deleted && !editing && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -117,9 +160,11 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
 
               <AnimatePresence>
                 {showMenu && (
-                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className={cn('absolute top-9 z-20 w-40 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg', isMine ? 'right-0' : 'left-0')}>
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className={cn('absolute top-9 z-20 w-48 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg', isMine ? 'right-0' : 'left-0')}>
+                    <MenuItem icon={Reply} label="Reply" onClick={() => { onReply?.(message); setShowMenu(false); }} />
                     <MenuItem icon={Star} label={message.starred ? 'Unstar' : 'Star'} onClick={() => { onStar?.(message); setShowMenu(false); }} />
                     <MenuItem icon={Pin} label={message.pinned ? 'Unpin' : 'Pin'} onClick={() => { onPin?.(message); setShowMenu(false); }} />
+                    <MenuItem icon={Forward} label="Forward" onClick={() => { onForward?.(message); setShowMenu(false); }} />
                     {message.content && (
                       <MenuItem
                         icon={Copy}
@@ -135,7 +180,9 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
                         }}
                       />
                     )}
-                    {isMine && <MenuItem icon={Trash2} label="Delete" danger onClick={() => { onDelete?.(message); setShowMenu(false); }} />}
+                    {canEdit && <MenuItem icon={Pencil} label="Edit" onClick={() => { setDraft(message.content || ''); setEditing(true); setShowMenu(false); }} />}
+                    {isMine && <MenuItem icon={Trash2} label="Delete for everyone" danger onClick={() => { onDelete?.(message, 'everyone'); setShowMenu(false); }} />}
+                    <MenuItem icon={Trash2} label="Delete for me" danger onClick={() => { onDelete?.(message, 'me'); setShowMenu(false); }} />
                   </motion.div>
                 )}
               </AnimatePresence>

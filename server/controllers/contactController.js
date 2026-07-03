@@ -11,6 +11,9 @@ export const sendRequest = asyncHandler(async (req, res) => {
   if (to === String(req.user._id)) throw new ApiError(400, "You can't add yourself.");
   const target = await User.findById(to);
   if (!target) throw new ApiError(404, 'User not found.');
+  if (String(target.workspace) !== String(req.user.workspace)) {
+    throw new ApiError(403, 'You can only connect with people in your workspace.');
+  }
 
   // Respect blocks in both directions.
   const blocked =

@@ -1,8 +1,10 @@
 import crypto from 'crypto';
 import User from '../models/User.js';
+import Workspace from '../models/Workspace.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { sendTokenResponse, sessionCookieOptions, generateOTP } from '../utils/token.js';
 import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
+import { createWorkspaceForUser, joinWorkspaceByCode } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
@@ -66,6 +68,17 @@ export const signup = asyncHandler(async (req, res) => {
   const exists = await User.findOne({ email: email.toLowerCase() });
   if (exists) throw new ApiError(409, 'An account with that email already exists.');
 
+  // Multi-tenant: an optional invite code makes the user JOIN that workspace;
+  // otherwise they create their own. Validate the code BEFORE creating the
+  // account so a bad code fails cleanly without orphaning a user.
+  const inviteCode =
+    (typeof req.body.inviteCode === 'string' && req.body.inviteCode.trim()) ||
+    (typeof req.body.invite === 'string' && req.body.invite.trim()) ||
+    '';
+  if (inviteCode && !(await Workspace.exists({ inviteCode }))) {
+    throw new ApiError(400, 'That invite code is invalid or has expired.');
+  }
+
   const otp = generateOTP();
   const baseDoc = {
     name: name.trim().slice(0, 60),
@@ -93,6 +106,10 @@ export const signup = asyncHandler(async (req, res) => {
       throw err;
     }
   }
+
+  // Attach the account to a workspace (join by invite, or create a new org).
+  if (inviteCode) await joinWorkspaceByCode(user, inviteCode);
+  else await createWorkspaceForUser(user, req.body.workspaceName);
 
   if (EMAIL_VERIFY_ON) {
     const emailConfigured = isEmailConfigured();

@@ -9,6 +9,7 @@ import {
   Contact,
   Settings,
   LayoutDashboard,
+  Code2,
   LogOut,
 } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
@@ -77,6 +78,15 @@ export default function NavRail() {
             </NavLink>
           </Tooltip>
         )}
+        <Tooltip label="Developers">
+          <NavLink to="/developers">
+            {({ isActive }) => (
+              <span className={cn('grid h-12 w-12 place-items-center rounded-2xl transition-colors', isActive ? 'bg-brand-gradient text-white shadow-glow' : 'text-content-muted hover:bg-content/5 hover:text-content')}>
+                <Code2 size={21} />
+              </span>
+            )}
+          </NavLink>
+        </Tooltip>
         <Tooltip label="Settings">
           <NavLink to="/settings">
             {({ isActive }) => (

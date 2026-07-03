@@ -20,6 +20,7 @@ import StatusPage from './pages/StatusPage.jsx';
 import GroupsPage from './pages/GroupsPage.jsx';
 import ContactsPage from './pages/ContactsPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
+import DevelopersPage from './pages/DevelopersPage.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 
 function ProtectedRoute({ children }) {
@@ -88,6 +89,7 @@ export default function App() {
             <Route path="/status" element={<StatusPage />} />
             <Route path="/groups" element={<GroupsPage />} />
             <Route path="/contacts" element={<ContactsPage  />} />
+            <Route path="/developers" element={<DevelopersPage />} />
             <Route path="/settings" element={<SettingsPage  />} />
             <Route
               path="/admin"

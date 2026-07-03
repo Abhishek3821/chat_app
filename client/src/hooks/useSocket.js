@@ -103,6 +103,11 @@ export function useSocket() {
     });
     socket.on('message:read', ({ chatId, userId: uid }) => useChat.getState().markReadBy(chatId, uid));
 
+    // Live edit / delete / reaction sync (WhatsApp-style).
+    socket.on('message-edited', ({ chatId, message }) => useChat.getState().applyEditedMessage(chatId, message));
+    socket.on('message-deleted', ({ chatId, messageId, scope }) => useChat.getState().applyDeletedMessage(chatId, messageId, scope || 'everyone'));
+    socket.on('message-reaction', ({ chatId, messageId, reactions }) => useChat.getState().applyReaction(chatId, messageId, reactions));
+
     // Live presence
     socket.on('presence-snapshot', ({ online }) => useChat.getState().setPresenceSnapshot(online));
     socket.on('user-online', ({ userId }) => useChat.getState().setUserOnline(userId));

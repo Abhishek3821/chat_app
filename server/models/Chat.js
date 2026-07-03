@@ -17,6 +17,8 @@ const participantSchema = new mongoose.Schema(
 
 const chatSchema = new mongoose.Schema(
   {
+    // Tenant this chat belongs to (all participants share it). Set on creation.
+    workspace: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', index: true },
     isGroup: { type: Boolean, default: false },
     participants: [participantSchema],
 

@@ -5,6 +5,7 @@ import MessageComposer from './MessageComposer';
 import RightPanel from './RightPanel';
 import { useChat } from '../../store/useChat';
 import { useAuth } from '../../store/useAuth';
+import { useUI } from '../../store/useUI';
 import { getChatDisplay, chatPeerIds } from '../../lib/chat';
 import { emitSocket } from '../../hooks/useSocket';
 import { DEMO_MODE } from '../../lib/api';
@@ -13,7 +14,8 @@ const DEMO_REPLIES = ['Absolutely! ðŸ™Œ', 'Sounds perfect.', 'Haha love that ðŸ˜
 
 export default function ChatArea({ chat }) {
   const currentUser = useAuth((s) => s.user);
-  const { messagesByChat, loadingMessages, sendMessage, appendMessage, reactToMessage, setTyping, typing, deleteMessage, toggleStarMessage, togglePinMessage } = useChat();
+  const { messagesByChat, loadingMessages, sendMessage, appendMessage, reactToMessage, setTyping, typing, deleteMessage, editMessage, toggleStarMessage, togglePinMessage } = useChat();
+  const openModal = useUI((s) => s.openModal);
   const [replyTo, setReplyTo] = useState(null);
   const [search, setSearch] = useState('');
 
@@ -72,7 +74,9 @@ export default function ChatArea({ chat }) {
           onReply={setReplyTo}
           onStar={(m) => toggleStarMessage(chat._id, m._id)}
           onPin={(m) => togglePinMessage(chat._id, m._id)}
-          onDelete={(m) => deleteMessage(chat._id, m._id)}
+          onDelete={(m, scope) => deleteMessage(chat._id, m._id, scope)}
+          onEdit={(m, content) => editMessage(chat._id, m._id, content)}
+          onForward={(m) => openModal('forwardMessage', { message: m })}
         />
         <MessageComposer chatId={chat._id} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={handleSend} />
       </div>

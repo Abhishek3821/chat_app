@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus } from 'lucide-react';
+import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
@@ -14,6 +14,7 @@ import { useContacts } from '../../store/useContacts';
 import { useMeetings } from '../../store/useMeetings';
 import { useStatus } from '../../store/useStatus';
 import { USERS } from '../../lib/demoData';
+import { getChatDisplay } from '../../lib/chat';
 import { cn } from '../../lib/utils';
 
 export default function ModalHost() {
@@ -26,6 +27,7 @@ export default function ModalHost() {
       <EditProfileModal open={activeModal === 'editProfile'} onClose={closeModal} />
       <NewStatusModal open={activeModal === 'newStatus'} onClose={closeModal} />
       <ProfileModal open={activeModal === 'profile'} onClose={closeModal} user={modalData} />
+      <ForwardMessageModal open={activeModal === 'forwardMessage'} onClose={closeModal} message={modalData?.message} />
     </>
   );
 }
@@ -389,6 +391,66 @@ function ProfileModal({ open, onClose, user }) {
           <Button variant="glass" size="icon-sm" onClick={() => { startCall({ type: 'video', peer: user, direction: 'outgoing' }); onClose(); }}><Video size={16} /></Button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+function ForwardMessageModal({ open, onClose, message }) {
+  const chats = useChat((s) => s.chats);
+  const forwardMessage = useChat((s) => s.forwardMessage);
+  const me = useAuth((s) => s.user);
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setPicked([]);
+      setQ('');
+    }
+  }, [open]);
+
+  const list = chats
+    .map((c) => ({ chat: c, d: getChatDisplay(c, me) }))
+    .filter(({ d }) => (d.name || '').toLowerCase().includes(q.toLowerCase()));
+
+  const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const doForward = async () => {
+    if (!picked.length || !message) return;
+    setBusy(true);
+    try {
+      await forwardMessage(message, picked);
+      toast.success(`Forwarded to ${picked.length} chat${picked.length === 1 ? '' : 's'}`);
+      onClose();
+    } catch {
+      toast.error('Could not forward the message');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const preview = message?.content || (message?.type && message.type !== 'text' ? `[${message.type}]` : '');
+
+  return (
+    <Modal open={open} onClose={onClose} title="Forward message" subtitle="Choose chats to forward to">
+      {preview && <p className="mb-3 truncate rounded-xl bg-content/5 px-3 py-2 text-sm text-content-muted">“{preview}”</p>}
+      <Input icon={Search} placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} className="mb-3" />
+      <div className="max-h-72 space-y-0.5 overflow-y-auto pb-2">
+        {list.map(({ chat, d }) => (
+          <button key={chat._id} onClick={() => toggle(chat._id)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-content/5">
+            <Avatar src={d.avatar} name={d.name} size="md" />
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-content">{d.name}</span>
+            <span className={cn('grid h-6 w-6 place-items-center rounded-full border-2 transition-colors', picked.includes(chat._id) ? 'border-brand-500 bg-brand-gradient text-white' : 'border-border')}>
+              {picked.includes(chat._id) && <Check size={14} />}
+            </span>
+          </button>
+        ))}
+        {list.length === 0 && <p className="px-2 py-6 text-center text-sm text-content-muted">No chats found.</p>}
+      </div>
+      <Button onClick={doForward} disabled={!picked.length || busy} className="w-full">
+        <Forward size={16} /> {busy ? 'Forwarding…' : `Forward${picked.length ? ` (${picked.length})` : ''}`}
+      </Button>
     </Modal>
   );
 }

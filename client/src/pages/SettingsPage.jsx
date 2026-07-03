@@ -30,6 +30,7 @@ import {
   KeyRound,
   Copy,
   Plus,
+  Building2,
 } from 'lucide-react';
 
 import Switch, { ToggleRow } from '@/components/ui/Switch';
@@ -41,6 +42,7 @@ import { cn, formatRelative } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useApiKeys } from '@/store/useApiKeys';
+import { useWorkspace } from '@/store/useWorkspace';
 import { DEMO_MODE } from '@/lib/api';
 import { ME } from '@/lib/demoData';
 
@@ -62,6 +64,7 @@ const TABS = [
   { id: 'privacy', label: 'Privacy', icon: ShieldCheck },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'workspace', label: 'Workspace', icon: Building2 },
   { id: 'developer', label: 'Developer', icon: KeyRound },
   { id: 'account', label: 'Account', icon: Settings2 },
 ];
@@ -381,6 +384,107 @@ function AppearancePanel() {
   );
 }
 
+/* ── Workspace (organization) ─────────────────────────────────── */
+function WorkspacePanel() {
+  const { workspace, members, myRole, memberCount, load, rename, rotateInvite } = useWorkspace();
+  const [name, setName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const isManager = myRole === 'owner' || myRole === 'admin';
+
+  useEffect(() => {
+    if (!DEMO_MODE) load();
+  }, [load]);
+  useEffect(() => {
+    if (workspace?.name) setName(workspace.name);
+  }, [workspace?.name]);
+
+  if (DEMO_MODE) {
+    return (
+      <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+        <Section title="Workspace" description="Your organization / team.">
+          <p className="mt-2 text-sm text-content-muted">Workspaces need the live backend. Turn off demo mode to manage your organization.</p>
+        </Section>
+      </motion.div>
+    );
+  }
+
+  if (!workspace) {
+    return (
+      <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+        <Section title="Workspace"><p className="mt-2 text-sm text-content-muted">Loading your workspace…</p></Section>
+      </motion.div>
+    );
+  }
+
+  const inviteLink = workspace.inviteLink;
+  const copyLink = () => navigator.clipboard?.writeText(inviteLink).then(() => toast.success('Invite link copied'), () => toast.error('Copy failed'));
+  const saveName = async () => {
+    if (!name.trim() || name === workspace.name) return;
+    setSavingName(true);
+    try {
+      await rename(name.trim());
+      toast.success('Workspace renamed');
+    } catch {
+      toast.error('Could not rename workspace');
+    } finally {
+      setSavingName(false);
+    }
+  };
+  const rotate = async () => {
+    if (!window.confirm('Generate a new invite link? The current link will stop working.')) return;
+    try {
+      await rotateInvite();
+      toast.success('New invite link generated');
+    } catch {
+      toast.error('Could not rotate the invite');
+    }
+  };
+
+  return (
+    <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+      <Section title="Workspace" description="Everyone in your workspace can find, message and call each other. People outside it can't.">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-brand-500">{workspace.plan} plan</span>
+          <span className="text-xs text-content-muted">{memberCount} member{memberCount === 1 ? '' : 's'} · you're {myRole}</span>
+        </div>
+        {isManager ? (
+          <div className="mt-4 flex items-end gap-2">
+            <div className="flex-1"><Field label="Workspace name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
+            <Button onClick={saveName} disabled={savingName || !name.trim() || name === workspace.name}>Save</Button>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-content">You're a member of <span className="font-semibold">{workspace.name}</span>.</p>
+        )}
+      </Section>
+
+      {isManager && inviteLink && (
+        <Section title="Invite teammates" description="Share this link — anyone who signs up with it joins your workspace.">
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{inviteLink}</code>
+            <Button size="sm" variant="subtle" onClick={copyLink}><Copy size={14} /> Copy</Button>
+          </div>
+          <button onClick={rotate} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Generate a new link (revokes the current one)</button>
+        </Section>
+      )}
+
+      <Section title="Members" description={`${memberCount} in ${workspace.name}`}>
+        <div className="mt-2 space-y-2">
+          {members.map((m) => (
+            <div key={m._id} className="flex items-center gap-3 rounded-2xl border border-border p-2.5">
+              <Avatar src={m.avatar} name={m.name} size="sm" online={m.isOnline} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-content">{m.name}</p>
+                <p className="truncate text-xs text-content-muted">@{m.username}</p>
+              </div>
+              <span className="rounded-full bg-content/5 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </motion.div>
+  );
+}
+
 /* ── Developer / API keys ─────────────────────────────────────── */
 const SCOPE_LABELS = {
   'chat:read': 'Read chats & messages',
@@ -657,6 +761,8 @@ export default function SettingsPage() {
         return <NotificationsPanel />;
       case 'appearance':
         return <AppearancePanel />;
+      case 'workspace':
+        return <WorkspacePanel />;
       case 'developer':
         return <DeveloperPanel />;
       case 'account':

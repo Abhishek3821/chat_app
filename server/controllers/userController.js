@@ -21,6 +21,7 @@ export const searchUsers = asyncHandler(async (req, res) => {
   const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const users = await User.find({
     _id: { $ne: req.user._id, $nin: req.user.blockedUsers },
+    workspace: req.user.workspace, // tenant isolation: only discover people in my workspace
     $or: [{ email: rx }, { username: rx }, { name: rx }],
   })
     .select(PUBLIC_FIELDS)
@@ -31,7 +32,8 @@ export const searchUsers = asyncHandler(async (req, res) => {
 
 // GET /api/users/:id
 export const getUserById = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id).select(PUBLIC_FIELDS);
+  // Only reachable within the same workspace (otherwise it's a 404, not a leak).
+  const user = await User.findOne({ _id: req.params.id, workspace: req.user.workspace }).select(PUBLIC_FIELDS);
   if (!user) throw new ApiError(404, 'User not found.');
   res.json({ success: true, user });
 });
@@ -106,6 +108,9 @@ export const addContact = asyncHandler(async (req, res) => {
   if (targetId === String(req.user._id)) throw new ApiError(400, "You can't add yourself.");
   const target = await User.findById(targetId);
   if (!target) throw new ApiError(404, 'User not found.');
+  if (String(target.workspace) !== String(req.user.workspace)) {
+    throw new ApiError(403, 'You can only add people in your workspace.');
+  }
 
   const blocked =
     (target.blockedUsers || []).some((b) => String(b) === String(req.user._id)) ||

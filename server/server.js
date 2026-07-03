@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
 
 import { connectDB } from './config/db.js';
+import { ensureWorkspaces } from './utils/workspaceService.js';
 import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -105,6 +106,17 @@ app.set('io', io);
 async function start() {
   validateEnv();
   await connectDB();
+
+  // Multi-tenancy: attach any pre-existing users/chats to a default workspace
+  // (idempotent — only touches docs created before workspaces existed).
+  try {
+    const summary = await ensureWorkspaces();
+    if (summary.migrated) {
+      console.log(`🏢 Workspace migration: moved ${summary.users} user(s) + ${summary.chats} chat(s) into "${summary.workspace}".`);
+    }
+  } catch (err) {
+    console.warn('⚠️  Workspace migration skipped:', err?.message || err);
+  }
 
   // Report SMTP status at boot so "why isn't the OTP email arriving?" is obvious.
   if (process.env.ENABLE_EMAIL_VERIFICATION === 'true') {

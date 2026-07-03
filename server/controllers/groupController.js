@@ -24,13 +24,18 @@ export const createGroup = asyncHandler(async (req, res) => {
   if (!name) throw new ApiError(400, 'Group name is required.');
 
   const uniqueMembers = [...new Set(members.map(String))].filter((id) => id !== String(req.user._id));
+  // Tenant isolation: only members in the same workspace can be added.
+  const sameWs = uniqueMembers.length
+    ? (await User.find({ _id: { $in: uniqueMembers }, workspace: req.user.workspace }).select('_id')).map((u) => String(u._id))
+    : [];
   const participants = [
     { user: req.user._id, role: 'owner' },
-    ...uniqueMembers.map((id) => ({ user: id, role: 'member' })),
+    ...sameWs.map((id) => ({ user: id, role: 'member' })),
   ];
 
   let chat = await Chat.create({
     isGroup: true,
+    workspace: req.user.workspace,
     name,
     description,
     avatar: avatar || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(name)}`,
@@ -71,7 +76,7 @@ export const addMembers = asyncHandler(async (req, res) => {
 
   // Honor each invitee's groupAddPermission: 'contacts' means only their own
   // contacts may pull them into a group — otherwise anyone could add anyone.
-  const candidates = await User.find({ _id: { $in: requested } }).select('name privacy contacts');
+  const candidates = await User.find({ _id: { $in: requested }, workspace: chat.workspace }).select('name privacy contacts');
   const added = candidates.filter((u) => {
     const perm = u.privacy?.groupAddPermission || 'everyone';
     if (perm === 'contacts') return (u.contacts || []).some((c) => String(c) === String(req.user._id));
@@ -145,6 +150,9 @@ export const leaveGroup = asyncHandler(async (req, res) => {
 export const joinByInvite = asyncHandler(async (req, res) => {
   const chat = await Chat.findOne({ inviteCode: req.params.inviteCode, isGroup: true });
   if (!chat) throw new ApiError(404, 'Invite is invalid.');
+  if (chat.workspace && String(chat.workspace) !== String(req.user.workspace)) {
+    throw new ApiError(403, 'This group belongs to another workspace.');
+  }
   if (chat.participants.some((p) => String(p.user) === String(req.user._id))) {
     return res.json({ success: true, chat, alreadyMember: true });
   }

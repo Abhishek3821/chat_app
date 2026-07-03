@@ -260,6 +260,17 @@ function CallSession({ call }) {
           )}
         </div>
 
+        {/* Presenting banner (Google-Meet style) */}
+        {sharingScreen && !incoming && (
+          <div className="mx-auto mb-2 flex items-center gap-3 rounded-full bg-emerald-500/15 px-4 py-2 text-sm text-emerald-200 ring-1 ring-emerald-500/30">
+            <MonitorUp size={16} />
+            <span className="font-medium">You’re presenting your screen</span>
+            <button onClick={toggleScreenShare} className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-emerald-600">
+              Stop presenting
+            </button>
+          </div>
+        )}
+
         {/* Stage */}
         <div className="relative flex flex-1 items-center justify-center px-6 pb-2">
           {status === 'error' ? (

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -16,6 +16,7 @@ import {
   Loader2,
   Camera,
   X,
+  Building2,
 } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
@@ -68,10 +69,12 @@ function fileToAvatarDataUrl(file, size = 384) {
 export default function Signup() {
   const navigate = useNavigate();
   const { signup, loading } = useAuth();
+  const [params] = useSearchParams();
+  const inviteCode = (params.get('invite') || '').trim();
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', workspaceName: '' });
   const [avatar, setAvatar] = useState(null); // data-URL preview, optional
   const fileRef = useRef(null);
 
@@ -117,6 +120,8 @@ export default function Signup() {
         email: form.email.trim(),
         password: form.password,
         confirmPassword: form.confirmPassword,
+        ...(inviteCode ? { inviteCode } : {}),
+        ...(!inviteCode && form.workspaceName.trim() ? { workspaceName: form.workspaceName.trim() } : {}),
         ...(avatar ? { avatar } : {}),
       });
       if (data?.requiresVerification) {
@@ -161,6 +166,13 @@ export default function Signup() {
           <h2 className="font-display text-2xl font-extrabold tracking-tight text-content">Create your account</h2>
           <p className="mt-1.5 text-sm text-content-muted">Join ChatConnect and connect in a whole new way.</p>
         </motion.div>
+
+        {inviteCode && (
+          <motion.div variants={rise} className="mt-4 flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-3 py-2.5 text-sm text-content">
+            <Building2 size={16} className="shrink-0 text-brand-500" />
+            You’re joining a workspace by invite — you’ll be able to chat with everyone in it.
+          </motion.div>
+        )}
 
         <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-4">
           {/* Optional profile photo */}
@@ -210,6 +222,20 @@ export default function Signup() {
               />
             </Field>
           </motion.div>
+
+          {!inviteCode && (
+            <motion.div variants={rise}>
+              <Field label="Workspace name" hint="Optional — your team/organization. Leave blank for a personal workspace.">
+                <Input
+                  icon={Building2}
+                  type="text"
+                  placeholder={form.name.trim() ? `${form.name.trim()}'s workspace` : 'My workspace'}
+                  value={form.workspaceName}
+                  onChange={set('workspaceName')}
+                />
+              </Field>
+            </motion.div>
+          )}
 
           <motion.div variants={rise}>
             <Field label="Email address" hint={fieldError('email')}>

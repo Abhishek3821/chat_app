@@ -42,6 +42,9 @@ export const accessDirectChat = asyncHandler(async (req, res) => {
 
   const other = await User.findById(otherId);
   if (!other) throw new ApiError(404, 'User not found.');
+  if (String(other.workspace) !== String(req.user.workspace)) {
+    throw new ApiError(403, 'You can only chat with people in your workspace.');
+  }
 
   let chat = await Chat.findOne({
     isGroup: false,
@@ -59,6 +62,7 @@ export const accessDirectChat = asyncHandler(async (req, res) => {
     }
     chat = await Chat.create({
       isGroup: false,
+      workspace: req.user.workspace,
       participants: [{ user: req.user._id }, { user: otherId }],
     });
   }

@@ -42,8 +42,12 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: 'Available on ChatConnect', maxlength: 160 },
     phone: { type: String, default: '' },
 
-    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' }, // platform-level (admin = super-admin)
     accountStatus: { type: String, enum: ['active', 'suspended', 'banned'], default: 'active' },
+
+    // Multi-tenancy: the org this user belongs to, and their role within it.
+    workspace: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', index: true },
+    workspaceRole: { type: String, enum: ['owner', 'admin', 'member'], default: 'member' },
 
     isVerified: { type: Boolean, default: false },
     otp: { type: String, select: false },

@@ -17,7 +17,7 @@ function DateSeparator({ date }) {
   );
 }
 
-export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, searchQuery, onReact, onReply, onStar, onPin, onDelete }) {
+export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, searchQuery, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
   const bottomRef = useRef(null);
   const meId = currentUser?._id || 'me';
 
@@ -58,6 +58,8 @@ export default function MessageList({ messages, loading, isGroup, currentUser, p
               onStar={onStar}
               onPin={onPin}
               onDelete={onDelete}
+              onForward={onForward}
+              onEdit={onEdit}
             />
           </div>
         );
