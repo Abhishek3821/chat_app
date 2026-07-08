@@ -37,6 +37,16 @@ export const useUI = create((set, get) => ({
     set({ accent });
   },
 
+  /** On logout, drop the previous user's look so it never lingers on the shared
+   *  browser (login/splash screens) or leaks onto the next user before they hydrate. */
+  resetAppearance: () => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('cc_theme');
+      localStorage.removeItem('cc_accent');
+    }
+    set({ theme: 'dark', accent: 'indigo' });
+  },
+
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
   setRightPanel: (rightPanelOpen) => set({ rightPanelOpen }),

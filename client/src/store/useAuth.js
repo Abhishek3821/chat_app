@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import api, { DEMO_MODE, ensureMediaToken, clearMediaToken } from '../lib/api';
 import { ME } from '../lib/demoData';
+import { useUI } from './useUI';
 
 export const useAuth = create((set, get) => ({
   user: null,
@@ -84,11 +85,24 @@ export const useAuth = create((set, get) => ({
     return data.user;
   },
 
+  /** Persist per-user preferences (theme, accent, notifications…) to the account,
+   *  so each user's look follows THEIR login — never shared across users/devices. */
+  updateSettings: async (updates) => {
+    if (DEMO_MODE) {
+      set((s) => ({ user: { ...s.user, settings: { ...(s.user?.settings || {}), ...updates } } }));
+      return get().user?.settings;
+    }
+    const { data } = await api.patch('/users/me/settings', updates);
+    set((s) => ({ user: { ...s.user, settings: data.settings } }));
+    return data.settings;
+  },
+
   /** Local-only session teardown (used when the API says our token is dead). */
   forceLogout: () => {
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
+    useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null, loading: false });
   },
 
@@ -103,6 +117,7 @@ export const useAuth = create((set, get) => ({
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
+    useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null });
   },
 }));

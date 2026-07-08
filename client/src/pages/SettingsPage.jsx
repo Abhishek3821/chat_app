@@ -303,13 +303,19 @@ const THEME_CARDS = [
 
 function AppearancePanel() {
   const { theme, setTheme, accent, setAccent } = useUI();
-  // 'system' is presentational only in demo — it maps to dark.
-  const [selection, setSelection] = useState(theme === 'light' ? 'light' : 'dark');
+  const updateSettings = useAuth((s) => s.updateSettings);
 
-  const pick = (id) => {
-    setSelection(id);
-    setTheme(id === 'system' ? 'dark' : id);
-    toast.success(`${id === 'system' ? 'System' : id[0].toUpperCase() + id.slice(1)} theme applied`);
+  // Apply immediately AND persist to the account, so each user keeps their OWN
+  // theme + accent (it follows their login, never shared across users/devices).
+  const pickTheme = (id) => {
+    setTheme(id);
+    updateSettings({ theme: id }).catch(() => toast.error('Could not save your theme.'));
+    toast.success(`${id[0].toUpperCase() + id.slice(1)} theme applied`);
+  };
+  const pickAccent = (a) => {
+    setAccent(a.id);
+    updateSettings({ accent: a.id }).catch(() => toast.error('Could not save your accent.'));
+    toast.success(`${a.name} accent applied`);
   };
 
   return (
@@ -317,12 +323,12 @@ function AppearancePanel() {
       <Section title="Theme" description="Choose how ChatConnect looks to you.">
         <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {THEME_CARDS.map(({ id, label, icon: Icon, swatch, dots }) => {
-            const active = selection === id;
+            const active = theme === id;
             return (
               <motion.button
                 key={id}
                 type="button"
-                onClick={() => pick(id)}
+                onClick={() => pickTheme(id)}
                 whileHover={{ y: -3 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 25 }}
@@ -368,10 +374,7 @@ function AppearancePanel() {
               <button
                 key={a.id}
                 type="button"
-                onClick={() => {
-                  setAccent(a.id);
-                  toast.success(`${a.name} accent applied`);
-                }}
+                onClick={() => pickAccent(a)}
                 className="ring-brand flex flex-col items-center gap-1.5 rounded-xl p-1"
                 aria-label={`Use ${a.name} accent`}
                 aria-pressed={active}
@@ -397,7 +400,9 @@ function AppearancePanel() {
 
 /* ── Workspace (organization) ─────────────────────────────────── */
 function WorkspacePanel() {
-  const { workspace, members, myRole, memberCount, load, rename, rotateInvite } = useWorkspace();
+  const { workspace, members, myRole, memberCount, load, rename, rotateInvite, setMemberStatus, removeMember } =
+    useWorkspace();
+  const meId = useAuth((s) => s.user?._id);
   const [name, setName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const isManager = myRole === 'owner' || myRole === 'admin';
@@ -472,6 +477,24 @@ function WorkspacePanel() {
       toast.error('Could not rotate the invite');
     }
   };
+  const toggleSuspend = async (m) => {
+    const next = m.accountStatus === 'suspended' ? 'active' : 'suspended';
+    try {
+      await setMemberStatus(m._id, next);
+      toast.success(next === 'suspended' ? `${m.name} paused` : `${m.name} resumed`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not update member.');
+    }
+  };
+  const kick = async (m) => {
+    if (!window.confirm(`Remove ${m.name} from ${workspace.name}? They'll lose access to this workspace.`)) return;
+    try {
+      await removeMember(m._id);
+      toast.success(`${m.name} removed from the workspace`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not remove member.');
+    }
+  };
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
@@ -502,16 +525,45 @@ function WorkspacePanel() {
 
       <Section title="Members" description={`${memberCount} in ${workspace.name}`}>
         <div className="mt-2 space-y-2">
-          {members.map((m) => (
-            <div key={m._id} className="flex items-center gap-3 rounded-2xl border border-border p-2.5">
-              <Avatar src={m.avatar} name={m.name} size="sm" online={m.isOnline} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-content">{m.name}</p>
-                <p className="truncate text-xs text-content-muted">@{m.username}</p>
+          {members.map((m) => {
+            const isOwnerRow = m.workspaceRole === 'owner';
+            const isMe = String(m._id) === String(meId);
+            const suspended = m.accountStatus === 'suspended';
+            const canManage = isManager && !isOwnerRow && !isMe;
+            return (
+              <div key={m._id} className="flex items-center gap-3 rounded-2xl border border-border p-2.5">
+                <Avatar src={m.avatar} name={m.name} size="sm" online={m.isOnline} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-content">{m.name}</p>
+                  <p className="truncate text-xs text-content-muted">@{m.username}</p>
+                </div>
+                {suspended && (
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600 dark:text-amber-400">
+                    Paused
+                  </span>
+                )}
+                <span className="rounded-full bg-content/5 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
+                {canManage && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => toggleSuspend(m)}
+                      title={suspended ? 'Resume access' : 'Pause access'}
+                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+                    >
+                      {suspended ? <Check size={15} /> : <Lock size={15} />}
+                    </button>
+                    <button
+                      onClick={() => kick(m)}
+                      title="Remove from workspace"
+                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-red-500 transition-colors hover:bg-red-500/10"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <span className="rounded-full bg-content/5 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Section>
     </motion.div>

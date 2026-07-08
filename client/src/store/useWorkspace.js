@@ -37,4 +37,22 @@ export const useWorkspace = create((set) => ({
     await api.patch(`/workspaces/me/members/${userId}/role`, { role });
     set((s) => ({ members: s.members.map((m) => (m._id === userId ? { ...m, workspaceRole: role } : m)) }));
   },
+
+  // Pause (suspend) or resume a member's access. status: 'suspended' | 'active'.
+  setMemberStatus: async (userId, status) => {
+    const { data } = await api.patch(`/workspaces/me/members/${userId}/status`, { status });
+    set((s) => ({
+      members: s.members.map((m) => (m._id === userId ? { ...m, accountStatus: data.member.accountStatus } : m)),
+    }));
+    return data.member;
+  },
+
+  // Remove a member from the workspace entirely.
+  removeMember: async (userId) => {
+    await api.delete(`/workspaces/me/members/${userId}`);
+    set((s) => ({
+      members: s.members.filter((m) => m._id !== userId),
+      memberCount: Math.max(0, (s.memberCount || 1) - 1),
+    }));
+  },
 }));

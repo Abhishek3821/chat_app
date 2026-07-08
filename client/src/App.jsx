@@ -52,11 +52,36 @@ export default function App() {
   const theme = useUI((s) => s.theme);
   const accent = useUI((s) => s.accent);
   const init = useAuth((s) => s.init);
+  const userSettings = useAuth((s) => s.user?.settings);
   const location = useLocation();
 
-  // Apply theme class to <html>.
+  // Each logged-in user's OWN look: hydrate theme + accent from THEIR account so
+  // preferences follow the person (not the browser) and never leak between users.
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    if (!userSettings) return;
+    if (userSettings.theme) useUI.getState().setTheme(userSettings.theme);
+    useUI.getState().setAccent(userSettings.accent || 'indigo');
+  }, [userSettings?.theme, userSettings?.accent]);
+
+  // Apply the theme to <html>, resolving 'system' against the OS (and reacting to
+  // the OS switching light/dark while 'system' is selected).
+  useEffect(() => {
+    const root = document.documentElement;
+    const mq =
+      typeof window !== 'undefined' && window.matchMedia
+        ? window.matchMedia('(prefers-color-scheme: dark)')
+        : null;
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && !!mq?.matches);
+      root.classList.toggle('dark', dark);
+    };
+    apply();
+    if (theme === 'system' && mq) {
+      const onChange = () => apply();
+      mq.addEventListener?.('change', onChange);
+      return () => mq.removeEventListener?.('change', onChange);
+    }
+    return undefined;
   }, [theme]);
 
   // Apply the chosen accent — drives every brand-* colour + gradient (index.css).
