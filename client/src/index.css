@@ -15,6 +15,23 @@
   --content: 15 23 42; /* slate-900 */
   --content-muted: 100 116 139; /* slate-500 */
   --app-bg: 244 246 251;
+
+  /* Brand / accent palette (default: Indigo). These are runtime-swappable so
+     the Appearance → Accent color picker actually recolors the whole app. Every
+     `brand-*` Tailwind class and `bg-brand-gradient` resolves through these. */
+  --brand-50: 238 242 255;
+  --brand-100: 224 231 255;
+  --brand-200: 199 210 254;
+  --brand-300: 165 180 252;
+  --brand-400: 129 140 248;
+  --brand-500: 99 102 241;
+  --brand-600: 79 70 229;
+  --brand-700: 67 56 202;
+  --brand-800: 55 48 163;
+  --brand-900: 49 46 129;
+  --grad-from: 99 102 241;
+  --grad-via: 139 92 246;
+  --grad-to: 6 182 212;
 }
 
 .dark {
@@ -24,6 +41,85 @@
   --content: 226 232 240; /* slate-200 */
   --content-muted: 148 163 184; /* slate-400 */
   --app-bg: 10 15 30; /* navy-950 */
+}
+
+/* ── Accent presets ───────────────────────────────────────────────
+   Applied via <html data-accent="…"> (see useUI + App.jsx). Indigo is the
+   :root default above; the rest override the brand scale + gradient stops. */
+:root[data-accent='violet'] {
+  --brand-50: 245 243 255;
+  --brand-100: 237 233 254;
+  --brand-200: 221 214 254;
+  --brand-300: 196 181 253;
+  --brand-400: 167 139 250;
+  --brand-500: 139 92 246;
+  --brand-600: 124 58 237;
+  --brand-700: 109 40 217;
+  --brand-800: 91 33 182;
+  --brand-900: 76 29 149;
+  --grad-from: 167 139 250;
+  --grad-via: 139 92 246;
+  --grad-to: 124 58 237;
+}
+:root[data-accent='cyan'] {
+  --brand-50: 236 254 255;
+  --brand-100: 207 250 254;
+  --brand-200: 165 243 252;
+  --brand-300: 103 232 249;
+  --brand-400: 34 211 238;
+  --brand-500: 6 182 212;
+  --brand-600: 8 145 178;
+  --brand-700: 14 116 144;
+  --brand-800: 21 94 117;
+  --brand-900: 22 78 99;
+  --grad-from: 34 211 238;
+  --grad-via: 6 182 212;
+  --grad-to: 8 145 178;
+}
+:root[data-accent='emerald'] {
+  --brand-50: 236 253 245;
+  --brand-100: 209 250 229;
+  --brand-200: 167 243 208;
+  --brand-300: 110 231 183;
+  --brand-400: 52 211 153;
+  --brand-500: 16 185 129;
+  --brand-600: 5 150 105;
+  --brand-700: 4 120 87;
+  --brand-800: 6 95 70;
+  --brand-900: 6 78 59;
+  --grad-from: 52 211 153;
+  --grad-via: 16 185 129;
+  --grad-to: 5 150 105;
+}
+:root[data-accent='rose'] {
+  --brand-50: 255 241 242;
+  --brand-100: 255 228 230;
+  --brand-200: 254 205 211;
+  --brand-300: 253 164 175;
+  --brand-400: 251 113 133;
+  --brand-500: 244 63 94;
+  --brand-600: 225 29 72;
+  --brand-700: 190 18 60;
+  --brand-800: 159 18 57;
+  --brand-900: 136 19 55;
+  --grad-from: 251 113 133;
+  --grad-via: 244 63 94;
+  --grad-to: 225 29 72;
+}
+:root[data-accent='amber'] {
+  --brand-50: 255 251 235;
+  --brand-100: 254 243 199;
+  --brand-200: 253 230 138;
+  --brand-300: 252 211 77;
+  --brand-400: 251 191 36;
+  --brand-500: 245 158 11;
+  --brand-600: 217 119 6;
+  --brand-700: 180 83 9;
+  --brand-800: 146 64 14;
+  --brand-900: 120 53 15;
+  --grad-from: 251 191 36;
+  --grad-via: 245 158 11;
+  --grad-to: 217 119 6;
 }
 
 @layer base {

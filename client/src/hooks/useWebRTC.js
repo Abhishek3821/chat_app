@@ -31,13 +31,21 @@ import { emitSocket } from './useSocket';
 const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
 ];
+// TURN relay(s) — required for calls behind symmetric NAT / strict firewalls.
+// VITE_TURN_URL may be a single URL or a comma-separated list (turn: and turns:).
 if (import.meta.env.VITE_TURN_URL) {
   ICE_SERVERS.push({
-    urls: import.meta.env.VITE_TURN_URL,
+    urls: import.meta.env.VITE_TURN_URL.split(',').map((u) => u.trim()).filter(Boolean),
     username: import.meta.env.VITE_TURN_USERNAME || '',
     credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
   });
 }
+
+// Browser DSP applied to the outgoing mic track. Toggled live via
+// track.applyConstraints() so "Noise cancellation" is a real control, not a stub.
+const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+const MAX_ICE_RESTARTS = 3; // per leg, before we give up and drop it
 
 const RING_TIMEOUT_MS = 35000; // caller gives up ringing a leg
 const INCOMING_TIMEOUT_MS = 45000; // callee popup safety net
@@ -58,6 +66,7 @@ export function useWebRTC(call) {
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
   const [sharingScreen, setSharingScreen] = useState(false);
+  const [noiseCancel, setNoiseCancel] = useState(true); // mic DSP on by default
   const [mediaError, setMediaError] = useState(null);
 
   const peersRef = useRef(new Map()); // remoteId -> RTCPeerConnection
@@ -65,6 +74,7 @@ export function useWebRTC(call) {
   const cameraTrackRef = useRef(null); // original camera track (to restore after screen share)
   const screenTrackRef = useRef(null);
   const candBufRef = useRef(new Map()); // remoteId -> [RTCIceCandidate] buffered until remoteDescription
+  const restartRef = useRef(new Map()); // remoteId -> ICE-restart attempt count
   const participantsRef = useRef(new Map()); // remoteId -> { _id, name, avatar }
   const timersRef = useRef([]); // primary-call timers
   const legTimersRef = useRef(new Map()); // remoteId -> ring timeout for an added leg
@@ -114,6 +124,7 @@ export function useWebRTC(call) {
         peersRef.current.delete(key);
       }
       candBufRef.current.delete(key);
+      restartRef.current.delete(key);
       const lt = legTimersRef.current.get(key);
       if (lt) {
         clearTimeout(lt);
@@ -170,7 +181,7 @@ export function useWebRTC(call) {
 
   const getMedia = useCallback(async () => {
     const constraints = {
-      audio: true,
+      audio: { ...AUDIO_ENHANCE },
       video: wantVideo ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -192,10 +203,31 @@ export function useWebRTC(call) {
     setStatus('error');
   }, []);
 
+  /**
+   * Best-effort ICE restart for a leg that dropped/failed. Only the leg's
+   * INITIATOR (the side that made the original offer) restarts, so the two
+   * sides can't glare. Renegotiation reuses the normal offer/answer path.
+   */
+  const attemptIceRestart = useCallback(async (key) => {
+    const pc = peersRef.current.get(key);
+    if (!pc || closedRef.current || !pc.__ccInitiator) return;
+    const n = restartRef.current.get(key) || 0;
+    if (n >= MAX_ICE_RESTARTS) return;
+    restartRef.current.set(key, n + 1);
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      emitSocket('call:offer', { to: key, offer, callId: callIdRef.current });
+    } catch {
+      /* noop — the connectionstate handler will drop it if it stays failed */
+    }
+  }, []);
+
   const createPeer = useCallback(
-    (remoteId, stream) => {
+    (remoteId, stream, initiator = false) => {
       const key = String(remoteId);
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      pc.__ccInitiator = initiator; // only the offerer performs ICE restarts
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       // If a screen share is already live, send the screen (not the camera) on this new leg.
       if (screenTrackRef.current) {
@@ -208,6 +240,7 @@ export function useWebRTC(call) {
         }
       };
       pc.ontrack = (e) => upsertRemote(key, e.streams[0]);
+      const isPrimaryLeg = () => key === String(peerId);
       pc.onconnectionstatechange = () => {
         const st = pc.connectionState;
         if (st === 'connected') {
@@ -218,13 +251,40 @@ export function useWebRTC(call) {
           }
           timersRef.current.forEach(clearTimeout);
           timersRef.current = [];
+          restartRef.current.delete(key); // recovered — reset the restart budget
           if (!connectedAtRef.current) connectedAtRef.current = Date.now();
           setStatus('connected');
-        } else if (st === 'failed' || st === 'closed') {
-          // This leg died — drop just its tile; end the whole call only when none
-          // remain AND either the call had connected or the PRIMARY leg is the one
-          // that failed (a primary that never connects must not hang the overlay).
-          const wasPrimary = key === String(peerId);
+        } else if (st === 'disconnected') {
+          // Transient blip — surface "reconnecting" (primary leg only) and let ICE
+          // recover; nudge an ICE restart if it's still down shortly after.
+          if (connectedAtRef.current && isPrimaryLeg()) setStatus('reconnecting');
+          const t = setTimeout(() => {
+            if (peersRef.current.get(key)?.connectionState === 'disconnected') attemptIceRestart(key);
+          }, 2500);
+          timersRef.current.push(t);
+        } else if (st === 'failed') {
+          const attempts = restartRef.current.get(key) || 0;
+          const dropLeg = () => {
+            const p = peersRef.current.get(key);
+            // Bail if it recovered in the meantime.
+            if (p && p.connectionState !== 'failed' && p.connectionState !== 'disconnected') return;
+            const wasPrimary = isPrimaryLeg();
+            closePeer(key);
+            if (peersRef.current.size === 0 && (connectedAtRef.current || wasPrimary)) teardown('ended');
+          };
+          // Only try to recover a leg that HAD connected (real reconnection).
+          // The initiator drives the ICE restart; the answerer just holds the leg
+          // open so that restart can land. A never-connected leg drops at once.
+          if (connectedAtRef.current && attempts < MAX_ICE_RESTARTS) {
+            if (isPrimaryLeg()) setStatus('reconnecting');
+            if (pc.__ccInitiator) attemptIceRestart(key);
+            else restartRef.current.set(key, attempts + 1);
+            timersRef.current.push(setTimeout(dropLeg, 7000)); // safety net
+            return;
+          }
+          dropLeg();
+        } else if (st === 'closed') {
+          const wasPrimary = isPrimaryLeg();
           closePeer(key);
           if (peersRef.current.size === 0 && (connectedAtRef.current || wasPrimary)) teardown('ended');
         }
@@ -232,7 +292,7 @@ export function useWebRTC(call) {
       peersRef.current.set(key, pc);
       return pc;
     },
-    [closePeer, teardown, upsertRemote]
+    [closePeer, teardown, upsertRemote, attemptIceRestart, peerId]
   );
 
   const flushCandidates = useCallback(async (remoteId) => {
@@ -457,7 +517,7 @@ export function useWebRTC(call) {
       if (peersRef.current.has(remote)) return;
       try {
         if (statusRef.current !== 'connected') setStatus('connecting');
-        const pc = createPeer(remote, localStreamRef.current);
+        const pc = createPeer(remote, localStreamRef.current, true);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         emitSocket('call:offer', { to: remote, offer, callId: callIdRef.current });
@@ -471,9 +531,10 @@ export function useWebRTC(call) {
     const onOffer = async ({ from, callId: cid, offer }) => {
       if (!mine(cid) || !offer || !localStreamRef.current) return;
       const remote = String(from || peerId);
-      if (peersRef.current.has(remote)) return;
+      // An offer for an EXISTING peer is a renegotiation (e.g. the initiator's
+      // ICE restart) — answer it on the same connection instead of bailing.
       try {
-        const pc = createPeer(remote, localStreamRef.current);
+        const pc = peersRef.current.get(remote) || createPeer(remote, localStreamRef.current, false);
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
         await flushCandidates(remote);
         const answer = await pc.createAnswer();
@@ -609,6 +670,28 @@ export function useWebRTC(call) {
     setCamOff((c) => !c);
   }, [camOff]);
 
+  // Live-toggle browser noise suppression / echo cancellation / auto-gain on the
+  // mic track. Reflects the setting the track actually reports back (some
+  // browsers silently ignore the constraint), and no-ops gracefully otherwise.
+  const toggleNoiseCancel = useCallback(async () => {
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (!track) return;
+    const next = !noiseCancel;
+    try {
+      await track.applyConstraints({
+        echoCancellation: next,
+        noiseSuppression: next,
+        autoGainControl: next,
+      });
+      const applied = track.getSettings?.().noiseSuppression;
+      const on = typeof applied === 'boolean' ? applied : next;
+      setNoiseCancel(on);
+      toast.success(on ? 'Noise cancellation on' : 'Noise cancellation off');
+    } catch {
+      toast.error('This browser can’t change noise cancellation.');
+    }
+  }, [noiseCancel]);
+
   return {
     localStream,
     screenStream,
@@ -617,6 +700,7 @@ export function useWebRTC(call) {
     muted,
     camOff,
     sharingScreen,
+    noiseCancel,
     mediaError,
     accept,
     reject,
@@ -624,6 +708,7 @@ export function useWebRTC(call) {
     toggleMute,
     toggleCamera,
     toggleScreenShare,
+    toggleNoiseCancel,
     addParticipants,
   };
 }

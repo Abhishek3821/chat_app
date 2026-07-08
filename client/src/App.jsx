@@ -50,6 +50,7 @@ function SplashScreen() {
 
 export default function App() {
   const theme = useUI((s) => s.theme);
+  const accent = useUI((s) => s.accent);
   const init = useAuth((s) => s.init);
   const location = useLocation();
 
@@ -57,6 +58,11 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
+
+  // Apply the chosen accent — drives every brand-* colour + gradient (index.css).
+  useEffect(() => {
+    document.documentElement.setAttribute('data-accent', accent);
+  }, [accent]);
 
   // Bootstrap the session once.
   useEffect(() => {
@@ -89,7 +95,14 @@ export default function App() {
             <Route path="/status" element={<StatusPage />} />
             <Route path="/groups" element={<GroupsPage />} />
             <Route path="/contacts" element={<ContactsPage  />} />
-            <Route path="/developers" element={<DevelopersPage />} />
+            <Route
+              path="/developers"
+              element={
+                <AdminRoute>
+                  <DevelopersPage />
+                </AdminRoute>
+              }
+            />
             <Route path="/settings" element={<SettingsPage  />} />
             <Route
               path="/admin"

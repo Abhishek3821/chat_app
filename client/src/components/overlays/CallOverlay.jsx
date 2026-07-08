@@ -8,6 +8,7 @@ import {
   Video,
   VideoOff,
   Volume2,
+  AudioLines,
   MonitorUp,
   MonitorX,
   UserPlus,
@@ -67,6 +68,7 @@ function CallSession({ call }) {
     muted,
     camOff,
     sharingScreen,
+    noiseCancel,
     mediaError,
     accept,
     reject,
@@ -74,6 +76,7 @@ function CallSession({ call }) {
     toggleMute,
     toggleCamera,
     toggleScreenShare,
+    toggleNoiseCancel,
     addParticipants,
   } = useWebRTC(call);
 
@@ -97,6 +100,13 @@ function CallSession({ call }) {
   const remotes = remoteStreams || [];
   const nRemote = remotes.length;
   const selfPreview = sharingScreen ? screenStream : localStream;
+  // Column count for the group video grid (remote tiles + your own tile).
+  const gridColsClass =
+    nRemote + 1 <= 2
+      ? 'grid-cols-2'
+      : nRemote + 1 <= 6
+      ? 'grid-cols-2 sm:grid-cols-3'
+      : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
 
   // Duration timer once connected.
   useEffect(() => {
@@ -128,6 +138,8 @@ function CallSession({ call }) {
     ? 'Missed call'
     : status === 'error'
     ? 'Call failed'
+    : status === 'reconnecting'
+    ? 'Reconnecting…'
     : connected
     ? formatDuration(seconds)
     : 'Calling…';
@@ -260,6 +272,14 @@ function CallSession({ call }) {
           )}
         </div>
 
+        {/* Reconnecting banner — shown while a dropped leg attempts ICE restart */}
+        {status === 'reconnecting' && !incoming && (
+          <div className="mx-auto mb-2 flex items-center gap-2 rounded-full bg-amber-500/15 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+            <span className="font-medium">Reconnecting…</span>
+          </div>
+        )}
+
         {/* Presenting banner (Google-Meet style) */}
         {sharingScreen && !incoming && (
           <div className="mx-auto mb-2 flex items-center gap-3 rounded-full bg-emerald-500/15 px-4 py-2 text-sm text-emerald-200 ring-1 ring-emerald-500/30">
@@ -390,6 +410,12 @@ function CallSession({ call }) {
               <CtrlBtn active={!muted} onClick={toggleMute} icon={muted ? MicOff : Mic} label={muted ? 'Unmute' : 'Mute'} />
               {isVideo && <CtrlBtn active={!camOff} onClick={toggleCamera} icon={camOff ? VideoOff : Video} label={camOff ? 'Camera on' : 'Camera off'} />}
               <CtrlBtn onClick={cycleSpeaker} icon={Volume2} label="Speaker" />
+              <CtrlBtn
+                active={!noiseCancel}
+                onClick={toggleNoiseCancel}
+                icon={AudioLines}
+                label={noiseCancel ? 'Noise cancel: On' : 'Noise cancel: Off'}
+              />
               {isVideo && (
                 <CtrlBtn
                   active={!sharingScreen}

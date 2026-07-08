@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -31,6 +32,8 @@ import {
   Copy,
   Plus,
   Building2,
+  Terminal,
+  ExternalLink,
 } from 'lucide-react';
 
 import Switch, { ToggleRow } from '@/components/ui/Switch';
@@ -39,7 +42,7 @@ import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { Chip } from '@/components/ui/Badge';
 import { cn, formatRelative } from '@/lib/utils';
-import { useUI } from '@/store/useUI';
+import { useUI, ACCENTS } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useApiKeys } from '@/store/useApiKeys';
 import { useWorkspace } from '@/store/useWorkspace';
@@ -298,15 +301,8 @@ const THEME_CARDS = [
   { id: 'system', label: 'System', icon: Monitor, swatch: 'bg-gradient-to-br from-white to-navy-900', dots: ['bg-slate-300', 'bg-navy-800'] },
 ];
 
-const ACCENTS = [
-  { name: 'Indigo', className: 'bg-brand-500' },
-  { name: 'Violet', className: 'bg-violet-500' },
-  { name: 'Cyan', className: 'bg-cyan-500' },
-  { name: 'Gradient', className: 'bg-brand-gradient' },
-];
-
 function AppearancePanel() {
-  const { theme, setTheme } = useUI();
+  const { theme, setTheme, accent, setAccent } = useUI();
   // 'system' is presentational only in demo — it maps to dark.
   const [selection, setSelection] = useState(theme === 'light' ? 'light' : 'dark');
 
@@ -364,20 +360,35 @@ function AppearancePanel() {
         </div>
       </Section>
 
-      <Section title="Accent color" description="A preview of the palette used across the app.">
+      <Section title="Accent color" description="Recolors buttons, highlights and gradients across the whole app.">
         <div className="mt-1 flex flex-wrap items-center gap-3">
-          {ACCENTS.map((a, i) => (
-            <div key={a.name} className="flex flex-col items-center gap-1.5">
-              <span
-                className={cn(
-                  'h-10 w-10 rounded-full shadow-soft ring-2 ring-offset-2 ring-offset-surface',
-                  a.className,
-                  i === 0 ? 'ring-brand-500/60' : 'ring-transparent'
-                )}
-              />
-              <span className="text-[11px] font-medium text-content-muted">{a.name}</span>
-            </div>
-          ))}
+          {ACCENTS.map((a) => {
+            const active = accent === a.id;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  setAccent(a.id);
+                  toast.success(`${a.name} accent applied`);
+                }}
+                className="ring-brand flex flex-col items-center gap-1.5 rounded-xl p-1"
+                aria-label={`Use ${a.name} accent`}
+                aria-pressed={active}
+              >
+                <span
+                  style={{ backgroundColor: a.dot }}
+                  className={cn(
+                    'grid h-10 w-10 place-items-center rounded-full text-white shadow-soft ring-2 ring-offset-2 ring-offset-surface transition-all',
+                    active ? 'ring-content/40 scale-105' : 'ring-transparent hover:scale-105'
+                  )}
+                >
+                  {active && <Check size={16} />}
+                </span>
+                <span className={cn('text-[11px] font-medium', active ? 'text-content' : 'text-content-muted')}>{a.name}</span>
+              </button>
+            );
+          })}
         </div>
       </Section>
     </motion.div>
@@ -496,6 +507,23 @@ const SCOPE_LABELS = {
 };
 const DEFAULT_SCOPES = ['chat:read', 'chat:write', 'contacts:read', 'calls:write', 'meetings:read', 'meetings:write'];
 
+const API_V1_BASE =
+  (import.meta.env.VITE_API_URL || 'https://chat-app-zqj9.onrender.com').replace(/\/+$/, '').replace(/\/api$/, '') +
+  '/api/v1';
+
+const API_ENDPOINTS = [
+  ['GET', '/me', '—', 'The key owner + granted scopes'],
+  ['GET', '/contacts', 'contacts:read', 'The owner’s contacts'],
+  ['GET', '/users/search?q=', 'contacts:read', 'Find users by name/username/email'],
+  ['GET', '/chats', 'chat:read', 'The owner’s conversations'],
+  ['POST', '/chats/direct/:userId', 'chat:write', 'Get-or-create a 1:1 chat'],
+  ['GET', '/messages/:chatId', 'chat:read', 'Messages in a chat'],
+  ['POST', '/messages', 'chat:write', 'Send a message'],
+  ['POST', '/calls', 'calls:write', 'Start a call'],
+  ['GET', '/meetings', 'meetings:read', 'List meetings'],
+  ['POST', '/meetings', 'meetings:write', 'Schedule a meeting'],
+];
+
 function DeveloperPanel() {
   const { keys, scopes, load, create, revoke } = useApiKeys();
   const [label, setLabel] = useState('');
@@ -588,7 +616,57 @@ function DeveloperPanel() {
             ))}
           </div>
         )}
-        <a href="https://github.com" onClick={(e) => e.preventDefault()} className="mt-3 inline-block text-xs font-medium text-brand-500">See docs/API_V1.md for endpoints & examples</a>
+      </Section>
+
+      <Section title="Using the API" description="Send your key as an X-API-Key header on every request — from your server, never from a browser.">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><Terminal size={13} /> Base URL</p>
+            <code className="mt-1 block truncate text-xs font-medium text-content">{API_V1_BASE}</code>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><KeyRound size={13} /> Auth</p>
+            <p className="mt-1 text-xs font-medium text-content"><code>X-API-Key</code> header</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><AlertTriangle size={13} /> Rate limit</p>
+            <p className="mt-1 text-xs font-medium text-content">120 req / min per key</p>
+          </div>
+        </div>
+
+        <p className="mb-1.5 mt-4 text-sm font-medium text-content">Quickstart {newKey ? '(using your new key)' : ''}</p>
+        <div className="flex items-start gap-2">
+          <pre className="scrollbar-thin min-w-0 flex-1 overflow-x-auto rounded-2xl bg-navy-950 p-4 text-xs leading-relaxed text-cyan-100">{`curl ${API_V1_BASE}/me \\\n  -H "X-API-Key: ${newKey || 'cc_live_…'}"`}</pre>
+          <Button size="sm" variant="subtle" onClick={() => copy(`curl ${API_V1_BASE}/me -H "X-API-Key: ${newKey || 'cc_live_…'}"`)} className="shrink-0"><Copy size={14} /></Button>
+        </div>
+
+        <p className="mb-1.5 mt-4 text-sm font-medium text-content">Endpoints</p>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-left text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-content-muted">
+                <th className="pb-2 pr-3 font-semibold">Method</th>
+                <th className="pb-2 pr-3 font-semibold">Path</th>
+                <th className="pb-2 pr-3 font-semibold">Scope</th>
+                <th className="pb-2 font-semibold">Purpose</th>
+              </tr>
+            </thead>
+            <tbody className="align-top">
+              {API_ENDPOINTS.map(([m, path, scope, purpose]) => (
+                <tr key={path} className="border-t border-border">
+                  <td className="py-2 pr-3"><span className={cn('rounded-md px-1.5 py-0.5 text-[11px] font-bold', m === 'GET' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-brand-500/15 text-brand-500')}>{m}</span></td>
+                  <td className="py-2 pr-3"><code className="text-xs text-content">{path}</code></td>
+                  <td className="py-2 pr-3 text-xs text-content-muted">{scope}</td>
+                  <td className="py-2 text-xs text-content-muted">{purpose}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <Link to="/developers" className="ring-brand mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-500 hover:underline">
+          <ExternalLink size={13} /> Open the full developer console
+        </Link>
       </Section>
     </motion.div>
   );
@@ -751,6 +829,12 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const me = user || ME;
 
+  // The Developer / API-keys tab is only for platform admins (the developer
+  // running the deployment). Regular workspace members just use the chat app —
+  // API keys grant programmatic access to chats, messages & contacts.
+  const isPlatformAdmin = me?.role === 'admin';
+  const tabs = TABS.filter((t) => t.id !== 'developer' || isPlatformAdmin);
+
   const renderPanel = () => {
     switch (active) {
       case 'profile':
@@ -764,7 +848,7 @@ export default function SettingsPage() {
       case 'workspace':
         return <WorkspacePanel />;
       case 'developer':
-        return <DeveloperPanel />;
+        return isPlatformAdmin ? <DeveloperPanel /> : null;
       case 'account':
         return <AccountPanel />;
       default:
@@ -791,7 +875,7 @@ export default function SettingsPage() {
         {/* Mobile: horizontal scrollable chip row */}
         <motion.div variants={rise} className="mb-5 -mx-4 px-4 md:hidden">
           <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
-            {TABS.map(({ id, label, icon: Icon }) => (
+            {tabs.map(({ id, label, icon: Icon }) => (
               <Chip
                 key={id}
                 active={active === id}
@@ -808,7 +892,7 @@ export default function SettingsPage() {
           {/* Desktop: vertical tab list */}
           <motion.nav variants={rise} className="hidden md:block">
             <div className="glass sticky top-6 rounded-3xl p-2 shadow-soft">
-              {TABS.map(({ id, label, icon: Icon }) => {
+              {tabs.map(({ id, label, icon: Icon }) => {
                 const isActive = active === id;
                 return (
                   <button

@@ -1,10 +1,23 @@
 import { create } from 'zustand';
 
 const storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_theme') : null;
+const storedAccent = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_accent') : null;
 
-/** Global UI state: theme, layout panels, active modal & active call. */
+/** Accent presets — keep in sync with the [data-accent] blocks in index.css. */
+export const ACCENTS = [
+  { id: 'indigo', name: 'Indigo', dot: '#6366f1' },
+  { id: 'violet', name: 'Violet', dot: '#8b5cf6' },
+  { id: 'cyan', name: 'Cyan', dot: '#06b6d4' },
+  { id: 'emerald', name: 'Emerald', dot: '#10b981' },
+  { id: 'rose', name: 'Rose', dot: '#f43f5e' },
+  { id: 'amber', name: 'Amber', dot: '#f59e0b' },
+];
+const ACCENT_IDS = ACCENTS.map((a) => a.id);
+
+/** Global UI state: theme, accent, layout panels, active modal & active call. */
 export const useUI = create((set, get) => ({
   theme: storedTheme || 'dark',
+  accent: ACCENT_IDS.includes(storedAccent) ? storedAccent : 'indigo',
   navCollapsed: false,
   chatListOpen: true, // mobile: whether the chat list (vs. conversation) is shown
   rightPanelOpen: false,
@@ -17,6 +30,12 @@ export const useUI = create((set, get) => ({
     set({ theme });
   },
   toggleTheme: () => get().setTheme(get().theme === 'dark' ? 'light' : 'dark'),
+
+  setAccent: (accent) => {
+    if (!ACCENT_IDS.includes(accent)) return;
+    if (typeof localStorage !== 'undefined') localStorage.setItem('cc_accent', accent);
+    set({ accent });
+  },
 
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),

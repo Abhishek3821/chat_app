@@ -5,18 +5,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Brand palette — deep navy, soft purple, electric blue
+        // Brand palette — driven by CSS variables (see index.css) so the
+        // Appearance → Accent color picker recolors the whole app at runtime.
         brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1', // primary
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
+          50: 'rgb(var(--brand-50) / <alpha-value>)',
+          100: 'rgb(var(--brand-100) / <alpha-value>)',
+          200: 'rgb(var(--brand-200) / <alpha-value>)',
+          300: 'rgb(var(--brand-300) / <alpha-value>)',
+          400: 'rgb(var(--brand-400) / <alpha-value>)',
+          500: 'rgb(var(--brand-500) / <alpha-value>)', // primary
+          600: 'rgb(var(--brand-600) / <alpha-value>)',
+          700: 'rgb(var(--brand-700) / <alpha-value>)',
+          800: 'rgb(var(--brand-800) / <alpha-value>)',
+          900: 'rgb(var(--brand-900) / <alpha-value>)',
         },
         violet: {
           500: '#8b5cf6', // secondary
@@ -50,14 +51,14 @@ export default {
       boxShadow: {
         soft: '0 4px 24px -8px rgb(15 23 42 / 0.12)',
         'soft-lg': '0 12px 40px -12px rgb(15 23 42 / 0.25)',
-        glow: '0 0 0 1px rgb(99 102 241 / 0.15), 0 8px 32px -8px rgb(99 102 241 / 0.35)',
-        'glow-cyan': '0 8px 32px -8px rgb(6 182 212 / 0.45)',
+        glow: '0 0 0 1px rgb(var(--brand-500) / 0.15), 0 8px 32px -8px rgb(var(--brand-500) / 0.35)',
+        'glow-cyan': '0 8px 32px -8px rgb(var(--grad-to) / 0.45)',
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%)',
-        'brand-gradient-soft': 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.10) 50%, rgba(6,182,212,0.10) 100%)',
-        'mesh-dark': 'radial-gradient(at 0% 0%, rgba(99,102,241,0.18) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(6,182,212,0.14) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(139,92,246,0.16) 0px, transparent 50%)',
-        'mesh-light': 'radial-gradient(at 0% 0%, rgba(99,102,241,0.10) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(6,182,212,0.08) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(139,92,246,0.08) 0px, transparent 50%)',
+        'brand-gradient': 'linear-gradient(135deg, rgb(var(--grad-from)) 0%, rgb(var(--grad-via)) 50%, rgb(var(--grad-to)) 100%)',
+        'brand-gradient-soft': 'linear-gradient(135deg, rgb(var(--grad-from) / 0.12) 0%, rgb(var(--grad-via) / 0.10) 50%, rgb(var(--grad-to) / 0.10) 100%)',
+        'mesh-dark': 'radial-gradient(at 0% 0%, rgb(var(--grad-from) / 0.18) 0px, transparent 50%), radial-gradient(at 100% 0%, rgb(var(--grad-to) / 0.14) 0px, transparent 50%), radial-gradient(at 100% 100%, rgb(var(--grad-via) / 0.16) 0px, transparent 50%)',
+        'mesh-light': 'radial-gradient(at 0% 0%, rgb(var(--grad-from) / 0.10) 0px, transparent 50%), radial-gradient(at 100% 0%, rgb(var(--grad-to) / 0.08) 0px, transparent 50%), radial-gradient(at 100% 100%, rgb(var(--grad-via) / 0.08) 0px, transparent 50%)',
       },
       keyframes: {
         'fade-in': {
