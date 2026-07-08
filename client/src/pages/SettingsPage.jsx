@@ -427,6 +427,28 @@ function WorkspacePanel() {
     );
   }
 
+  // Personal accounts aren't a team — show a simple explainer, not a roster/invite.
+  if (workspace.type === 'personal') {
+    return (
+      <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+        <Section title="Personal account" description="You're using ChatConnect for personal use.">
+          <div className="mt-2 flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+              <User size={18} />
+            </span>
+            <div className="text-sm text-content">
+              <p>You can chat, call and meet with other <span className="font-semibold">personal</span> users.</p>
+              <p className="mt-1 text-content-muted">
+                Find people by their exact <span className="font-medium">email or username</span> and send a contact request.
+                There’s no public directory, and personal accounts are kept completely separate from company workspaces.
+              </p>
+            </div>
+          </div>
+        </Section>
+      </motion.div>
+    );
+  }
+
   const inviteLink = workspace.inviteLink;
   const copyLink = () => navigator.clipboard?.writeText(inviteLink).then(() => toast.success('Invite link copied'), () => toast.error('Copy failed'));
   const saveName = async () => {

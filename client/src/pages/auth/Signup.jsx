@@ -75,6 +75,7 @@ export default function Signup() {
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', workspaceName: '' });
+  const [accountType, setAccountType] = useState('personal'); // 'personal' | 'workspace'
   const [avatar, setAvatar] = useState(null); // data-URL preview, optional
   const fileRef = useRef(null);
 
@@ -120,8 +121,10 @@ export default function Signup() {
         email: form.email.trim(),
         password: form.password,
         confirmPassword: form.confirmPassword,
-        ...(inviteCode ? { inviteCode } : {}),
-        ...(!inviteCode && form.workspaceName.trim() ? { workspaceName: form.workspaceName.trim() } : {}),
+        ...(inviteCode ? { inviteCode } : { accountType }),
+        ...(!inviteCode && accountType === 'workspace' && form.workspaceName.trim()
+          ? { workspaceName: form.workspaceName.trim() }
+          : {}),
         ...(avatar ? { avatar } : {}),
       });
       if (data?.requiresVerification) {
@@ -174,7 +177,45 @@ export default function Signup() {
           </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-4">
+        {!inviteCode && (
+          <motion.div variants={rise} className="mt-5">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-muted">I'm signing up for</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'personal', label: 'Personal use', desc: 'Chat & call friends and family', icon: Heart },
+                { id: 'workspace', label: 'Workspace / Team', desc: 'For your company or organization', icon: Building2 },
+              ].map((opt) => {
+                const Icon = opt.icon;
+                const active = accountType === opt.id;
+                return (
+                  <button
+                    type="button"
+                    key={opt.id}
+                    onClick={() => setAccountType(opt.id)}
+                    aria-pressed={active}
+                    className={cn(
+                      'ring-brand rounded-2xl border p-3 text-left transition-colors',
+                      active ? 'border-brand-500 bg-brand-500/10' : 'border-border hover:bg-content/5'
+                    )}
+                  >
+                    <span className={cn('inline-grid h-8 w-8 place-items-center rounded-xl', active ? 'bg-brand-gradient text-white' : 'bg-content/5 text-content-muted')}>
+                      <Icon size={16} />
+                    </span>
+                    <p className="mt-1.5 text-sm font-semibold text-content">{opt.label}</p>
+                    <p className="text-[11px] leading-snug text-content-muted">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[11px] text-content-muted">
+              {accountType === 'personal'
+                ? 'You’ll connect with other personal users by their email or username.'
+                : 'You’ll get your own private workspace — only its members can reach each other.'}
+            </p>
+          </motion.div>
+        )}
+
+        <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
           {/* Optional profile photo */}
           <motion.div variants={rise} className="flex items-center gap-4">
             <div className="relative">
@@ -223,9 +264,9 @@ export default function Signup() {
             </Field>
           </motion.div>
 
-          {!inviteCode && (
+          {!inviteCode && accountType === 'workspace' && (
             <motion.div variants={rise}>
-              <Field label="Workspace name" hint="Optional — your team/organization. Leave blank for a personal workspace.">
+              <Field label="Workspace name" hint="Your team or company name — you can rename it later.">
                 <Input
                   icon={Building2}
                   type="text"
