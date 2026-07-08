@@ -4,7 +4,7 @@ import Workspace from '../models/Workspace.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { sendTokenResponse, sessionCookieOptions, generateOTP } from '../utils/token.js';
 import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
-import { createWorkspaceForUser, joinWorkspaceByCode } from '../utils/workspaceService.js';
+import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
@@ -69,8 +69,9 @@ export const signup = asyncHandler(async (req, res) => {
   if (exists) throw new ApiError(409, 'An account with that email already exists.');
 
   // Multi-tenant: an optional invite code makes the user JOIN that workspace;
-  // otherwise they create their own. Validate the code BEFORE creating the
-  // account so a bad code fails cleanly without orphaning a user.
+  // otherwise the account type decides — 'personal' joins the shared Personal
+  // space; 'workspace' (default) creates their own company workspace. Validate
+  // the code BEFORE creating the account so a bad code fails cleanly.
   const inviteCode =
     (typeof req.body.inviteCode === 'string' && req.body.inviteCode.trim()) ||
     (typeof req.body.invite === 'string' && req.body.invite.trim()) ||
@@ -78,6 +79,8 @@ export const signup = asyncHandler(async (req, res) => {
   if (inviteCode && !(await Workspace.exists({ inviteCode }))) {
     throw new ApiError(400, 'That invite code is invalid or has expired.');
   }
+  // An invite always means a workspace join; otherwise honour the chosen type.
+  const accountType = req.body.accountType === 'personal' && !inviteCode ? 'personal' : 'workspace';
 
   const otp = generateOTP();
   const baseDoc = {
@@ -107,8 +110,10 @@ export const signup = asyncHandler(async (req, res) => {
     }
   }
 
-  // Attach the account to a workspace (join by invite, or create a new org).
+  // Attach the account: join by invite, join the shared Personal space, or
+  // create a new company workspace.
   if (inviteCode) await joinWorkspaceByCode(user, inviteCode);
+  else if (accountType === 'personal') await joinPersonalSpace(user);
   else await createWorkspaceForUser(user, req.body.workspaceName);
 
   if (EMAIL_VERIFY_ON) {

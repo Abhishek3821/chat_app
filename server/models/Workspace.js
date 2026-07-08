@@ -15,6 +15,10 @@ const workspaceSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 80 },
     slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    // 'team' = a company/organisation workspace (isolated tenant). 'personal' = the
+    // single shared consumer space that all Personal-account users live in; they can
+    // only reach OTHER personal users, never anyone in a team workspace.
+    type: { type: String, enum: ['team', 'personal'], default: 'team', index: true },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     // Anyone with this code can join the workspace. Rotatable by the owner/admin.
     inviteCode: { type: String, required: true, unique: true, index: true },

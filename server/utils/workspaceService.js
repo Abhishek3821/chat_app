@@ -39,6 +39,38 @@ export async function createWorkspaceForUser(user, name) {
   return ws;
 }
 
+const PERSONAL_SLUG = 'personal-space';
+
+/**
+ * Attach `user` to the single shared "Personal" space — the consumer tenant that
+ * every Personal-account user joins. Because it's one workspace, personal users
+ * can discover/contact each OTHER (subject to the consent + exact-match rules),
+ * but the tenant boundary still keeps them fully separate from every team
+ * workspace ("don't mix them"). Get-or-create is race-safe on the unique slug.
+ */
+export async function joinPersonalSpace(user) {
+  let ws = await Workspace.findOne({ slug: PERSONAL_SLUG });
+  if (!ws) {
+    try {
+      ws = await Workspace.create({
+        name: 'Personal',
+        slug: PERSONAL_SLUG,
+        type: 'personal',
+        owner: user._id, // nominal — the shared space has no real owner/admin
+        inviteCode: await uniqueInviteCode(),
+        plan: 'free',
+      });
+    } catch (err) {
+      if (err?.code === 11000) ws = await Workspace.findOne({ slug: PERSONAL_SLUG });
+      else throw err;
+    }
+  }
+  user.workspace = ws._id;
+  user.workspaceRole = 'member';
+  await user.save({ validateBeforeSave: false });
+  return ws;
+}
+
 /** Attach `user` to the workspace identified by an invite code (as a member). */
 export async function joinWorkspaceByCode(user, code) {
   const ws = await Workspace.findOne({ inviteCode: String(code || '').trim() });

@@ -11,6 +11,7 @@ function publicWorkspace(ws, { includeInvite = false } = {}) {
     _id: ws._id,
     name: ws.name,
     slug: ws.slug,
+    type: ws.type || 'team',
     plan: ws.plan,
     owner: ws.owner,
     createdAt: ws.createdAt,
@@ -27,13 +28,18 @@ function publicWorkspace(ws, { includeInvite = false } = {}) {
 export const getMyWorkspace = asyncHandler(async (req, res) => {
   const ws = await Workspace.findById(req.user.workspace);
   if (!ws) throw new ApiError(404, 'You are not in a workspace yet.');
-  const members = await User.find({ workspace: ws._id }).select(MEMBER_FIELDS).sort({ createdAt: 1 });
+  // The shared Personal space is NOT a team: never expose its (potentially huge)
+  // member roster — that would leak every personal user as a browsable directory.
+  const isPersonal = ws.type === 'personal';
+  const members = isPersonal
+    ? []
+    : await User.find({ workspace: ws._id }).select(MEMBER_FIELDS).sort({ createdAt: 1 });
   res.json({
     success: true,
-    workspace: publicWorkspace(ws, { includeInvite: isManager(req.user) }),
+    workspace: publicWorkspace(ws, { includeInvite: !isPersonal && isManager(req.user) }),
     myRole: req.user.workspaceRole,
     members,
-    memberCount: members.length,
+    memberCount: isPersonal ? undefined : members.length,
   });
 });
 

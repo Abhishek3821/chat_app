@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Workspace from '../models/Workspace.js';
 import ContactRequest from '../models/ContactRequest.js';
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
@@ -18,15 +19,24 @@ export const searchUsers = asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ success: true, users: [] });
 
-  const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  const users = await User.find({
-    _id: { $ne: req.user._id, $nin: req.user.blockedUsers },
-    workspace: req.user.workspace, // tenant isolation: only discover people in my workspace
-    $or: [{ email: rx }, { username: rx }, { name: rx }],
-  })
-    .select(PUBLIC_FIELDS)
-    .limit(20);
+  // In the shared Personal space, everyone is a stranger by default, so we must
+  // NOT expose a browsable directory. Only an EXACT email or username match
+  // returns a hit — you find someone you already know, then send a request.
+  // Team workspaces are a company directory, so partial name/username/email
+  // search is expected there.
+  const ws = await Workspace.findById(req.user.workspace).select('type');
+  const base = { _id: { $ne: req.user._id, $nin: req.user.blockedUsers }, workspace: req.user.workspace };
 
+  let match;
+  if (ws?.type === 'personal') {
+    const term = q.toLowerCase();
+    match = { ...base, $or: [{ email: term }, { username: term }] };
+  } else {
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    match = { ...base, $or: [{ email: rx }, { username: rx }, { name: rx }] };
+  }
+
+  const users = await User.find(match).select(PUBLIC_FIELDS).limit(20);
   res.json({ success: true, users });
 });
 
