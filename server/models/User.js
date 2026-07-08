@@ -73,6 +73,7 @@ const userSchema = new mongoose.Schema(
     privacy: { type: Object, default: privacyDefaults },
     settings: {
       theme: { type: String, enum: ['light', 'dark', 'system'], default: 'dark' },
+      accent: { type: String, enum: ['indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'], default: 'indigo' },
       notifications: {
         messages: { type: Boolean, default: true },
         groups: { type: Boolean, default: true },

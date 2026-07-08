@@ -77,7 +77,9 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
 // Whitelists so a client can't stuff arbitrary keys into these schemaless objects.
 const PRIVACY_KEYS = ['lastSeen', 'profilePhoto', 'about', 'status', 'readReceipts', 'groupAddPermission', 'onlineStatus'];
-const SETTINGS_KEYS = ['theme', 'notifications', 'enterToSend'];
+const SETTINGS_KEYS = ['theme', 'accent', 'notifications', 'enterToSend'];
+const THEME_VALUES = ['light', 'dark', 'system'];
+const ACCENT_VALUES = ['indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'];
 
 // PATCH /api/users/me/privacy
 export const updatePrivacy = asyncHandler(async (req, res) => {
@@ -92,6 +94,12 @@ export const updatePrivacy = asyncHandler(async (req, res) => {
 
 // PATCH /api/users/me/settings
 export const updateSettings = asyncHandler(async (req, res) => {
+  if (req.body.theme !== undefined && !THEME_VALUES.includes(req.body.theme)) {
+    throw new ApiError(400, 'Invalid theme.');
+  }
+  if (req.body.accent !== undefined && !ACCENT_VALUES.includes(req.body.accent)) {
+    throw new ApiError(400, 'Invalid accent color.');
+  }
   const user = await User.findById(req.user._id);
   const current = user.settings.toObject?.() ?? user.settings;
   const next = { ...current };
