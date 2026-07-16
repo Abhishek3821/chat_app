@@ -13,6 +13,8 @@ import {
   enableTwoStep,
   disableTwoStep,
   verifyTwoStep,
+  requestTwoStepReset,
+  resetTwoStepPin,
   refresh,
   listSessions,
   revokeSession,
@@ -44,5 +46,8 @@ router.patch('/change-password', protect, changePassword);
 router.post('/two-step/enable', protect, enableTwoStep);
 router.post('/two-step/disable', protect, disableTwoStep);
 router.post('/two-step/verify', protect, authLimiter, verifyTwoStep);
+// Forgot PIN → reset it with an email OTP (both rate-limited).
+router.post('/two-step/forgot', protect, authLimiter, requestTwoStepReset);
+router.post('/two-step/reset', protect, authLimiter, resetTwoStepPin);
 
 export default router;

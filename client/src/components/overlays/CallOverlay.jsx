@@ -22,6 +22,10 @@ import {
   X,
   Check,
   Search,
+  LayoutGrid,
+  Presentation,
+  RectangleHorizontal,
+  RectangleVertical,
 } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { useUI } from '../../store/useUI';
@@ -64,6 +68,7 @@ function CallSession({ call }) {
     localStream,
     screenStream,
     remoteStreams,
+    remotePresenters,
     status,
     muted,
     camOff,
@@ -91,6 +96,8 @@ function CallSession({ call }) {
   const [isFs, setIsFs] = useState(false);
   const [sinkId, setSinkId] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [gridView, setGridView] = useState(false); // force equal-tile grid layout
+  const [portrait, setPortrait] = useState(false); // tile orientation: landscape | portrait
   const rootRef = useRef(null);
 
   const isVideo = call.type === 'video';
@@ -100,10 +107,19 @@ function CallSession({ call }) {
   const remotes = remoteStreams || [];
   const nRemote = remotes.length;
   const selfPreview = sharingScreen ? screenStream : localStream;
+  const tileAspect = portrait ? 'aspect-[3/4]' : 'aspect-video';
+
+  // Who is presenting a screen right now? (Google-Meet style spotlight.)
+  const presenterId = (remotePresenters && remotePresenters[0]) || (sharingScreen ? 'self' : null);
+  const presenterRemote = presenterId && presenterId !== 'self' ? remotes.find((r) => r.id === presenterId) : null;
+  const presenterStream = presenterId === 'self' ? screenStream : presenterRemote?.stream;
+  const presenterName = presenterId === 'self' ? 'You' : presenterRemote?.user?.name || peer.name || 'Guest';
+  const spotlight = Boolean(isVideo && connected && presenterStream && !gridView);
+
   // Column count for the group video grid (remote tiles + your own tile).
   const gridColsClass =
     nRemote + 1 <= 2
-      ? 'grid-cols-2'
+      ? 'grid-cols-1 sm:grid-cols-2'
       : nRemote + 1 <= 6
       ? 'grid-cols-2 sm:grid-cols-3'
       : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
@@ -136,6 +152,8 @@ function CallSession({ call }) {
     ? 'User is offline'
     : status === 'missed'
     ? 'Missed call'
+    : status === 'busy'
+    ? 'Busy on another call'
     : status === 'error'
     ? 'Call failed'
     : status === 'reconnecting'
@@ -290,6 +308,12 @@ function CallSession({ call }) {
             </button>
           </div>
         )}
+        {!sharingScreen && presenterRemote && !incoming && (
+          <div className="mx-auto mb-2 flex items-center gap-2 rounded-full bg-cyan-500/15 px-4 py-2 text-sm text-cyan-200 ring-1 ring-cyan-500/30">
+            <Presentation size={16} />
+            <span className="font-medium">{presenterName} is presenting</span>
+          </div>
+        )}
 
         {/* Stage */}
         <div className="relative flex flex-1 items-center justify-center px-6 pb-2">
@@ -325,9 +349,37 @@ function CallSession({ call }) {
                 </div>
               </div>
             )
+          ) : spotlight ? (
+            // ── Someone is presenting → spotlight the SCREEN (object-contain so
+            //    nothing is cropped) with a filmstrip of the people below ──
+            <div className="flex h-full w-full max-w-6xl flex-col items-center gap-3">
+              <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-3xl border border-white/10 bg-black">
+                <StreamVideo stream={presenterStream} className="h-full w-full object-contain" />
+                <span className="absolute bottom-2 left-2 rounded-full bg-navy-950/70 px-2.5 py-1 text-xs text-white/90 backdrop-blur">
+                  {presenterName === 'You' ? 'You are presenting' : `${presenterName}’s screen`}
+                </span>
+              </div>
+              <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
+                {/* People strip: every remote camera (except a remote presenter's screen feed) + you */}
+                {remotes.filter((r) => r.id !== presenterId).map((r) => (
+                  <div key={r.id} className="relative h-24 w-36 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-navy-900">
+                    <StreamVideo stream={r.stream} className="h-full w-full object-cover" />
+                    <span className="absolute bottom-1 left-1 rounded-full bg-navy-950/60 px-1.5 py-0.5 text-[10px] text-white/80">{r.user?.name || 'Guest'}</span>
+                  </div>
+                ))}
+                <div className="relative h-24 w-36 shrink-0 overflow-hidden rounded-xl border border-white/20 bg-navy-900">
+                  {camOff || !localStream ? (
+                    <div className="grid h-full place-items-center text-white/60"><VideoOff size={18} /></div>
+                  ) : (
+                    <StreamVideo stream={localStream} mirror className="h-full w-full object-cover" />
+                  )}
+                  <span className="absolute bottom-1 left-1 rounded-full bg-navy-950/60 px-1.5 py-0.5 text-[10px] text-white/80">You</span>
+                </div>
+              </div>
+            </div>
           ) : !isVideo ? (
             // ── Audio, connected ──
-            nRemote === 1 ? (
+            nRemote === 1 && !gridView ? (
               <div className="flex flex-col items-center gap-6">
                 <Avatar src={remotes[0].user?.avatar || peer.avatar} name={remotes[0].user?.name || peer.name} size="2xl" className="scale-[1.6]" />
                 <div className="mt-6 text-center text-white">
@@ -336,41 +388,54 @@ function CallSession({ call }) {
                 </div>
               </div>
             ) : (
-              <div className="grid max-w-3xl grid-cols-2 gap-4 sm:grid-cols-3">
+              // Audio grid — everyone on the call, including you
+              <div className={cn('grid w-full max-w-3xl gap-4', nRemote + 1 <= 4 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3')}>
                 {remotes.map((r) => (
                   <div key={r.id} className="flex flex-col items-center gap-2 rounded-2xl bg-white/5 p-4">
                     <Avatar src={r.user?.avatar} name={r.user?.name} size="xl" />
                     <span className="max-w-[120px] truncate text-sm font-medium text-white/90">{r.user?.name || 'Guest'}</span>
                   </div>
                 ))}
+                <div className="flex flex-col items-center gap-2 rounded-2xl bg-white/5 p-4 ring-1 ring-brand-500/40">
+                  <Avatar name="You" size="xl" />
+                  <span className="max-w-[120px] truncate text-sm font-medium text-white/90">You{muted ? ' · muted' : ''}</span>
+                </div>
               </div>
             )
-          ) : nRemote === 1 ? (
+          ) : nRemote === 1 && !gridView ? (
             // ── Video 1:1 — remote big, local PiP ──
             <>
-              <StreamVideo stream={remotes[0].stream} className="h-full max-h-[72vh] w-full max-w-4xl rounded-3xl border border-white/10 object-cover" />
+              <div className="relative h-full max-h-[72vh] w-full max-w-4xl">
+                <StreamVideo stream={remotes[0].stream} className={cn('h-full w-full rounded-3xl border border-white/10', portrait ? 'object-contain bg-black' : 'object-cover')} />
+                <span className="absolute bottom-3 left-3 rounded-full bg-navy-950/60 px-2.5 py-1 text-xs text-white/85 backdrop-blur">{remotes[0].user?.name || peer.name || 'Guest'}</span>
+              </div>
               <div className="absolute bottom-4 right-4 h-40 w-28 overflow-hidden rounded-2xl border border-white/20 bg-navy-900 shadow-soft-lg sm:h-48 sm:w-36">
                 {camOff && !sharingScreen ? (
                   <div className="grid h-full place-items-center text-white/60"><VideoOff size={20} /></div>
                 ) : (
-                  <StreamVideo stream={selfPreview} mirror={!sharingScreen} className="h-full w-full object-cover" />
+                  <StreamVideo stream={selfPreview} mirror={!sharingScreen} className={cn('h-full w-full', sharingScreen ? 'object-contain bg-black' : 'object-cover')} />
                 )}
               </div>
             </>
           ) : (
-            // ── Video group — grid of remotes + self ──
-            <div className={cn('grid w-full max-w-5xl gap-3', nRemote >= 3 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-2')}>
-              {remotes.map((r) => (
-                <div key={r.id} className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-navy-900">
-                  <StreamVideo stream={r.stream} className="h-full w-full object-cover" />
-                  <span className="absolute bottom-2 left-2 rounded-full bg-navy-950/60 px-2 py-0.5 text-xs text-white/80 backdrop-blur">{r.user?.name || 'Guest'}</span>
-                </div>
-              ))}
-              <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/20 bg-navy-900">
+            // ── Video grid — equal tiles for every participant, including you ──
+            <div className={cn('grid max-h-full w-full max-w-5xl gap-3 overflow-y-auto', gridColsClass)}>
+              {remotes.map((r) => {
+                const presenting = remotePresenters?.includes(r.id);
+                return (
+                  <div key={r.id} className={cn('relative overflow-hidden rounded-2xl border border-white/10 bg-navy-900', tileAspect)}>
+                    <StreamVideo stream={r.stream} className={cn('h-full w-full', presenting ? 'object-contain bg-black' : 'object-cover')} />
+                    <span className="absolute bottom-2 left-2 rounded-full bg-navy-950/60 px-2 py-0.5 text-xs text-white/80 backdrop-blur">
+                      {r.user?.name || 'Guest'}{presenting ? ' · presenting' : ''}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className={cn('relative overflow-hidden rounded-2xl border border-white/20 bg-navy-900', tileAspect)}>
                 {camOff && !sharingScreen ? (
                   <div className="grid h-full place-items-center text-white/60"><VideoOff size={22} /></div>
                 ) : (
-                  <StreamVideo stream={selfPreview} mirror={!sharingScreen} className="h-full w-full object-cover" />
+                  <StreamVideo stream={selfPreview} mirror={!sharingScreen} className={cn('h-full w-full', sharingScreen ? 'object-contain bg-black' : 'object-cover')} />
                 )}
                 <span className="absolute bottom-2 left-2 rounded-full bg-navy-950/60 px-2 py-0.5 text-xs text-white/80 backdrop-blur">You{sharingScreen ? ' · presenting' : ''}</span>
               </div>
@@ -422,6 +487,23 @@ function CallSession({ call }) {
                   onClick={toggleScreenShare}
                   icon={sharingScreen ? MonitorX : MonitorUp}
                   label={sharingScreen ? 'Stop presenting' : 'Present screen'}
+                  className="hidden sm:grid"
+                />
+              )}
+              {connected && (
+                <CtrlBtn
+                  active={!gridView}
+                  onClick={() => setGridView((v) => !v)}
+                  icon={LayoutGrid}
+                  label={gridView ? 'Auto layout' : 'Grid layout'}
+                />
+              )}
+              {isVideo && connected && (
+                <CtrlBtn
+                  active={!portrait}
+                  onClick={() => setPortrait((v) => !v)}
+                  icon={portrait ? RectangleVertical : RectangleHorizontal}
+                  label={portrait ? 'Portrait tiles (tap for landscape)' : 'Landscape tiles (tap for portrait)'}
                   className="hidden sm:grid"
                 />
               )}

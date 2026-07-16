@@ -291,6 +291,23 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.to(`user:${userId}`).emit('call:handled', { callId });
     });
 
+    // Callee is already on another call / in a meeting → tell the caller they're
+    // busy (shown as "busy on another call") and log it as missed for history.
+    onAll(['call:busy'], async ({ to, callId, chatId } = {}) => {
+      await logCall(callId, 'missed');
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:busy'], { from: userId, callId });
+      }
+    });
+
+    // Screen-share presence: lets the other side render a presented screen with
+    // the right fit (contain, spotlight) instead of cropping it like a camera.
+    onAll(['call:screen'], async ({ to, callId, chatId, on } = {}) => {
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:screen'], { from: userId, callId, on: !!on });
+      }
+    });
+
     onAll(['call:offer', 'webrtc-offer'], async ({ to, offer, callId, chatId } = {}) => {
       if (to && (await canSignal(userId, to, chatId))) {
         relay(to, ['call:offer', 'webrtc-offer'], { from: userId, offer, callId, chatId });
@@ -392,6 +409,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.on('meeting:signal', ({ meetingId, to, data } = {}) => {
       if (!to || !meetingId || !socket.rooms.has(meetingRoom(meetingId))) return;
       ioRef.to(to).emit('meeting:signal', { from: socket.id, data });
+    });
+
+    // Screen-share announcements: everyone in the room learns who is presenting
+    // so they can spotlight that stream (Google-Meet style) instead of cropping it.
+    socket.on('meeting:presenting', ({ meetingId, on } = {}) => {
+      if (!meetingId || !socket.rooms.has(meetingRoom(meetingId))) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:presenting', { socketId: socket.id, on: !!on });
     });
 
     // Finalize this socket's attendance for a meeting: add the session's duration,

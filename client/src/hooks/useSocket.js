@@ -14,6 +14,29 @@ function preview(m) {
 }
 
 /**
+ * OS-level desktop notification for an incoming call (like WhatsApp Desktop).
+ * Shows only when the tab isn't focused (the in-app ringing screen covers the
+ * focused case), the user's "Call notifications" setting is on, and the browser
+ * permission has been granted (Settings → Notifications → Enable).
+ */
+function notifyIncomingCallDesktop(caller, type) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const settings = useAuth.getState().user?.settings;
+    if (settings?.notifications?.calls === false) return;
+    if (document.visibilityState === 'visible' && document.hasFocus()) return;
+    const n = new Notification(`Incoming ${type === 'video' ? 'video' : 'voice'} call`, {
+      body: `${caller?.name || 'Someone'} is calling you on ChatConnect`,
+      icon: caller?.avatar || '/logo.svg',
+      tag: 'cc-incoming-call', // one call notification at a time
+      requireInteraction: true,
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 35000); // matches the ring timeout
+  } catch { /* notifications are best-effort */ }
+}
+
+/**
  * Resolve the Socket.IO server URL.
  * - Explicit VITE_SOCKET_URL wins.
  * - An absolute VITE_API_URL (prod) → use its origin.
@@ -144,10 +167,23 @@ export function useSocket() {
     // (The SDP offer arrives later, only after we accept — see useWebRTC.)
     socket.on('call:incoming', ({ from, callId, type, caller, chatId, isGroup }) => {
       const ui = useUI.getState();
-      if (ui.call) {
-        socket.emit('call:reject', { to: from, callId, chatId }); // busy on another call
+      if (String(from) === String(userId)) return; // never ring for my own call
+      if (ui.call || ui.inMeeting) {
+        // Busy on another call / in a meeting → tell the caller (they see
+        // "busy on another call") and surface a side notification here.
+        socket.emit('call:busy', { to: from, callId, chatId });
+        const who = caller || { _id: from };
+        ui.showBusyIncoming({ caller: who, type: type || 'audio', at: Date.now() });
+        useNotifications.getState().pushLocal({
+          type: 'missed_call',
+          title: `Missed ${type === 'video' ? 'video ' : ''}call`,
+          body: `${who?.name || 'Someone'} called while you were on another call`,
+          from: who,
+        });
         return;
       }
+      // OS-level notification so an unfocused/backgrounded desktop still rings.
+      notifyIncomingCallDesktop(caller, type);
       // Group call: attach the group chat (for the roster + header) so useWebRTC
       // can mesh-connect to everyone, not just the caller.
       const group = isGroup && chatId ? useChat.getState().chats.find((c) => c._id === chatId) || { _id: chatId, isGroup: true } : null;

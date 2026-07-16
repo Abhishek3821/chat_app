@@ -481,3 +481,69 @@ export const verifyTwoStep = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, verified: true });
 });
+
+// POST /api/auth/two-step/forgot — email an OTP that lets the user reset a
+// forgotten app-lock / chat-lock PIN. The requester is already authenticated
+// (the lock screen sits BEHIND login), so the OTP simply proves email ownership.
+export const requestTwoStepReset = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select('+twoStepResetOtp +twoStepResetExpires');
+  if (!user.twoStepEnabled) throw new ApiError(400, 'Two-step verification is not enabled.');
+
+  const otp = generateOTP();
+  user.twoStepResetOtp = otp;
+  user.twoStepResetExpires = new Date(Date.now() + 10 * 60 * 1000);
+  user.twoStepResetAttempts = 0;
+  await user.save({ validateBeforeSave: false });
+
+  const emailConfigured = isEmailConfigured();
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: 'Reset your ChatConnect PIN',
+      html: otpEmailTemplate(user.name, otp),
+      text: `Your ChatConnect PIN reset code is ${otp}. It expires in 10 minutes.`,
+    });
+  } catch (err) {
+    console.error('❌ PIN-reset email failed:', err.message);
+    securityEvent('twostep.reset.email.failed', req, { userId: String(user._id) });
+  }
+  securityEvent('twostep.reset.requested', req, { userId: String(user._id) });
+  res.json({
+    success: true,
+    message: `We sent a verification code to ${user.email}.`,
+    email: user.email,
+    // Dev convenience only: surface the OTP when SMTP isn't set up.
+    ...(!emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
+  });
+});
+
+// POST /api/auth/two-step/reset  { otp, pin } — verify the emailed OTP and set a
+// new PIN. Locked chats stay locked; they open with the NEW PIN afterwards.
+export const resetTwoStepPin = asyncHandler(async (req, res) => {
+  const pin = String(req.body.pin || '');
+  if (!/^\d{4,8}$/.test(pin)) throw new ApiError(400, 'Your new PIN must be 4 to 8 digits.');
+  const user = await User.findById(req.user._id).select('+twoStepPin +twoStepResetOtp +twoStepResetExpires +twoStepResetAttempts');
+  if (!user.twoStepEnabled) throw new ApiError(400, 'Two-step verification is not enabled.');
+  if (!user.twoStepResetOtp) throw new ApiError(400, 'Request a reset code first.');
+
+  // Same brute-force cap as signup OTPs: 5 wrong guesses kills the code.
+  if ((user.twoStepResetAttempts || 0) >= 5) {
+    securityEvent('twostep.reset.locked', req, { userId: String(user._id) });
+    throw new ApiError(429, 'Too many incorrect attempts. Request a new code.');
+  }
+  if (String(user.twoStepResetOtp) !== String(req.body.otp || '')) {
+    user.twoStepResetAttempts = (user.twoStepResetAttempts || 0) + 1;
+    await user.save({ validateBeforeSave: false });
+    securityEvent('twostep.reset.failure', req, { userId: String(user._id) });
+    throw new ApiError(400, 'Invalid verification code.');
+  }
+  if (user.twoStepResetExpires < Date.now()) throw new ApiError(400, 'Verification code has expired. Request a new one.');
+
+  user.twoStepPin = await bcrypt.hash(pin, 10);
+  user.twoStepResetOtp = undefined;
+  user.twoStepResetExpires = undefined;
+  user.twoStepResetAttempts = 0;
+  await user.save({ validateBeforeSave: false });
+  securityEvent('twostep.reset.success', req, { userId: String(user._id) });
+  res.json({ success: true, message: 'Your PIN has been reset.' });
+});

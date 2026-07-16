@@ -6,6 +6,7 @@ import { useUI } from './store/useUI';
 import { useAuth } from './store/useAuth';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import LockScreen from './components/LockScreen.jsx';
+import BusyCallBanner from './components/overlays/BusyCallBanner.jsx';
 
 // Eager: the two first-paint entry points (logged-out landing + logged-in home)
 // and the app shell. Everything else is code-split so the initial bundle stays
@@ -170,6 +171,9 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+
+      {/* Someone called while we were on another call / in a meeting. */}
+      <BusyCallBanner />
 
       <Toaster
         position="top-center"

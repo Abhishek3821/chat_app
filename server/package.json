@@ -10,7 +10,8 @@
     "dev": "nodemon server.js",
     "seed": "node utils/seed.js",
     "test:e2e": "node tests/e2e.mjs",
-    "build": "node --check server.js && echo Backend is plain Node.js - nothing to compile."
+    "build": "node --check server.js && echo Backend is plain Node.js - nothing to compile.",
+    "test:features": "node tests/new-features.mjs"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",

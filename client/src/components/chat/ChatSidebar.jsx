@@ -11,6 +11,7 @@ import { useUI } from '../../store/useUI';
 import { useAuth } from '../../store/useAuth';
 import { getChatDisplay, lastMessagePreview } from '../../lib/chat';
 import { formatChatTime, cn } from '../../lib/utils';
+import PinResetForm from '../PinResetForm';
 
 const FILTERS = ['All', 'Unread', 'Groups', 'Archived', 'Locked'];
 
@@ -166,12 +167,14 @@ export default function ChatSidebar() {
  *  back into the main list. */
 function LockedSection() {
   const currentUser = useAuth((s) => s.user);
+  const twoStepEnabled = useAuth((s) => Boolean(s.user?.twoStepEnabled));
   const lockedChats = useChat((s) => s.lockedChats);
   const revealLockedChats = useChat((s) => s.revealLockedChats);
   const unlockChat = useChat((s) => s.unlockChat);
   const [pin, setPin] = useState('');
   const [revealed, setRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -187,6 +190,30 @@ function LockedSection() {
       setBusy(false);
     }
   };
+
+  // Chat lock rides on the two-step PIN — point people to Settings until it's set.
+  if (!twoStepEnabled) {
+    return (
+      <div className="mt-6 px-6 text-center">
+        <span className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500"><Lock size={24} /></span>
+        <p className="text-sm font-semibold text-content">Locked chats</p>
+        <p className="mt-1 text-xs text-content-muted">
+          Set up a two-step PIN in Settings → Privacy first — then you can hide any chat behind it.
+        </p>
+      </div>
+    );
+  }
+
+  if (forgot) {
+    return (
+      <div className="mt-6 px-6">
+        <PinResetForm
+          onDone={() => { setForgot(false); setPin(''); toast('Enter your new PIN to reveal locked chats.', { icon: '🔐' }); }}
+          onCancel={() => setForgot(false)}
+        />
+      </div>
+    );
+  }
 
   if (!revealed) {
     return (
@@ -205,6 +232,9 @@ function LockedSection() {
         />
         <button type="submit" disabled={busy || pin.length < 4} className="mt-3 w-full rounded-xl bg-brand-gradient py-2.5 text-sm font-semibold text-white disabled:opacity-50">
           {busy ? 'Checking…' : 'Reveal'}
+        </button>
+        <button type="button" onClick={() => setForgot(true)} className="mt-3 text-xs font-medium text-brand-500 hover:underline">
+          Forgot PIN?
         </button>
       </form>
     );

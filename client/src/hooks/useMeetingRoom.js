@@ -23,7 +23,9 @@ const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : nul
 
 export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, autoRecord = false, isHost = false } = {}) {
   const [localStream, setLocalStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null); // your own shared screen (self-preview)
   const [remotes, setRemotes] = useState([]); // [{ socketId, stream, user }]
+  const [presenterSid, setPresenterSid] = useState(null); // socketId of whoever is presenting (or 'me')
   const [status, setStatus] = useState('connecting'); // connecting | connected | waiting | error | left
   const [muted, setMuted] = useState(muteOnEntry && !isHost); // host-controlled mute-on-entry
   const [camOff, setCamOff] = useState(false);
@@ -60,6 +62,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     if (pc) { try { pc.close(); } catch { /* noop */ } peersRef.current.delete(socketId); }
     candBufRef.current.delete(socketId);
     setRemotes((prev) => prev.filter((r) => r.socketId !== socketId));
+    setPresenterSid((prev) => (prev === socketId ? null : prev)); // presenter left → back to grid
   }, []);
 
   const createPeer = useCallback((socketId) => {
@@ -130,8 +133,14 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     const onPeerJoined = ({ socketId, userId, name, avatar }) => {
       usersRef.current.set(socketId, { userId, name, avatar });
       // The newcomer offers to US — just record them and wait for their offer.
+      // Already presenting? Re-announce so the newcomer spotlights our screen too.
+      if (screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: true });
     };
     const onPeerLeft = ({ socketId }) => closePeer(socketId);
+    // Someone started/stopped sharing their screen → spotlight / release it.
+    const onPresenting = ({ socketId, on }) => {
+      setPresenterSid((prev) => (on ? socketId : prev === socketId ? null : prev));
+    };
 
     (async () => {
       try {
@@ -151,6 +160,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:signal', onSignal);
       socket.on('meeting:peer-joined', onPeerJoined);
       socket.on('meeting:peer-left', onPeerLeft);
+      socket.on('meeting:presenting', onPresenting);
 
       let waitTimer = null;
       const join = () => socket.emit('meeting:join', { meetingId }, (res) => {
@@ -184,6 +194,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:signal', onSignal);
       socket.off('meeting:peer-joined', onPeerJoined);
       socket.off('meeting:peer-left', onPeerLeft);
+      socket.off('meeting:presenting', onPresenting);
+      if (screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: false });
       socket.emit('meeting:leave', { meetingId });
       peersRef.current.forEach((pc) => { try { pc.close(); } catch { /* noop */ } });
       peersRef.current.clear();
@@ -281,8 +293,11 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     peersRef.current.forEach((pc) => { const sender = pc.getSenders().find((s) => s.track?.kind === 'video'); if (sender) sender.replaceTrack(cam).catch(() => {}); });
     try { screenTrackRef.current?.stop(); } catch { /* noop */ }
     screenTrackRef.current = null;
+    setScreenStream(null);
     setSharingScreen(false);
-  }, []);
+    setPresenterSid((prev) => (prev === 'me' ? null : prev));
+    getSocket()?.emit('meeting:presenting', { meetingId, on: false });
+  }, [meetingId]);
 
   const toggleScreenShare = useCallback(async () => {
     if (!video) return;
@@ -293,10 +308,13 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       if (!track) return;
       screenTrackRef.current = track;
       peersRef.current.forEach((pc) => { const sender = pc.getSenders().find((s) => s.track?.kind === 'video'); if (sender) sender.replaceTrack(track).catch(() => {}); });
+      setScreenStream(display); // show YOUR OWN screen in the room (like Google Meet)
       setSharingScreen(true);
+      setPresenterSid('me');
+      getSocket()?.emit('meeting:presenting', { meetingId, on: true });
       track.onended = () => stopShare();
     } catch (err) { if (err?.name !== 'NotAllowedError') toast.error('Could not start screen share.'); }
-  }, [video, sharingScreen, stopShare]);
+  }, [video, sharingScreen, stopShare, meetingId]);
 
   const leave = useCallback(() => {
     if (closedRef.current) return;
@@ -304,5 +322,5 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     setStatus('left');
   }, []);
 
-  return { localStream, remotes, status, muted, camOff, sharingScreen, recording, mediaError, toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave };
+  return { localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError, toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave };
 }

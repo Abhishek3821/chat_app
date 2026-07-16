@@ -173,6 +173,17 @@ export const useAuth = create((set, get) => ({
     await api.post('/auth/two-step/verify', { pin });
     sessionStorage.setItem('cc_unlocked', '1');
   },
+  /** Forgot PIN → email an OTP to the account address. */
+  requestTwoStepReset: async () => {
+    const { data } = await api.post('/auth/two-step/forgot');
+    return data; // { message, email, devOtp? }
+  },
+  /** Verify the emailed OTP and set a new PIN. Unlocks this session. */
+  resetTwoStepPin: async ({ otp, pin }) => {
+    const { data } = await api.post('/auth/two-step/reset', { otp, pin });
+    sessionStorage.setItem('cc_unlocked', '1'); // email ownership proven — unlock
+    return data;
+  },
 
   // ── Active sessions / devices (secure session handling) ──
   listSessions: async () => {

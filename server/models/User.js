@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema(
     // device. Stored bcrypt-hashed; never returned to the client.
     twoStepEnabled: { type: Boolean, default: false },
     twoStepPin: { type: String, select: false },
+    // Forgot-PIN recovery: a short-lived email OTP that allows resetting the PIN.
+    twoStepResetOtp: { type: String, select: false },
+    twoStepResetExpires: { type: Date, select: false },
+    twoStepResetAttempts: { type: Number, default: 0, select: false },
 
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
@@ -115,6 +119,9 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
   delete obj.twoStepPin;
+  delete obj.twoStepResetOtp;
+  delete obj.twoStepResetExpires;
+  delete obj.twoStepResetAttempts;
   return obj;
 };
 

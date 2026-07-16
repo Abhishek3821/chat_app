@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import toast from 'react-hot-toast';
+// Circular with useAuth (it imports useUI) — safe: only dereferenced inside actions.
+import { useAuth } from './useAuth';
 
 const storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_theme') : null;
 const storedAccent = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_accent') : null;
@@ -55,8 +58,30 @@ export const useUI = create((set, get) => ({
   openModal: (activeModal, modalData = null) => set({ activeModal, modalData }),
   closeModal: () => set({ activeModal: null, modalData: null }),
 
-  startCall: (call) => set({ call: { minimized: false, ...call } }),
+  startCall: (call) => {
+    // You can't call yourself: block an outgoing 1:1 call whose target is the
+    // signed-in user (the server rejects it too — this keeps the UI honest).
+    if (call?.direction === 'outgoing' && !call?.group) {
+      const meId = useAuth.getState()?.user?._id;
+      if (meId && call?.peer?._id && String(call.peer._id) === String(meId)) {
+        toast.error("You can't call yourself.");
+        return;
+      }
+    }
+    set({ call: { minimized: false, ...call } });
+  },
   endCall: () => set({ call: null }),
+
+  // True while the user is inside a meeting room — incoming calls are then
+  // answered with "busy" and surfaced as a side notification instead of ringing.
+  inMeeting: false,
+  setInMeeting: (inMeeting) => set({ inMeeting }),
+
+  // Someone called while we were busy (in a call or meeting). Rendered by
+  // BusyCallBanner as a dismissible side notification.
+  busyIncoming: null, // { caller, type, at }
+  showBusyIncoming: (busyIncoming) => set({ busyIncoming }),
+  dismissBusyIncoming: () => set({ busyIncoming: null }),
   // Minimize keeps the call ALIVE (media + peer connection) — the overlay just
   // collapses to a floating pill so the user can browse/chat during the call.
   minimizeCall: () => set((s) => (s.call ? { call: { ...s.call, minimized: true } } : {})),

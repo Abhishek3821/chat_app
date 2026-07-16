@@ -61,8 +61,9 @@ export function useWebRTC(call) {
   const [localStream, setLocalStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState([]); // [{ id, stream, user }]
+  const [remotePresenters, setRemotePresenters] = useState([]); // remote ids currently screen-sharing
   // incoming | calling | connecting | connected | demo | declined | noanswer |
-  // unavailable | missed | ended | error
+  // unavailable | missed | busy | ended | error
   const [status, setStatus] = useState(call?.direction === 'incoming' ? 'incoming' : 'calling');
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
@@ -173,6 +174,7 @@ export function useWebRTC(call) {
         clearTimeout(lt);
         legTimersRef.current.delete(key);
       }
+      setRemotePresenters((prev) => prev.filter((id) => id !== key));
       dropRemote(key);
     },
     [dropRemote]
@@ -296,6 +298,9 @@ export function useWebRTC(call) {
           timersRef.current = [];
           restartRef.current.delete(key); // recovered — reset the restart budget
           if (!connectedAtRef.current) connectedAtRef.current = Date.now();
+          // Already presenting when this leg connected → tell the new peer, so
+          // they render the screen with the right fit (contain, spotlight).
+          if (screenTrackRef.current) emitSig('call:screen', { to: key, on: true });
           setStatus('connected');
         } else if (st === 'disconnected') {
           // Transient blip — surface "reconnecting" (primary leg only) and let ICE
@@ -543,9 +548,10 @@ export function useWebRTC(call) {
   // ── Screen share (video calls): swap the outgoing video track on every leg ──
   const stopShare = useCallback(() => {
     const cam = cameraTrackRef.current || null;
-    peersRef.current.forEach((pc) => {
+    peersRef.current.forEach((pc, id) => {
       const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
       if (sender) sender.replaceTrack(cam).catch(() => {});
+      emitSig('call:screen', { to: id, on: false });
     });
     try {
       screenTrackRef.current?.stop();
@@ -555,7 +561,7 @@ export function useWebRTC(call) {
     screenTrackRef.current = null;
     setScreenStream(null);
     setSharingScreen(false);
-  }, []);
+  }, [emitSig]);
 
   const toggleScreenShare = useCallback(async () => {
     if (!wantVideo) return;
@@ -568,9 +574,10 @@ export function useWebRTC(call) {
       const track = display.getVideoTracks()[0];
       if (!track) return;
       screenTrackRef.current = track;
-      peersRef.current.forEach((pc) => {
+      peersRef.current.forEach((pc, id) => {
         const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
         if (sender) sender.replaceTrack(track).catch(() => {});
+        emitSig('call:screen', { to: id, on: true });
       });
       setScreenStream(display);
       setSharingScreen(true);
@@ -578,7 +585,7 @@ export function useWebRTC(call) {
     } catch (err) {
       if (err?.name !== 'NotAllowedError') toast.error('Could not start screen share.');
     }
-  }, [wantVideo, sharingScreen, stopShare]);
+  }, [wantVideo, sharingScreen, stopShare, emitSig]);
 
   // ── Signaling listeners ──
   useEffect(() => {
@@ -728,6 +735,26 @@ export function useWebRTC(call) {
       if (mine(cid) && statusRef.current === 'incoming') teardown('ended');
     };
 
+    // The person we're ringing is on another call / in a meeting.
+    const onBusy = ({ from, callId: cid }) => {
+      if (!mine(cid) || connectedAtRef.current) return;
+      const remote = String(from || peerId);
+      if (isPrimary(remote)) {
+        toast(`${nameFor(remote)} is busy on another call.`, { icon: '⏳' });
+        teardown('busy', { linger: 2000 });
+      } else {
+        toast(`${nameFor(remote)} is busy on another call.`, { icon: '⏳' });
+        closePeer(remote);
+      }
+    };
+
+    // A remote party started/stopped presenting their screen.
+    const onScreen = ({ from, callId: cid, on }) => {
+      if (!mine(cid)) return;
+      const remote = String(from || peerId);
+      setRemotePresenters((prev) => (on ? [...prev.filter((id) => id !== remote), remote] : prev.filter((id) => id !== remote)));
+    };
+
     s.on('call:accepted', onAccepted);
     s.on('call:offer', onOffer);
     s.on('call:answer', onAnswer);
@@ -737,6 +764,8 @@ export function useWebRTC(call) {
     s.on('call:unavailable', onUnavailable);
     s.on('call:ended', onEnded);
     s.on('call:handled', onHandled);
+    s.on('call:busy', onBusy);
+    s.on('call:screen', onScreen);
     return () => {
       s.off('call:accepted', onAccepted);
       s.off('call:offer', onOffer);
@@ -747,6 +776,8 @@ export function useWebRTC(call) {
       s.off('call:unavailable', onUnavailable);
       s.off('call:ended', onEnded);
       s.off('call:handled', onHandled);
+      s.off('call:busy', onBusy);
+      s.off('call:screen', onScreen);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createPeer, flushCandidates, closePeer, teardown, peerId, emitSig, isGroupCall, myId]);
@@ -797,6 +828,7 @@ export function useWebRTC(call) {
     localStream,
     screenStream,
     remoteStreams,
+    remotePresenters,
     status,
     muted,
     camOff,

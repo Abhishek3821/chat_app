@@ -77,12 +77,18 @@ export default {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-8px)' },
         },
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%, 60%': { transform: 'translateX(-6px)' },
+          '40%, 80%': { transform: 'translateX(6px)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
         'pulse-ring': 'pulse-ring 1.8s cubic-bezier(0.4,0,0.6,1) infinite',
         shimmer: 'shimmer 1.6s infinite',
         float: 'float 6s ease-in-out infinite',
+        shake: 'shake 0.4s ease-in-out',
       },
     },
   },

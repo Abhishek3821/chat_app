@@ -22,23 +22,34 @@ services:
         sync: false # set in dashboard (MongoDB Atlas SRV string incl. /chatconnect)
       - key: CLIENT_URL
         sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
-      # Email verification is OFF until an SMTP provider is configured — otherwise
-      # new users could never receive their code. TO ENABLE (recommended before a
-      # real launch): set this to "true" AND set EMAIL_HOST/USER/PASS below in the
-      # dashboard. The mail pipeline is already built and verified.
+      # Email verification is ON: signup issues an OTP that must be verified
+      # before the account can log in. Requires the SMTP vars below to be set in
+      # the dashboard (the pipeline is built and verified). PIN reset ("forgot
+      # chat-lock PIN") uses the same mailer.
       - key: ENABLE_EMAIL_VERIFICATION
-        value: "false"
-      # SMTP (uncomment/set in the dashboard when you turn verification on):
-      # - key: EMAIL_HOST      # e.g. smtp-relay.brevo.com / smtp.gmail.com / smtp.sendgrid.net
-      #   sync: false
-      # - key: EMAIL_PORT
-      #   value: "587"
-      # - key: EMAIL_USER
-      #   sync: false
-      # - key: EMAIL_PASS
-      #   sync: false
-      # - key: EMAIL_FROM
-      #   value: ChatConnect <no-reply@chatconnect.app>
+        value: "true"
+      # SMTP — set these in the dashboard (e.g. smtpout.secureserver.net / Brevo / SendGrid):
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        value: ChatConnect
+      # Google sign-in: OAuth 2.0 Web Client ID from Google Cloud Console.
+      # The SAME value must be built into the frontend as VITE_GOOGLE_CLIENT_ID.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      # Web Push (VAPID) — notifications when the app is closed.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:support@chatconnect.app
       # Optional: comma-separated additional allowed origins
       # - key: EXTRA_CORS_ORIGINS
       #   value: https://staging.yourdomain.com
