@@ -61,8 +61,8 @@ function SplashScreen() {
 }
 
 export default function App() {
-  const theme = useUI((s) => s.theme);
-  const accent = useUI((s) => s.accent);
+  const  theme = useUI((s) => s.theme);
+  const  accent = useUI((s) => s.accent);
   const init = useAuth((s) => s.init);
   const userSettings = useAuth((s) => s.user?.settings);
   const location = useLocation();
