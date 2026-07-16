@@ -21,7 +21,7 @@ const businessProfileSchema = new mongoose.Schema(
     address: { type: String, default: '' },
     website: { type: String, default: '' },
     email: { type: String, default: '' },
-    verified: { type: Boolean, default: false }, // platform-admin-granted badge
+    verified: { type: Boolean, default: false  }, // platform-admin-granted badge
   },
   { _id: false }
 );
