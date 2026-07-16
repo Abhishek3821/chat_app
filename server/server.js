@@ -2,6 +2,7 @@ import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
@@ -13,30 +14,29 @@ import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { mongoSanitize } from './middleware/sanitize.js';
+import { csrfGuard, isAllowedOrigin } from './middleware/csrf.js';
 import { serveUpload } from './controllers/mediaController.js';
 import { verifyEmailTransport } from './utils/sendEmail.js';
 import { initSocket } from './socket/index.js';
+import { getAdapterPair, redisEnabled } from './utils/redis.js';
+import { initQueue } from './utils/queue.js';
+import { registerFanoutJobs } from './utils/jobs.js';
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5290';
-const EXTRA_ORIGINS = (process.env.EXTRA_CORS_ORIGINS || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
 
 /**
- * CORS origin check shared by Express + Socket.IO.
- * - Always allows the configured CLIENT_URL and any EXTRA_CORS_ORIGINS.
- * - In development, also allows any localhost / 127.0.0.1 / LAN-IP origin on
- *   any port, so the dev client works no matter which port it lands on and a
- *   friend on the same Wi-Fi can connect via your machine's LAN IP.
+ * CORS origin check shared by Express + Socket.IO — delegates to the same
+ * allowlist the CSRF guard uses (middleware/csrf.js), so the two never drift.
+ * Allows CLIENT_URL + EXTRA_CORS_ORIGINS always, and any localhost/LAN origin
+ * in development.
  */
 function corsOrigin(origin, cb) {
-  if (!origin) return cb(null, true); // curl / server-to-server / same-origin
-  if ([CLIENT_URL, ...EXTRA_ORIGINS].includes(origin)) return cb(null, true);
-  const isLocalOrLan = /^https?:\/\/(localhost|127\.0\.0\.1|(?:\d{1,3}\.){3}\d{1,3})(:\d+)?$/.test(origin);
-  if (process.env.NODE_ENV !== 'production' && isLocalOrLan) return cb(null, true);
-  return cb(new Error(`CORS: origin ${origin} is not allowed`));
+  // Don't THROW on a disallowed origin — that returns a 500 and makes CSRF
+  // defense an implicit side-effect of CORS. Instead just decline CORS headers
+  // (the browser then can't read the response); csrfGuard is the explicit gate
+  // that blocks cross-site state-changing requests with a clean 403.
+  return cb(null, isAllowedOrigin(origin));
 }
 
 /**
@@ -75,6 +75,9 @@ const server = http.createServer(app);
 
 // ── Security & parsing middleware ───────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Gzip responses (JSON chat/message payloads compress ~5–8×, cutting transfer
+// time on every API call). The filter auto-skips already-compressed media.
+app.use(compression());
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
@@ -88,7 +91,8 @@ if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 app.get('/uploads/:filename', serveUpload);
 
 // ── API ─────────────────────────────────────────────────────────
-app.use('/api', apiLimiter, apiRoutes);
+// csrfGuard rejects cross-site cookie-borne mutations (Origin verification).
+app.use('/api', apiLimiter, csrfGuard, apiRoutes);
 app.get('/', (req, res) => res.json({ success: true, message: 'ChatConnect API is running 🚀' }));
 
 // ── Error handling ──────────────────────────────────────────────
@@ -99,13 +103,29 @@ app.use(errorHandler);
 const io = new SocketServer(server, {
   cors: { origin: corsOrigin, credentials: true },
 });
-initSocket(io);
+// Attach the Redis adapter when REDIS_URL is set, so message/presence fan-out
+// works across a load-balanced fleet of instances. Without it, Socket.IO runs
+// single-instance exactly as before.
+let hasAdapter = false;
+const adapterPair = getAdapterPair();
+if (adapterPair) {
+  const { createAdapter } = await import('@socket.io/redis-adapter');
+  io.adapter(createAdapter(adapterPair.pub, adapterPair.sub));
+  hasAdapter = true;
+  console.log('✅ Socket.IO Redis adapter attached (horizontal scaling enabled).');
+}
+initSocket(io, { hasAdapter });
 app.set('io', io);
 
 // ── Boot ────────────────────────────────────────────────────────
 async function start() {
   validateEnv();
   await connectDB();
+
+  // Background jobs (notification fan-out, push delivery). Runs on a BullMQ
+  // worker when REDIS_URL is set, else inline in this process.
+  registerFanoutJobs();
+  await initQueue();
 
   // Multi-tenancy: attach any pre-existing users/chats to a default workspace
   // (idempotent — only touches docs created before workspaces existed).

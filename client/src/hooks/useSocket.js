@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
-import { DEMO_MODE } from '../lib/api';
+import { DEMO_MODE, refreshAccessToken } from '../lib/api';
 import { useAuth } from '../store/useAuth';
 import { useChat } from '../store/useChat';
 import { useUI } from '../store/useUI';
@@ -10,7 +10,7 @@ import { useNotifications } from '../store/useNotifications';
 /** Short preview of a message for notifications. */
 function preview(m) {
   if (m?.content) return m.content;
-  return { image: '📷 Photo', video: '🎬 Video', voice: '🎤 Voice message', audio: '🎤 Audio', document: '📎 Document', location: '📍 Location' }[m?.type] || 'New message';
+  return { image: '📷 Photo', video: '🎬 Video', voice: '🎤 Voice message', audio: '🎤 Audio', document: '📎 Document', location: '📍 Location', poll: '📊 Poll' }[m?.type] || 'New message';
 }
 
 /**
@@ -45,15 +45,27 @@ export function useSocket() {
   useEffect(() => {
     if (DEMO_MODE || !userId) return undefined;
 
-    const token = localStorage.getItem('cc_token');
-    const url = import.meta.env.VITE_SOCKET_URL || undefined; // same-origin via proxy
+    const url = resolveSocketUrl();
     const socket = io(url, {
-      auth: { token },
+      // Dynamic auth: read the LATEST access token on every (re)connect, so after
+      // a token refresh the socket re-authenticates without being recreated.
+      auth: (cb) => cb({ token: localStorage.getItem('cc_token') }),
       withCredentials: true,
       transports: ['websocket', 'polling'], // prefer native WebSocket, poll only as fallback
     });
     socketRef.current = socket;
     window.__ccSocket = socket;
+
+    // If the handshake fails because the access token expired, refresh once and
+    // reconnect with the fresh token. The flag prevents a refresh loop.
+    let refreshedForAuth = false;
+    socket.on('connect', () => { refreshedForAuth = false; });
+    socket.on('connect_error', async () => {
+      if (refreshedForAuth) return;
+      refreshedForAuth = true;
+      const t = await refreshAccessToken();
+      if (t) socket.connect();
+    });
 
     const { appendMessage, setTyping } = useChat.getState();
 
@@ -81,7 +93,20 @@ export function useSocket() {
     });
     socket.on('typing-start', ({ chatId, userId }) => setTyping(chatId, userId, true));
     socket.on('typing-stop', ({ chatId, userId }) => setTyping(chatId, userId, false));
-    socket.on('chat-updated', () => useChat.getState().loadChats());
+    // `chat-updated` fires for every inbound message, but `receive-message`
+    // already patched lastMessage/unread locally — the refetch only reconciles
+    // ordering / brand-new chats. Debounce it so a burst of messages triggers at
+    // most one GET /chats instead of one per message.
+    let chatsRefetchTimer = null;
+    socket.on('chat-updated', () => {
+      clearTimeout(chatsRefetchTimer);
+      chatsRefetchTimer = setTimeout(() => useChat.getState().loadChats(), 800);
+    });
+    socket.on('chat-disappearing', ({ chatId, seconds }) => useChat.getState().applyDisappearing(chatId, seconds));
+
+    // Live location: apply streamed coordinate updates + end-of-share.
+    socket.on('live-location', ({ chatId, messageId, lat, lng }) => useChat.getState().applyLiveLocation(chatId, messageId, lat, lng));
+    socket.on('live-location-stopped', ({ chatId, message }) => { if (message) useChat.getState().applyEditedMessage(chatId, message); });
 
     // ── Contact + status notifications (bell + toast) ─────────────
     socket.on('contact-request', ({ from }) => {
@@ -105,6 +130,8 @@ export function useSocket() {
 
     // Live edit / delete / reaction sync (WhatsApp-style).
     socket.on('message-edited', ({ chatId, message }) => useChat.getState().applyEditedMessage(chatId, message));
+    // Poll votes (and other in-place message changes) broadcast as message-updated.
+    socket.on('message-updated', ({ chatId, message }) => useChat.getState().applyEditedMessage(chatId, message));
     socket.on('message-deleted', ({ chatId, messageId, scope }) => useChat.getState().applyDeletedMessage(chatId, messageId, scope || 'everyone'));
     socket.on('message-reaction', ({ chatId, messageId, reactions }) => useChat.getState().applyReaction(chatId, messageId, reactions));
 
@@ -115,16 +142,20 @@ export function useSocket() {
 
     // Incoming WebRTC call → pop the call screen in "incoming" mode.
     // (The SDP offer arrives later, only after we accept — see useWebRTC.)
-    socket.on('call:incoming', ({ from, callId, type, caller }) => {
+    socket.on('call:incoming', ({ from, callId, type, caller, chatId, isGroup }) => {
       const ui = useUI.getState();
       if (ui.call) {
-        socket.emit('call:reject', { to: from, callId }); // busy on another call
+        socket.emit('call:reject', { to: from, callId, chatId }); // busy on another call
         return;
       }
-      ui.startCall({ direction: 'incoming', peer: caller || { _id: from }, callId, type: type || 'audio' });
+      // Group call: attach the group chat (for the roster + header) so useWebRTC
+      // can mesh-connect to everyone, not just the caller.
+      const group = isGroup && chatId ? useChat.getState().chats.find((c) => c._id === chatId) || { _id: chatId, isGroup: true } : null;
+      ui.startCall({ direction: 'incoming', peer: caller || { _id: from }, callId, type: type || 'audio', chatId, group });
     });
 
     return () => {
+      clearTimeout(chatsRefetchTimer);
       socket.disconnect();
       socketRef.current = null;
       window.__ccSocket = null;

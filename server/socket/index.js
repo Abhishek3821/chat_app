@@ -1,19 +1,49 @@
+import mongoose from 'mongoose';
 import { verifyToken } from '../utils/token.js';
 import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
+import Meeting from '../models/Meeting.js';
+import Session from '../models/Session.js';
+import { isSessionValid } from '../utils/session.js';
 import { transitionCall } from '../utils/callService.js';
 
+// Socket payloads DON'T pass through the Express mongoSanitize middleware, so any
+// id used in a Mongo query MUST be validated here — otherwise a client could send
+// `{ chatId: { $ne: null } }` and turn a scoped update into a whole-collection one.
+const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
+
 let ioRef = null;
-/** userId -> Set<socketId> */
+let usingAdapter = false; // true once the Redis adapter is attached (multi-instance)
+/** userId -> Set<socketId> (THIS instance only) */
 const onlineUsers = new Map();
 
 export function getIO() {
   return ioRef;
 }
 
+/** Fast, LOCAL presence check (this instance only). */
 export function isOnline(userId) {
   return onlineUsers.has(String(userId));
+}
+
+/**
+ * Cross-instance presence: local first (cheap), then — when the Redis adapter is
+ * attached — ask every instance via the user's personal room. This is what makes
+ * "is the callee reachable?" correct across a load-balanced fleet.
+ */
+export async function isUserOnline(userId) {
+  if (!userId) return false;
+  if (onlineUsers.has(String(userId))) return true;
+  if (usingAdapter && ioRef) {
+    try {
+      const sockets = await ioRef.in(`user:${String(userId)}`).fetchSockets();
+      return sockets.length > 0;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export function onlineUserIds() {
@@ -52,9 +82,32 @@ async function areMutualContacts(aId, bId) {
   return !!b && (b.contacts || []).some((c) => String(c) === String(aId));
 }
 
+/**
+ * May `fromId` send a call signal to `toId`? Allowed when they're mutual contacts
+ * (1:1 calls) OR both are members of the same group chat (so group-call
+ * participants who aren't personal contacts can still connect to each other).
+ */
+async function canSignal(fromId, toId, chatId) {
+  if (!isId(fromId) || !isId(toId)) return false;
+  if (await areMutualContacts(fromId, toId)) return true;
+  if (isId(chatId)) {
+    try {
+      const chat = await Chat.findOne({
+        _id: chatId,
+        isGroup: true,
+        'participants.user': { $all: [String(fromId), String(toId)] },
+      }).select('_id');
+      if (chat) return true;
+    } catch {
+      /* bad ObjectId */
+    }
+  }
+  return false;
+}
+
 /** True if the user is a participant of the chat. */
 async function isChatMember(chatId, userId) {
-  if (!chatId || !userId) return false;
+  if (!isId(chatId) || !isId(userId)) return false;
   try {
     const chat = await Chat.findOne({ _id: chatId, 'participants.user': userId }).select('_id');
     return !!chat;
@@ -63,8 +116,9 @@ async function isChatMember(chatId, userId) {
   }
 }
 
-export function initSocket(io) {
+export function initSocket(io, { hasAdapter = false } = {}) {
   ioRef = io;
+  usingAdapter = hasAdapter;
 
   // Authenticate every socket connection with the JWT and re-check account state,
   // so banned/suspended users and revoked tokens can't hold a live socket open.
@@ -75,13 +129,27 @@ export function initSocket(io) {
         socket.handshake.headers?.authorization?.split(' ')[1];
       if (!token) return next(new Error('No auth token'));
       const decoded = verifyToken(token);
-      const user = await User.findById(decoded.id).select('accountStatus tokenVersion');
+      // Scoped tokens (media token — lives in URLs) can't open a socket session.
+      if (decoded.scope) return next(new Error('Invalid auth token'));
+      const user = await User.findById(decoded.id).select('accountStatus tokenVersion privacy name avatar');
       if (!user) return next(new Error('User no longer exists'));
       if (user.accountStatus !== 'active') return next(new Error('Account is not active'));
       if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
         return next(new Error('Session revoked'));
       }
+      // Validate the tracked session too — a revoked session can't open a socket.
+      if (!decoded.sid) return next(new Error('Invalid session'));
+      const session = await Session.findById(decoded.sid).select('user revokedAt expiresAt lastActiveAt');
+      if (!isSessionValid(session) || String(session.user) !== String(user._id)) {
+        return next(new Error('Session revoked'));
+      }
       socket.userId = String(user._id);
+      socket.userName = user.name;
+      socket.userAvatar = user.avatar;
+      // Reciprocal read receipts: if this user turned them OFF, we still record
+      // their reads server-side (for their own unread counts) but never tell the
+      // sender — so they don't reveal read state either.
+      socket.readReceipts = user.privacy?.readReceipts !== false;
       next();
     } catch {
       next(new Error('Invalid auth token'));
@@ -90,6 +158,11 @@ export function initSocket(io) {
 
   io.on('connection', (socket) => {
     const userId = String(socket.userId);
+    // Stashed on socket.data so it survives adapter.fetchSockets() across instances
+    // (used to build the meeting-room roster).
+    socket.data.userId = userId;
+    socket.data.name = socket.userName;
+    socket.data.avatar = socket.userAvatar;
     socket.join(`user:${userId}`);
 
     // IMPORTANT: register ALL event listeners synchronously FIRST. Clients emit
@@ -105,28 +178,33 @@ export function initSocket(io) {
     });
     socket.on('leave-chat', (chatId) => chatId && socket.leave(`chat:${chatId}`));
 
+    // A socket is only ever IN `chat:<id>` after join-chat verified membership,
+    // so room membership doubles as a free authorization check for relays —
+    // a non-member can't inject typing/reaction/read events into a chat.
+    const inChat = (chatId) => chatId && socket.rooms.has(`chat:${chatId}`);
+
     // ── Typing indicators ─────────────────────────────────────────
-    socket.on('typing-start', ({ chatId }) =>
-      socket.to(`chat:${chatId}`).emit('typing-start', { chatId, userId })
-    );
-    socket.on('typing-stop', ({ chatId }) =>
-      socket.to(`chat:${chatId}`).emit('typing-stop', { chatId, userId })
-    );
+    socket.on('typing-start', ({ chatId } = {}) => {
+      if (inChat(chatId)) socket.to(`chat:${chatId}`).emit('typing-start', { chatId, userId });
+    });
+    socket.on('typing-stop', ({ chatId } = {}) => {
+      if (inChat(chatId)) socket.to(`chat:${chatId}`).emit('typing-stop', { chatId, userId });
+    });
 
     // ── Read receipts ─────────────────────────────────────────────
-    socket.on('message-read', ({ chatId, messageIds }) => {
-      socket.to(`chat:${chatId}`).emit('message-read', { chatId, messageIds, userId });
+    socket.on('message-read', ({ chatId, messageIds } = {}) => {
+      if (inChat(chatId)) socket.to(`chat:${chatId}`).emit('message-read', { chatId, messageIds, userId });
     });
 
     // ── Live reactions (also persisted via REST) ──────────────────
     socket.on('message-reaction', (payload) => {
-      if (payload?.chatId) socket.to(`chat:${payload.chatId}`).emit('message-reaction', payload);
+      if (inChat(payload?.chatId)) socket.to(`chat:${payload.chatId}`).emit('message-reaction', payload);
     });
 
     // ── Delivery / read receipts (persist + broadcast — drives the ticks) ──
     // delivered: the recipient's device received a specific message → ✓✓ (grey)
     socket.on('message:delivered', async ({ chatId, messageId }) => {
-      if (!chatId || !messageId || !(await isChatMember(chatId, userId))) return;
+      if (!isId(messageId) || !(await isChatMember(chatId, userId))) return;
       try {
         const r = await Message.updateOne(
           { _id: messageId, chat: chatId, sender: { $ne: userId }, deliveredTo: { $ne: userId } },
@@ -147,7 +225,8 @@ export function initSocket(io) {
           { chat: chatId, sender: { $ne: userId }, 'readBy.user': { $ne: userId } },
           { $push: { readBy: { user: userId, at: new Date() } } }
         );
-        if (r.modifiedCount) emitToChat(chatId, 'message:read', { chatId, userId });
+        // Only surface the read to the sender if this reader allows read receipts.
+        if (r.modifiedCount && socket.readReceipts) emitToChat(chatId, 'message:read', { chatId, userId });
       } catch {
         /* ignore */
       }
@@ -174,9 +253,9 @@ export function initSocket(io) {
     });
 
     onAll(['call:invite', 'call-user'], async (data = {}) => {
-      const { to, callId, type, callType, caller } = data;
-      if (!to || !(await areMutualContacts(userId, to))) return;
-      if (!isOnline(to)) {
+      const { to, callId, type, callType, caller, chatId } = data;
+      if (!to || !(await canSignal(userId, to, chatId))) return;
+      if (!(await isUserOnline(to))) {
         // Race fallback — REST /api/calls/start already reports offline receivers.
         socket.emit('call:unavailable', { callId, to });
         await logCall(callId, 'missed');
@@ -187,56 +266,140 @@ export function initSocket(io) {
         callId,
         type: type || callType || 'audio',
         caller,
+        chatId, // present → the callee treats this as a group call
+        isGroup: !!chatId,
       });
     });
 
-    onAll(['call:accept', 'accept-call'], async ({ to, callId } = {}) => {
+    // For group calls `call:accept` doubles as the mesh "I'm here" hello, so it's
+    // gated by canSignal (group membership) like the media signals.
+    onAll(['call:accept', 'accept-call'], async ({ to, callId, chatId } = {}) => {
+      if (to && !(await canSignal(userId, to, chatId))) return;
       await logCall(callId, 'accept');
-      relay(to, ['call:accepted', 'accept-call'], { from: userId, callId });
+      relay(to, ['call:accepted', 'accept-call'], { from: userId, callId, chatId });
       // Close the ringing popup on the callee's OTHER tabs/devices.
       socket.to(`user:${userId}`).emit('call:handled', { callId });
     });
 
-    onAll(['call:reject', 'reject-call'], async ({ to, callId } = {}) => {
+    onAll(['call:reject', 'reject-call'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'reject');
-      relay(to, ['call:rejected', 'reject-call'], { from: userId, callId });
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:rejected', 'reject-call'], { from: userId, callId });
+      }
       socket.to(`user:${userId}`).emit('call:handled', { callId });
     });
 
-    onAll(['call:offer', 'webrtc-offer'], async ({ to, offer, callId } = {}) => {
-      if (to && (await areMutualContacts(userId, to))) {
-        relay(to, ['call:offer', 'webrtc-offer'], { from: userId, offer, callId });
+    onAll(['call:offer', 'webrtc-offer'], async ({ to, offer, callId, chatId } = {}) => {
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:offer', 'webrtc-offer'], { from: userId, offer, callId, chatId });
       }
     });
 
-    onAll(['call:answer', 'webrtc-answer'], ({ to, answer, callId } = {}) =>
-      relay(to, ['call:answer', 'webrtc-answer'], { from: userId, answer, callId })
-    );
+    onAll(['call:answer', 'webrtc-answer'], async ({ to, answer, callId, chatId } = {}) => {
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:answer', 'webrtc-answer'], { from: userId, answer, callId, chatId });
+      }
+    });
 
-    onAll(['call:ice-candidate', 'webrtc-ice-candidate'], ({ to, candidate, callId } = {}) =>
-      relay(to, ['call:ice-candidate', 'webrtc-ice-candidate'], { from: userId, candidate, callId })
-    );
+    onAll(['call:ice-candidate', 'webrtc-ice-candidate'], async ({ to, candidate, callId, chatId } = {}) => {
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:ice-candidate', 'webrtc-ice-candidate'], { from: userId, candidate, callId, chatId });
+      }
+    });
 
     // Caller gave up before an answer (timeout or manual cancel) → missed call.
-    onAll(['call:cancel', 'call-missed'], async ({ to, callId } = {}) => {
+    onAll(['call:cancel', 'call-missed'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'missed');
-      relay(to, ['call:cancelled', 'call-missed'], { from: userId, callId });
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:cancelled', 'call-missed'], { from: userId, callId });
+      }
     });
 
-    onAll(['call:end', 'end-call'], async ({ to, callId, duration } = {}) => {
+    onAll(['call:end', 'end-call'], async ({ to, callId, duration, chatId } = {}) => {
       await logCall(callId, 'end', { duration });
-      relay(to, ['call:ended', 'call-ended'], { from: userId, callId });
+      if (to && (await canSignal(userId, to, chatId))) {
+        relay(to, ['call:ended', 'call-ended'], { from: userId, callId });
+      }
     });
+
+    // ── Meeting rooms (Google-Meet-style shareable links) ─────────
+    // A meeting room is a full-mesh WebRTC space keyed by socket id (a user may
+    // even join from two tabs). Anyone signed in who holds a valid, non-cancelled
+    // room code may join — that's the whole point of a shareable link. Signaling
+    // is relayed only between sockets that are actually in the SAME room.
+    const meetingRoom = (meetingId) => `mtg:${meetingId}`;
+
+    async function meetingPeers(meetingId, exceptId) {
+      try {
+        const sockets = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
+        return sockets
+          .filter((s) => s.id !== exceptId)
+          .map((s) => ({ socketId: s.id, userId: s.data.userId, name: s.data.name, avatar: s.data.avatar }));
+      } catch {
+        return [];
+      }
+    }
+
+    // Join a room → get the list of peers already inside, and announce yourself
+    // to them. The NEWCOMER initiates the offer to each existing peer (no glare).
+    socket.on('meeting:join', async ({ meetingId } = {}, cb) => {
+      if (!isId(meetingId)) return typeof cb === 'function' && cb({ ok: false, error: 'Invalid meeting.' });
+      let meeting;
+      try {
+        meeting = await Meeting.findById(meetingId).select('status');
+      } catch {
+        meeting = null;
+      }
+      if (!meeting || meeting.status === 'cancelled') {
+        return typeof cb === 'function' && cb({ ok: false, error: 'Meeting not available.' });
+      }
+      const peers = await meetingPeers(meetingId, socket.id);
+      socket.join(meetingRoom(meetingId));
+      if (!socket.data.meetings) socket.data.meetings = new Set();
+      socket.data.meetings.add(String(meetingId));
+      socket.to(meetingRoom(meetingId)).emit('meeting:peer-joined', {
+        socketId: socket.id,
+        userId,
+        name: socket.data.name,
+        avatar: socket.data.avatar,
+      });
+      if (typeof cb === 'function') cb({ ok: true, peers });
+    });
+
+    // Relay an opaque SDP/ICE payload to ONE specific socket, only if the sender
+    // is actually in that room (prevents cross-room signal injection).
+    socket.on('meeting:signal', ({ meetingId, to, data } = {}) => {
+      if (!to || !meetingId || !socket.rooms.has(meetingRoom(meetingId))) return;
+      ioRef.to(to).emit('meeting:signal', { from: socket.id, data });
+    });
+
+    const leaveMeeting = (meetingId) => {
+      if (!meetingId) return;
+      socket.leave(meetingRoom(meetingId));
+      socket.data.meetings?.delete(String(meetingId));
+      socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: socket.id });
+    };
+    socket.on('meeting:leave', ({ meetingId } = {}) => leaveMeeting(meetingId));
 
     // ── Disconnect / presence ─────────────────────────────────────
     socket.on('disconnect', async () => {
+      // Tell every meeting room this socket was in that the peer is gone.
+      if (socket.data.meetings) {
+        for (const mId of socket.data.meetings) {
+          socket.to(meetingRoom(mId)).emit('meeting:peer-left', { socketId: socket.id });
+        }
+      }
       const set = onlineUsers.get(userId);
       if (set) {
         set.delete(socket.id);
         if (set.size === 0) {
           onlineUsers.delete(userId);
-          await setPresence(userId, false);
-          socket.broadcast.emit('user-offline', { userId, lastSeen: new Date() });
+          // In a multi-instance deploy the user may still be connected to another
+          // node — only mark them offline once they're gone everywhere.
+          if (!(await isUserOnline(userId))) {
+            await setPresence(userId, false);
+            socket.broadcast.emit('user-offline', { userId, lastSeen: new Date() });
+          }
         }
       }
     });

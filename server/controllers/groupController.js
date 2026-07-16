@@ -3,14 +3,18 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat, emitToUser } from '../socket/index.js';
+import { groupCan, PERMISSIONS } from '../utils/rbac.js';
 
 const USER_FIELDS = 'name username email avatar bio isOnline lastSeen';
 
-function requireAdmin(chat, userId) {
+// Require a specific group permission (from the central RBAC matrix) for the
+// caller's per-chat role. Defaults to GROUP_MANAGE (the old "admin" gate).
+function requireGroupPerm(chat, userId, permission = PERMISSIONS.GROUP_MANAGE) {
   const me = chat.participants.find((p) => String(p.user) === String(userId));
-  if (!me || me.role === 'member') throw new ApiError(403, 'Admin privileges required.');
+  if (!me || !groupCan(me.role, permission)) throw new ApiError(403, 'Admin privileges required.');
   return me;
 }
+const requireAdmin = requireGroupPerm; // back-compat alias for existing call sites
 
 async function systemMessage(chatId, text, event) {
   const msg = await Message.create({ chat: chatId, type: 'system', content: text, systemEvent: event });
@@ -22,6 +26,7 @@ async function systemMessage(chatId, text, event) {
 export const createGroup = asyncHandler(async (req, res) => {
   const { name, description = '', avatar = '', members = [] } = req.body;
   if (!name) throw new ApiError(400, 'Group name is required.');
+  if (!Array.isArray(members)) throw new ApiError(400, 'members must be a list.');
 
   const uniqueMembers = [...new Set(members.map(String))].filter((id) => id !== String(req.user._id));
   // Tenant isolation: only members in the same workspace can be added.
@@ -71,6 +76,9 @@ export const addMembers = asyncHandler(async (req, res) => {
   if (!chat?.isGroup) throw new ApiError(404, 'Group not found.');
   requireAdmin(chat, req.user._id);
 
+  if (req.body.members !== undefined && !Array.isArray(req.body.members)) {
+    throw new ApiError(400, 'members must be a list.');
+  }
   const existing = new Set(chat.participants.map((p) => String(p.user)));
   const requested = (req.body.members || []).map(String).filter((id) => !existing.has(id));
 
@@ -98,6 +106,12 @@ export const removeMember = asyncHandler(async (req, res) => {
   const chat = await Chat.findById(req.params.id);
   if (!chat?.isGroup) throw new ApiError(404, 'Group not found.');
   requireAdmin(chat, req.user._id);
+
+  // Protect the owner: a plain admin can't remove the group owner (matches the
+  // guard on setMemberRole). Only the owner could, and they can't remove
+  // themselves this way — they use leaveGroup, which reassigns ownership.
+  const targetMember = chat.participants.find((p) => String(p.user) === req.params.userId);
+  if (targetMember?.role === 'owner') throw new ApiError(400, "The group owner can't be removed.");
 
   const target = await User.findById(req.params.userId).select('name');
   chat.participants = chat.participants.filter((p) => String(p.user) !== req.params.userId);
@@ -133,6 +147,11 @@ export const setMemberRole = asyncHandler(async (req, res) => {
 export const leaveGroup = asyncHandler(async (req, res) => {
   const chat = await Chat.findById(req.params.id);
   if (!chat?.isGroup) throw new ApiError(404, 'Group not found.');
+  // Must actually be a member — otherwise a stranger could inject a system
+  // message into (and bump) a group they don't belong to.
+  if (!chat.participants.some((p) => String(p.user) === String(req.user._id))) {
+    throw new ApiError(403, 'You are not a member of this group.');
+  }
   chat.participants = chat.participants.filter((p) => String(p.user) !== String(req.user._id));
   if (chat.participants.length === 0) {
     await chat.deleteOne();

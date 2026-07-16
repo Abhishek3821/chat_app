@@ -76,7 +76,7 @@ export const useChat = create((set, get) => ({
       };
     }),
 
-  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments }) => {
+  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce }) => {
     const me = useAuth.getState().user;
     const optimistic = {
       _id: `tmp-${Date.now()}`,
@@ -85,6 +85,8 @@ export const useChat = create((set, get) => ({
       type,
       attachments,
       replyTo,
+      location,
+      viewOnce,
       createdAt: new Date().toISOString(),
       status: 'sent',
       optimistic: true,
@@ -94,7 +96,7 @@ export const useChat = create((set, get) => ({
     if (DEMO_MODE) return optimistic;
 
     try {
-      const { data } = await api.post('/messages', { chatId, content, type, attachments, replyTo: replyTo?._id });
+      const { data } = await api.post('/messages', { chatId, content, type, attachments, location, viewOnce, replyTo: replyTo?._id });
       set((s) => {
         // The saved message may ALSO have arrived via the socket echo before this
         // response resolved — drop that copy first, then swap the optimistic one,
@@ -195,12 +197,21 @@ export const useChat = create((set, get) => ({
       return { typing: { ...s.typing, [chatId]: next } };
     }),
 
-  togglePin: (chatId) =>
-    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, pinned: !c.pinned } : c)) })),
-  toggleArchive: (chatId) =>
-    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, archived: !c.archived } : c)) })),
-  toggleMute: (chatId) =>
-    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, muted: !c.muted } : c)) })),
+  // Pin / archive / mute a chat — optimistic local toggle + persist to the
+  // account (server stores it per-user, so it survives reload and follows login).
+  _toggleChatFlag: async (chatId, flag, action) => {
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, [flag]: !c[flag] } : c)) }));
+    if (DEMO_MODE) return;
+    try {
+      await api.post(`/users/me/chats/${chatId}/${action}`);
+    } catch {
+      // revert on failure
+      set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, [flag]: !c[flag] } : c)) }));
+    }
+  },
+  togglePin: (chatId) => get()._toggleChatFlag(chatId, 'pinned', 'pin'),
+  toggleArchive: (chatId) => get()._toggleChatFlag(chatId, 'archived', 'archive'),
+  toggleMute: (chatId) => get()._toggleChatFlag(chatId, 'muted', 'mute'),
 
   addChat: (chat) => set((s) => (s.chats.some((c) => c._id === chat._id) ? {} : { chats: [chat, ...s.chats] })),
 
@@ -382,6 +393,91 @@ export const useChat = create((set, get) => ({
     }
   },
 
+  /** Create a poll message in a chat. */
+  createPoll: async ({ chatId, question, options, multi = false }) => {
+    if (DEMO_MODE) {
+      const me = useAuth.getState().user;
+      get().appendMessage(chatId, {
+        _id: `poll-${Date.now()}`,
+        sender: me,
+        type: 'poll',
+        poll: { question, options: options.map((text) => ({ text, votes: [] })), multi, closed: false },
+        createdAt: new Date().toISOString(),
+        status: 'sent',
+      });
+      return null;
+    }
+    const { data } = await api.post('/messages/poll', { chatId, question, options, multi });
+    get().appendMessage(chatId, data.message); // socket echoes it to everyone else
+    return data.message;
+  },
+
+  /** Vote on / clear a poll option — optimistic, then reconcile with server truth. */
+  votePoll: async (chatId, messageId, optionIndex) => {
+    const meId = useAuth.getState().user?._id;
+    const idOf = (v) => String(v?._id ?? v);
+    const applyLocal = (m) => {
+      if (m._id !== messageId || !m.poll) return m;
+      const { multi } = m.poll;
+      const options = m.poll.options.map((opt, i) => {
+        const had = (opt.votes || []).some((v) => idOf(v) === String(meId));
+        const without = (opt.votes || []).filter((v) => idOf(v) !== String(meId));
+        if (multi) return { ...opt, votes: i === optionIndex ? (had ? without : [...without, meId]) : opt.votes };
+        // single-select: my vote lives on at most one option
+        if (i === optionIndex) return { ...opt, votes: had ? without : [...without, meId] };
+        return { ...opt, votes: without };
+      });
+      return { ...m, poll: { ...m.poll, options } };
+    };
+    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: (s.messagesByChat[chatId] || []).map(applyLocal) } }));
+    if (DEMO_MODE) return;
+    try {
+      const { data } = await api.post(`/messages/${messageId}/vote`, { optionIndex });
+      set((s) => ({
+        messagesByChat: {
+          ...s.messagesByChat,
+          [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === messageId ? data.message : m)),
+        },
+      }));
+    } catch {
+      /* keep the optimistic vote */
+    }
+  },
+
+  /** Set the disappearing-messages timer for a chat (seconds; 0 = off). */
+  setDisappearing: async (chatId, seconds) => {
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, disappearingSeconds: seconds } : c)) }));
+    if (DEMO_MODE) return;
+    try {
+      await api.patch(`/chats/${chatId}/disappearing`, { seconds });
+    } catch {
+      /* leave optimistic value */
+    }
+  },
+
+  /** Apply a disappearing-timer change that arrived over the socket. */
+  applyDisappearing: (chatId, seconds) =>
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, disappearingSeconds: seconds } : c)) })),
+
+  /** Mark a view-once message consumed locally (hide its media) + tell the server. */
+  consumeViewOnce: async (chatId, messageId) => {
+    const meId = useAuth.getState().user?._id;
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, viewedBy: [...(m.viewedBy || []), meId] } : m
+        ),
+      },
+    }));
+    if (DEMO_MODE) return;
+    try {
+      await api.post(`/messages/${messageId}/viewed`);
+    } catch {
+      /* already hidden locally */
+    }
+  },
+
   /** Empty a conversation (keeps the chat) — local + API. */
   clearChat: async (chatId) => {
     set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: [] } }));
@@ -393,6 +489,57 @@ export const useChat = create((set, get) => ({
       }
     }
   },
+
+  // ── Chat lock ────────────────────────────────────────────────
+  lockedChats: [], // populated by revealLockedChats after PIN entry
+  lockChat: async (chatId) => {
+    await api.post(`/chats/${chatId}/lock`);
+    set((s) => ({
+      chats: s.chats.filter((c) => c._id !== chatId),
+      activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
+    }));
+  },
+  unlockChat: async (chatId) => {
+    await api.post(`/chats/${chatId}/unlock`);
+    set((s) => ({ lockedChats: s.lockedChats.filter((c) => c._id !== chatId) }));
+    await get().loadChats();
+  },
+  revealLockedChats: async (pin) => {
+    const { data } = await api.post('/chats/locked', { pin });
+    set({ lockedChats: data.chats || [] });
+    return data.chats || [];
+  },
+
+  // ── Live location ────────────────────────────────────────────
+  startLiveLocation: async (chatId, coords, durationSecs = 3600) => {
+    const { data } = await api.post('/live-location/start', { chatId, lat: coords.lat, lng: coords.lng, durationSecs });
+    get().appendMessage(chatId, data.message);
+    return data.message;
+  },
+  updateLiveLocation: async (messageId, coords) => {
+    try {
+      await api.post(`/live-location/${messageId}/update`, { lat: coords.lat, lng: coords.lng });
+    } catch {
+      /* the share may have expired — the watcher will be cleared by the caller */
+    }
+  },
+  stopLiveLocation: async (messageId) => {
+    try {
+      await api.post(`/live-location/${messageId}/stop`);
+    } catch {
+      /* noop */
+    }
+  },
+  /** Apply a live-location coordinate update that arrived over the socket. */
+  applyLiveLocation: (chatId, messageId, lat, lng) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, location: { ...(m.location || {}), lat, lng } } : m
+        ),
+      },
+    })),
 
   /** Delete a conversation entirely — removes it from the list + API. */
   deleteChat: async (chatId) => {

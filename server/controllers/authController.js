@@ -1,8 +1,11 @@
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Workspace from '../models/Workspace.js';
+import Session from '../models/Session.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { sendTokenResponse, sessionCookieOptions, generateOTP } from '../utils/token.js';
+import { signAccessToken, generateOTP } from '../utils/token.js';
+import { sendTokenResponse, setAuthCookies, clearAuthCookies, rotateSession, isSessionValid, hashToken } from '../utils/session.js';
 import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
@@ -79,8 +82,11 @@ export const signup = asyncHandler(async (req, res) => {
   if (inviteCode && !(await Workspace.exists({ inviteCode }))) {
     throw new ApiError(400, 'That invite code is invalid or has expired.');
   }
-  // An invite always means a workspace join; otherwise honour the chosen type.
-  const accountType = req.body.accountType === 'personal' && !inviteCode ? 'personal' : 'workspace';
+  // An invite always means a workspace join. Otherwise honour the chosen type,
+  // DEFAULTING to 'personal': a client that never sends accountType (older
+  // clients, API consumers, tests) must not end up alone in a private workspace
+  // where they can never contact anyone. Company workspaces are explicit opt-in.
+  const accountType = inviteCode || req.body.accountType === 'workspace' ? 'workspace' : 'personal';
 
   const otp = generateOTP();
   const baseDoc = {
@@ -147,7 +153,7 @@ export const signup = asyncHandler(async (req, res) => {
     });
   }
 
-  sendTokenResponse(res, user, 201);
+  await sendTokenResponse(req, res, user, 201);
 });
 
 // POST /api/auth/verify-otp
@@ -180,7 +186,7 @@ export const verifyOtp = asyncHandler(async (req, res) => {
   user.otpAttempts = 0;
   await user.save();
   securityEvent('otp.verify.success', req, { userId: String(user._id) });
-  sendTokenResponse(res, user);
+  await sendTokenResponse(req, res, user);
 });
 
 // POST /api/auth/resend-otp
@@ -236,18 +242,75 @@ export const login = asyncHandler(async (req, res) => {
   user.lastSeen = new Date();
   await user.save({ validateBeforeSave: false });
   securityEvent('login.success', req, { userId: String(user._id) });
-  sendTokenResponse(res, user);
+  await sendTokenResponse(req, res, user);
 });
 
-// POST /api/auth/logout
+// POST /api/auth/logout — revoke THIS session (not just clear the cookie).
 export const logout = asyncHandler(async (req, res) => {
-  res.cookie('token', '', { ...sessionCookieOptions(), expires: new Date(0) });
+  const raw = req.cookies?.refreshToken;
+  if (raw) await Session.updateOne({ refreshHash: hashToken(raw) }, { $set: { revokedAt: new Date() } });
+  else if (req.sessionId) await Session.updateOne({ _id: req.sessionId }, { $set: { revokedAt: new Date() } });
+  clearAuthCookies(res);
   if (req.user) {
     req.user.isOnline = false;
     req.user.lastSeen = new Date();
     await req.user.save({ validateBeforeSave: false });
   }
   res.json({ success: true, message: 'Logged out.' });
+});
+
+// POST /api/auth/refresh — rotate the refresh token and mint a fresh access
+// token. Authenticated by the httpOnly refresh cookie (the access token may have
+// already expired), so this route is deliberately NOT behind `protect`.
+export const refresh = asyncHandler(async (req, res) => {
+  const raw = req.cookies?.refreshToken;
+  if (!raw) throw new ApiError(401, 'No refresh token.');
+  const session = await Session.findOne({ refreshHash: hashToken(raw) }).select('+refreshHash user revokedAt expiresAt lastActiveAt');
+  if (!isSessionValid(session)) {
+    clearAuthCookies(res);
+    throw new ApiError(401, 'Session expired. Please log in again.');
+  }
+  const user = await User.findById(session.user);
+  if (!user || user.accountStatus !== 'active') {
+    await Session.updateOne({ _id: session._id }, { $set: { revokedAt: new Date() } });
+    clearAuthCookies(res);
+    throw new ApiError(401, 'Account is not active.');
+  }
+  const refreshToken = await rotateSession(session, req);
+  const accessToken = signAccessToken(user, session._id);
+  setAuthCookies(res, accessToken, refreshToken);
+  res.json({ success: true, token: accessToken, user: user.toSafeJSON() });
+});
+
+// GET /api/auth/sessions — the caller's active devices/sessions.
+export const listSessions = asyncHandler(async (req, res) => {
+  const sessions = await Session.find({ user: req.user._id, revokedAt: null, expiresAt: { $gt: new Date() } }).sort({ lastActiveAt: -1 });
+  res.json({
+    success: true,
+    sessions: sessions.map((s) => ({
+      id: String(s._id),
+      device: s.device,
+      ip: s.ip,
+      lastActiveAt: s.lastActiveAt,
+      createdAt: s.createdAt,
+      current: String(s._id) === String(req.sessionId),
+    })),
+  });
+});
+
+// DELETE /api/auth/sessions/:id — revoke one session (log out that device).
+export const revokeSession = asyncHandler(async (req, res) => {
+  await Session.updateOne({ _id: req.params.id, user: req.user._id }, { $set: { revokedAt: new Date() } });
+  res.json({ success: true });
+});
+
+// POST /api/auth/sessions/revoke-others — log out every device except this one.
+export const revokeOtherSessions = asyncHandler(async (req, res) => {
+  await Session.updateMany(
+    { user: req.user._id, _id: { $ne: req.sessionId }, revokedAt: null },
+    { $set: { revokedAt: new Date() } }
+  );
+  res.json({ success: true });
 });
 
 // GET /api/auth/me
@@ -295,8 +358,10 @@ export const resetPassword = asyncHandler(async (req, res) => {
   user.resetPasswordExpires = undefined;
   user.tokenVersion = (user.tokenVersion || 0) + 1; // revoke all old sessions
   await user.save();
+  // Kill every tracked session too, then start a fresh one for this device.
+  await Session.updateMany({ user: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
   securityEvent('password.reset', req, { userId: String(user._id) });
-  sendTokenResponse(res, user);
+  await sendTokenResponse(req, res, user);
 });
 
 // PATCH /api/auth/change-password
@@ -310,8 +375,49 @@ export const changePassword = asyncHandler(async (req, res) => {
   user.password = newPassword;
   user.tokenVersion = (user.tokenVersion || 0) + 1; // revoke all old sessions
   await user.save();
+  // Log out every device on a password change, then re-issue for THIS one.
+  await Session.updateMany({ user: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
   securityEvent('password.change', req, { userId: String(user._id) });
-  // Re-issue a token for THIS session so the current device stays logged in
-  // (its old token was just invalidated by the tokenVersion bump).
-  sendTokenResponse(res, user, 200, { message: 'Password updated.' });
+  await sendTokenResponse(req, res, user, 200, { message: 'Password updated.' });
+});
+
+// ── Two-step verification (app-lock PIN) ─────────────────────────
+// A 4–8 digit PIN required to open ChatConnect on a device, stored bcrypt-hashed.
+
+// POST /api/auth/two-step/enable  { pin }
+export const enableTwoStep = asyncHandler(async (req, res) => {
+  const pin = String(req.body.pin || '');
+  if (!/^\d{4,8}$/.test(pin)) throw new ApiError(400, 'Your PIN must be 4 to 8 digits.');
+  const user = await User.findById(req.user._id).select('+twoStepPin');
+  user.twoStepPin = await bcrypt.hash(pin, 10);
+  user.twoStepEnabled = true;
+  await user.save();
+  securityEvent('twostep.enable', req, { userId: String(user._id) });
+  res.json({ success: true, twoStepEnabled: true });
+});
+
+// POST /api/auth/two-step/disable  { pin }
+export const disableTwoStep = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select('+twoStepPin');
+  if (user.twoStepEnabled) {
+    const ok = user.twoStepPin && (await bcrypt.compare(String(req.body.pin || ''), user.twoStepPin));
+    if (!ok) throw new ApiError(400, 'Incorrect PIN.');
+  }
+  user.twoStepEnabled = false;
+  user.twoStepPin = undefined;
+  await user.save();
+  securityEvent('twostep.disable', req, { userId: String(user._id) });
+  res.json({ success: true, twoStepEnabled: false });
+});
+
+// POST /api/auth/two-step/verify  { pin }  — unlock this session (rate-limited).
+export const verifyTwoStep = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select('+twoStepPin');
+  if (!user.twoStepEnabled) return res.json({ success: true, verified: true });
+  const ok = user.twoStepPin && (await bcrypt.compare(String(req.body.pin || ''), user.twoStepPin));
+  if (!ok) {
+    securityEvent('twostep.verify.failure', req, { userId: String(user._id) });
+    throw new ApiError(400, 'Incorrect PIN.');
+  }
+  res.json({ success: true, verified: true });
 });

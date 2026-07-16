@@ -7,22 +7,28 @@ import { Mail, ArrowLeft, ArrowRight, MailCheck, RotateCw, KeyRound, Loader2 } f
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/store/useAuth';
 import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.jsx';
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ForgotPassword() {
+  const forgotPassword = useAuth((s) => s.forgotPassword);
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Simulated request — no backend call in demo mode.
   const sendLink = async () => {
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setSubmitting(false);
-    setSubmitted(true);
-    toast.success('Reset link sent — check your inbox!');
+    try {
+      await forgotPassword(email.trim());
+      setSubmitted(true);
+      toast.success('If that email exists, a reset link is on its way.');
+    } catch (err) {
+      toast.error(err?.message || 'Could not send the reset link. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSubmit = async (e) => {

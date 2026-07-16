@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 
 const rsvpSchema = new mongoose.Schema(
   {
@@ -21,6 +22,9 @@ const meetingSchema = new mongoose.Schema(
     timezone: { type: String, default: 'UTC' },
 
     type: { type: String, enum: ['audio', 'video'], default: 'video' },
+    // Google-Meet-style shareable room code (e.g. "abc-defg-hij"). Anyone with
+    // the code/link can join the live room. Unguessable so it can't be brute-forced.
+    roomCode: { type: String, unique: true, index: true },
     link: { type: String },
     recurrence: { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
     reminderMinutes: { type: Number, default: 10 },
@@ -31,6 +35,13 @@ const meetingSchema = new mongoose.Schema(
 );
 
 meetingSchema.index({ startAt: 1 });
+
+/** A readable, unguessable "abc-defg-hij" room code (CSPRNG). */
+export function generateRoomCode() {
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // no ambiguous chars
+  const pick = (n) => Array.from({ length: n }, () => chars[crypto.randomInt(0, chars.length)]).join('');
+  return `${pick(3)}-${pick(4)}-${pick(3)}`;
+}
 
 const Meeting = mongoose.model('Meeting', meetingSchema);
 export default Meeting;

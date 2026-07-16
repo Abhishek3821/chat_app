@@ -93,6 +93,22 @@ export const useContacts = create((set, get) => ({
     return !isFav;
   },
 
+  /** Block / unblock a user (toggle). The server enforces blocks in both
+   *  directions — a blocked user can't send you requests, chat, or call you. */
+  toggleBlock: async (userId) => {
+    if (DEMO_MODE) return true;
+    const { data } = await api.post(`/users/me/block/${userId}`);
+    await get().load(); // refresh contacts (blocking also affects the relationship)
+    return data.blocked;
+  },
+
+  /** File a moderation report (user / group / message / status). */
+  report: async ({ targetType, targetUser, targetChat, targetMessage, reason, description = '' }) => {
+    if (DEMO_MODE) return { success: true };
+    const { data } = await api.post('/reports', { targetType, targetUser, targetChat, targetMessage, reason, description });
+    return data;
+  },
+
   /** Open (or create) a 1:1 chat with a contact. Returns the chat id or null. */
   startChat: async (user) => {
     const chatStore = useChat.getState();

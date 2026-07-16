@@ -12,6 +12,7 @@ import {
   toggleBlock,
   toggleChatFlag,
   deleteAccount,
+  exportData,
 } from '../controllers/userController.js';
 import { protect } from '../middleware/auth.js';
 
@@ -22,6 +23,7 @@ router.get('/search', searchUsers);
 router.patch('/me', updateProfile);
 router.patch('/me/privacy', updatePrivacy);
 router.patch('/me/settings', updateSettings);
+router.get('/me/export', exportData);
 router.delete('/me', deleteAccount);
 
 router.get('/me/contacts', getContacts);

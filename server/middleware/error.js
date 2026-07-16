@@ -26,13 +26,17 @@ export function errorHandler(err, req, res, _next) {
     message = Object.values(err.errors).map((e) => e.message).join(', ');
   }
 
-  if (process.env.NODE_ENV !== 'production' && statusCode >= 500) {
-    console.error('💥', err.stack);
-  }
+  const isProd = process.env.NODE_ENV === 'production';
+  // Always log server-side faults (helps monitoring); only 500s are noisy internals.
+  if (statusCode >= 500) console.error('💥', err.stack || err.message);
+
+  // Don't disclose internal error text to clients in production for 5xx — those
+  // messages (DB driver, Redis host, etc.) can leak infrastructure detail.
+  const clientMessage = isProd && statusCode >= 500 ? 'Something went wrong. Please try again.' : message;
 
   res.status(statusCode || 500).json({
     success: false,
-    message,
-    ...(process.env.NODE_ENV !== 'production' && statusCode >= 500 ? { stack: err.stack } : {}),
+    message: clientMessage,
+    ...(!isProd && statusCode >= 500 ? { stack: err.stack } : {}),
   });
 }

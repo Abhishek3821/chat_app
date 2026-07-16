@@ -1,32 +1,44 @@
-import { useEffect } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
 import { useUI } from './store/useUI';
 import { useAuth } from './store/useAuth';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import LockScreen from './components/LockScreen.jsx';
 
+// Eager: the two first-paint entry points (logged-out landing + logged-in home)
+// and the app shell. Everything else is code-split so the initial bundle stays
+// small — the admin/charts, business, meetings screens no longer ship to users
+// who never open them (better LCP/TBT).
 import Login from './pages/auth/Login.jsx';
-import Signup from './pages/auth/Signup.jsx';
-import ForgotPassword from './pages/auth/ForgotPassword.jsx';
-import ResetPassword from './pages/auth/ResetPassword.jsx';
-import VerifyOtp from './pages/auth/VerifyOtp.jsx';
-
 import AppLayout from './components/layout/AppLayout.jsx';
 import ChatsPage from './pages/ChatsPage.jsx';
-import CallsPage from './pages/CallsPage.jsx';
-import MeetingsPage from './pages/MeetingsPage.jsx';
-import StatusPage from './pages/StatusPage.jsx';
-import GroupsPage from './pages/GroupsPage.jsx';
-import ContactsPage from './pages/ContactsPage.jsx';
-import SettingsPage from './pages/SettingsPage.jsx';
-import DevelopersPage from './pages/DevelopersPage.jsx';
-import AdminDashboard from './pages/AdminDashboard.jsx';
+
+const Signup = lazy(() => import('./pages/auth/Signup.jsx'));
+const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword.jsx'));
+const ResetPassword = lazy(() => import('./pages/auth/ResetPassword.jsx'));
+const VerifyOtp = lazy(() => import('./pages/auth/VerifyOtp.jsx'));
+const CallsPage = lazy(() => import('./pages/CallsPage.jsx'));
+const MeetingsPage = lazy(() => import('./pages/MeetingsPage.jsx'));
+const StatusPage = lazy(() => import('./pages/StatusPage.jsx'));
+const GroupsPage = lazy(() => import('./pages/GroupsPage.jsx'));
+const CommunitiesPage = lazy(() => import('./pages/CommunitiesPage.jsx'));
+const BusinessPage = lazy(() => import('./pages/BusinessPage.jsx'));
+const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage.jsx'));
+const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const DevelopersPage = lazy(() => import('./pages/DevelopersPage.jsx'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
+const MeetingRoom = lazy(() => import('./pages/MeetingRoom.jsx'));
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  // Two-step verification: gate the app behind a PIN once per browser session.
+  const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('cc_unlocked') === '1');
   if (loading) return <SplashScreen />;
   if (!user) return <Navigate to="/login" replace />;
+  if (user.twoStepEnabled && !unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />;
   return children;
 }
 
@@ -97,7 +109,9 @@ export default function App() {
   return (
     <ErrorBoundary resetKey={location.pathname}>
       {/* Route swaps are instant + reliable; page transitions live in AppLayout
-          around the Outlet, so the shell (nav/socket) never remounts. */}
+          around the Outlet, so the shell (nav/socket) never remounts. Suspense
+          covers the lazily-loaded route chunks with the splash fallback. */}
+      <Suspense fallback={<SplashScreen />}>
       <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />
@@ -105,6 +119,17 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
+
+          {/* Immersive meeting room — protected but OUTSIDE the app shell (its own
+              full-screen layout, like a Google Meet link). */}
+          <Route
+            path="/meet/:code"
+            element={
+              <ProtectedRoute>
+                <MeetingRoom />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Protected app shell */}
           <Route
@@ -119,6 +144,9 @@ export default function App() {
             <Route path="/meetings" element={<MeetingsPage />} />
             <Route path="/status" element={<StatusPage />} />
             <Route path="/groups" element={<GroupsPage />} />
+            <Route path="/communities" element={<CommunitiesPage />} />
+            <Route path="/business" element={<BusinessPage />} />
+            <Route path="/broadcasts" element={<BroadcastsPage />} />
             <Route path="/contacts" element={<ContactsPage  />} />
             <Route
               path="/developers"
@@ -141,6 +169,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
 
       <Toaster
         position="top-center"

@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Workspace from '../models/Workspace.js';
 import ContactRequest from '../models/ContactRequest.js';
@@ -11,41 +12,50 @@ import Report from '../models/Report.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { sessionCookieOptions } from '../utils/token.js';
 import { emitToUser } from '../socket/index.js';
+import { applyPresencePrivacy } from '../utils/privacy.js';
 
 const PUBLIC_FIELDS = 'name username email avatar bio isOnline lastSeen accountStatus createdAt';
+// PUBLIC_FIELDS plus the fields needed to evaluate presence privacy (stripped
+// again by applyPresencePrivacy before the object is returned to the client).
+const PUBLIC_WITH_PRIVACY = `${PUBLIC_FIELDS} privacy contacts`;
 
 // GET /api/users/search?q=
 export const searchUsers = asyncHandler(async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ success: true, users: [] });
 
-  // In the shared Personal space, everyone is a stranger by default, so we must
-  // NOT expose a browsable directory. Only an EXACT email or username match
-  // returns a hit — you find someone you already know, then send a request.
-  // Team workspaces are a company directory, so partial name/username/email
-  // search is expected there.
+  // GLOBAL reachability (WhatsApp-style): anyone can be found by their EXACT
+  // email or username, across every workspace — you find someone you already
+  // know by their identifier, then send a contact request. Within your OWN team
+  // workspace, partial name/username/email search also works (a company
+  // directory). There is deliberately NO partial cross-workspace search, so we
+  // never expose a browsable global directory of every user.
+  const term = q.toLowerCase();
+  const orClauses = [{ email: term }, { username: term }];
   const ws = await Workspace.findById(req.user.workspace).select('type');
-  const base = { _id: { $ne: req.user._id, $nin: req.user.blockedUsers }, workspace: req.user.workspace };
-
-  let match;
-  if (ws?.type === 'personal') {
-    const term = q.toLowerCase();
-    match = { ...base, $or: [{ email: term }, { username: term }] };
-  } else {
+  if (ws && ws.type !== 'personal') {
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    match = { ...base, $or: [{ email: rx }, { username: rx }, { name: rx }] };
+    orClauses.push({ workspace: req.user.workspace, $or: [{ email: rx }, { username: rx }, { name: rx }] });
   }
+  const match = { _id: { $ne: req.user._id, $nin: req.user.blockedUsers }, $or: orClauses };
 
-  const users = await User.find(match).select(PUBLIC_FIELDS).limit(20);
-  res.json({ success: true, users });
+  const users = await User.find(match).select(PUBLIC_WITH_PRIVACY).limit(20);
+  const meId = String(req.user._id);
+  const sanitized = users.map((u) => {
+    const viewerIsContact = (u.contacts || []).some((c) => String(c) === meId);
+    return applyPresencePrivacy(u.toObject(), viewerIsContact);
+  });
+  res.json({ success: true, users: sanitized });
 });
 
 // GET /api/users/:id
 export const getUserById = asyncHandler(async (req, res) => {
-  // Only reachable within the same workspace (otherwise it's a 404, not a leak).
-  const user = await User.findOne({ _id: req.params.id, workspace: req.user.workspace }).select(PUBLIC_FIELDS);
+  // Global reachability: any user is viewable by id (public fields only, with
+  // presence/photo privacy applied below). Not a directory dump — you need the id.
+  const user = await User.findById(req.params.id).select(PUBLIC_WITH_PRIVACY);
   if (!user) throw new ApiError(404, 'User not found.');
-  res.json({ success: true, user });
+  const viewerIsContact = (user.contacts || []).some((c) => String(c) === String(req.user._id));
+  res.json({ success: true, user: applyPresencePrivacy(user.toObject(), viewerIsContact) });
 });
 
 // PATCH /api/users/me
@@ -187,6 +197,16 @@ export const toggleChatFlag = asyncHandler(async (req, res) => {
   res.json({ success: true, [req.params.action]: !has });
 });
 
+// The two-step PIN (app lock) itself is enabled/disabled/verified in
+// authController at /auth/two-step/*. This helper lets chat lock reuse the same
+// PIN to gate revealing locked chats. Matches authController's 4–8 digit rule.
+export async function verifyTwoStepPin(userId, pin) {
+  if (!/^\d{4,8}$/.test(String(pin || ''))) return false;
+  const user = await User.findById(userId).select('+twoStepPin twoStepEnabled');
+  if (!user || !user.twoStepEnabled || !user.twoStepPin) return false;
+  return bcrypt.compare(String(pin), user.twoStepPin);
+}
+
 // DELETE /api/users/me
 // GDPR-style erasure: remove the account AND the data it produced / references to
 // it, instead of leaving orphaned PII behind. Best-effort, sequential; for very
@@ -229,4 +249,40 @@ export const deleteAccount = asyncHandler(async (req, res) => {
   await User.findByIdAndDelete(uid);
   res.cookie('token', '', { ...sessionCookieOptions(), expires: new Date(0) });
   res.json({ success: true, message: 'Account and associated data deleted.' });
+});
+
+// GET /api/users/me/export — a downloadable JSON archive of the user's own data.
+// Only the caller's OWN messages are included (never other people's), so this
+// can't be used to exfiltrate a conversation partner's content.
+export const exportData = asyncHandler(async (req, res) => {
+  const uid = req.user._id;
+  const [user, contacts, chats] = await Promise.all([
+    User.findById(uid).lean(),
+    User.find({ _id: { $in: req.user.contacts || [] } }).select('name username email').lean(),
+    Chat.find({ 'participants.user': uid }).select('isGroup name createdAt').lean(),
+  ]);
+  const myMessages = await Message.find({ sender: uid })
+    .select('chat type content createdAt')
+    .sort({ createdAt: 1 })
+    .lean();
+
+  const archive = {
+    exportedAt: new Date().toISOString(),
+    profile: {
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      bio: user.bio,
+      phone: user.phone,
+      createdAt: user.createdAt,
+    },
+    contacts: contacts.map((c) => ({ name: c.name, username: c.username, email: c.email })),
+    chats: chats.map((c) => ({ id: String(c._id), type: c.isGroup ? 'group' : 'direct', name: c.name || null, createdAt: c.createdAt })),
+    messages: myMessages.map((m) => ({ chat: String(m.chat), type: m.type, content: m.content, at: m.createdAt })),
+    counts: { contacts: contacts.length, chats: chats.length, messages: myMessages.length },
+  };
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="chatconnect-export.json"');
+  res.status(200).send(JSON.stringify(archive, null, 2));
 });

@@ -8,17 +8,20 @@ import ModalHost from '../modals/ModalHost';
 import CallOverlay from '../overlays/CallOverlay';
 import ErrorBoundary from '../ErrorBoundary';
 import { useChat } from '../../store/useChat';
+import { useWorkspace } from '../../store/useWorkspace';
 import { useSocket } from '../../hooks/useSocket';
 
 export default function AppLayout() {
   const loadChats = useChat((s) => s.loadChats);
+  const loadWorkspace = useWorkspace((s) => s.load);
   const { pathname } = useLocation();
   const outlet = useOutlet();
   useSocket();
 
   useEffect(() => {
     loadChats();
-  }, [loadChats]);
+    loadWorkspace(); // so nav can surface team-only tools (Business)
+  }, [loadChats, loadWorkspace]);
 
   // On the chat page the conversation region handles its own scrolling;
   // other pages get a scrollable content area.

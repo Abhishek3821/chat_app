@@ -6,6 +6,7 @@ import {
   User,
   ShieldCheck,
   Bell,
+  BellRing,
   Palette,
   Settings2,
   Pencil,
@@ -34,6 +35,7 @@ import {
   Building2,
   Terminal,
   ExternalLink,
+  Crown,
 } from 'lucide-react';
 
 import Switch, { ToggleRow } from '@/components/ui/Switch';
@@ -48,6 +50,7 @@ import { useApiKeys } from '@/store/useApiKeys';
 import { useWorkspace } from '@/store/useWorkspace';
 import { DEMO_MODE } from '@/lib/api';
 import { ME } from '@/lib/demoData';
+import { getPushState, enablePush, disablePush } from '@/lib/push';
 
 /* Motion presets — matched to the app's existing feel */
 const rise = {
@@ -243,6 +246,34 @@ function NotificationsPanel() {
     meetings: true,
     sounds: false,
   });
+  // Real, system-level Web Push opt-in for THIS device.
+  const [pushState, setPushState] = useState('default'); // default | subscribed | denied | unsupported
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    if (DEMO_MODE) return setPushState('unsupported');
+    getPushState().then(setPushState);
+  }, []);
+
+  const togglePush = async (next) => {
+    setPushBusy(true);
+    try {
+      if (next) {
+        await enablePush();
+        setPushState('subscribed');
+        toast.success('Push notifications enabled on this device');
+      } else {
+        await disablePush();
+        setPushState('default');
+        toast.success('Push notifications turned off');
+      }
+    } catch (err) {
+      setPushState(await getPushState());
+      toast.error(err?.message || 'Could not update notifications.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const toggle = (key, label) => (next) => {
     setPrefs((p) => ({ ...p, [key]: next }));
@@ -251,6 +282,33 @@ function NotificationsPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+      <Section title="Push notifications" description="Get notified when the app is closed. Enabled per device.">
+        <div className="flex items-start justify-between gap-4 py-1">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+              <BellRing size={18} />
+            </span>
+            <div>
+              <p className="text-sm font-medium text-content">Push on this device</p>
+              <p className="text-xs text-content-muted">
+                {pushState === 'unsupported'
+                  ? 'Not supported in this browser.'
+                  : pushState === 'denied'
+                    ? 'Blocked — enable notifications for this site in your browser settings.'
+                    : pushState === 'subscribed'
+                      ? 'This device will receive push notifications.'
+                      : 'Turn on to receive messages while ChatConnect is closed.'}
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={pushState === 'subscribed'}
+            disabled={pushBusy || pushState === 'unsupported' || pushState === 'denied'}
+            onChange={togglePush}
+          />
+        </div>
+      </Section>
+
       <Section title="Notifications" description="Decide what pings you and how.">
         <Rows>
           <ToggleRow
@@ -400,7 +458,7 @@ function AppearancePanel() {
 
 /* ── Workspace (organization) ─────────────────────────────────── */
 function WorkspacePanel() {
-  const { workspace, members, myRole, memberCount, load, rename, rotateInvite, setMemberStatus, removeMember } =
+  const { workspace, members, myRole, memberCount, load, rename, rotateInvite, setMemberStatus, removeMember, setMemberRole, transferOwnership } =
     useWorkspace();
   const meId = useAuth((s) => s.user?._id);
   const [name, setName] = useState('');
@@ -495,6 +553,24 @@ function WorkspacePanel() {
       toast.error(err?.message || 'Could not remove member.');
     }
   };
+  const changeRole = async (m) => {
+    const next = m.workspaceRole === 'admin' ? 'member' : 'admin';
+    try {
+      await setMemberRole(m._id, next);
+      toast.success(`${m.name} is now ${next === 'admin' ? 'an admin' : 'a member'}`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not change role.');
+    }
+  };
+  const makeOwner = async (m) => {
+    if (!window.confirm(`Transfer ownership of ${workspace.name} to ${m.name}? You'll step down to admin.`)) return;
+    try {
+      await transferOwnership(m._id);
+      toast.success(`${m.name} is now the owner`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not transfer ownership.');
+    }
+  };
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
@@ -545,6 +621,22 @@ function WorkspacePanel() {
                 <span className="rounded-full bg-content/5 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
                 {canManage && (
                   <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => changeRole(m)}
+                      title={m.workspaceRole === 'admin' ? 'Demote to member' : 'Promote to admin'}
+                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-brand-500"
+                    >
+                      <ShieldCheck size={15} />
+                    </button>
+                    {myRole === 'owner' && !suspended && (
+                      <button
+                        onClick={() => makeOwner(m)}
+                        title="Transfer ownership"
+                        className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-amber-500"
+                      >
+                        <Crown size={15} />
+                      </button>
+                    )}
                     <button
                       onClick={() => toggleSuspend(m)}
                       title={suspended ? 'Resume access' : 'Pause access'}
@@ -748,24 +840,114 @@ function DeveloperPanel() {
 
 /* ── Account ──────────────────────────────────────────────────── */
 function AccountPanel() {
-  const { logout } = useAuth();
+  const { logout, changePassword: doChangePassword, deleteAccount, exportMyData, enableTwoStep, disableTwoStep, listSessions, revokeSession, revokeOtherSessions } = useAuth();
+  const twoStepEnabled = useAuth((s) => s.user?.twoStepEnabled);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pin, setPin] = useState('');
+  const [twoBusy, setTwoBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [sessLoading, setSessLoading] = useState(false);
+
+  const loadSessions = async () => {
+    if (DEMO_MODE) return;
+    setSessLoading(true);
+    try {
+      setSessions(await listSessions());
+    } catch {
+      /* ignore */
+    } finally {
+      setSessLoading(false);
+    }
+  };
+  useEffect(() => {
+    loadSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const revokeOne = async (id) => {
+    try {
+      await revokeSession(id);
+      setSessions((s) => s.filter((x) => x.id !== id));
+      toast.success('Device signed out');
+    } catch {
+      toast.error('Could not sign out that device.');
+    }
+  };
+  const revokeOthers = async () => {
+    try {
+      await revokeOtherSessions();
+      await loadSessions();
+      toast.success('Signed out all other devices');
+    } catch {
+      toast.error('Could not sign out other devices.');
+    }
+  };
 
   const setField = (key) => (e) => setPw((p) => ({ ...p, [key]: e.target.value }));
 
-  const changePassword = (e) => {
+  const doExport = async () => {
+    setExporting(true);
+    try {
+      await exportMyData();
+      toast.success('Your data has been downloaded.');
+    } catch {
+      toast.error('Could not export your data.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const toggleTwoStep = async () => {
+    if (!/^\d{4,8}$/.test(pin)) return toast.error('Enter a 4–8 digit PIN.');
+    setTwoBusy(true);
+    try {
+      if (twoStepEnabled) {
+        await disableTwoStep(pin);
+        toast.success('Two-step verification turned off.');
+      } else {
+        await enableTwoStep(pin);
+        toast.success('Two-step verification enabled.');
+      }
+      setPin('');
+    } catch (err) {
+      toast.error(err?.message || 'Could not update two-step verification.');
+    } finally {
+      setTwoBusy(false);
+    }
+  };
+
+  const changePassword = async (e) => {
     e.preventDefault();
     if (!pw.current || !pw.next || !pw.confirm) return toast.error('Please fill in all password fields');
     if (pw.next.length < 8) return toast.error('New password must be at least 8 characters');
     if (pw.next !== pw.confirm) return toast.error('New passwords do not match');
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      await doChangePassword({ currentPassword: pw.current, newPassword: pw.next });
       setPw({ current: '', next: '', confirm: '' });
       toast.success('Password updated successfully');
-    }, 900);
+    } catch (err) {
+      toast.error(err?.message || 'Could not update your password.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      toast.success('Your account has been deleted.');
+      // forceLogout/state clear triggers ProtectedRoute → /login automatically.
+    } catch (err) {
+      toast.error(err?.message || 'Could not delete your account.');
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   };
 
   return (
@@ -789,6 +971,82 @@ function AccountPanel() {
         </form>
       </Section>
 
+      <Section title="Two-step verification" description="Require a PIN to open ChatConnect on a device.">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+            <ShieldCheck size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-content">
+              {twoStepEnabled ? 'Two-step verification is on' : 'Add an extra layer of security'}
+            </p>
+            <p className="text-xs text-content-muted">
+              {twoStepEnabled ? 'Enter your PIN to turn it off.' : 'Choose a 4–8 digit PIN, asked whenever the app is reopened.'}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-end gap-2">
+          <div className="flex-1">
+            <Input
+              icon={KeyRound}
+              type="password"
+              inputMode="numeric"
+              placeholder={twoStepEnabled ? 'Current PIN' : 'New PIN'}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            />
+          </div>
+          <Button
+            variant={twoStepEnabled ? 'outline' : 'primary'}
+            size="md"
+            disabled={twoBusy || pin.length < 4}
+            onClick={toggleTwoStep}
+            className="shrink-0"
+          >
+            {twoBusy ? '…' : twoStepEnabled ? 'Turn off' : 'Enable'}
+          </Button>
+        </div>
+      </Section>
+
+      <Section title="Active sessions" description="Devices signed in to your account. Revoking one signs it out immediately.">
+        {sessions.length === 0 ? (
+          <p className="mt-2 text-sm text-content-muted">{sessLoading ? 'Loading…' : 'No active sessions found.'}</p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {sessions.map((s) => (
+              <div key={s.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+                  <Monitor size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-2 truncate text-sm font-semibold text-content">
+                    {s.device || 'Unknown device'}
+                    {s.current && (
+                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400">
+                        This device
+                      </span>
+                    )}
+                  </p>
+                  <p className="truncate text-xs text-content-muted">
+                    {s.ip || 'unknown IP'} · active {formatRelative(s.lastActiveAt)}
+                  </p>
+                </div>
+                {!s.current && (
+                  <Button size="sm" variant="ghost" onClick={() => revokeOne(s.id)} className="shrink-0 text-red-500 hover:bg-red-500/10">
+                    Sign out
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {sessions.some((s) => !s.current) && (
+          <Button variant="outline" size="sm" onClick={revokeOthers} className="mt-3">
+            <LogOut size={15} /> Log out all other devices
+          </Button>
+        )}
+      </Section>
+
       <Section title="Your data" description="Download a copy of your ChatConnect data.">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <div className="flex items-center gap-3">
@@ -797,11 +1055,11 @@ function AccountPanel() {
             </span>
             <div>
               <p className="text-sm font-medium text-content">Export my data</p>
-              <p className="text-xs text-content-muted">Messages, contacts and account info as an archive.</p>
+              <p className="text-xs text-content-muted">Your profile, contacts, chats and messages as a JSON archive.</p>
             </div>
           </div>
-          <Button variant="outline" size="md" onClick={() => toast.success('Preparing your data export…')} className="shrink-0">
-            <Download size={16} /> Export
+          <Button variant="outline" size="md" onClick={doExport} disabled={exporting} className="shrink-0">
+            <Download size={16} /> {exporting ? 'Preparing…' : 'Export'}
           </Button>
         </div>
       </Section>
@@ -877,14 +1135,12 @@ function AccountPanel() {
                   <Button
                     variant="danger"
                     size="sm"
-                    onClick={() => {
-                      setConfirmDelete(false);
-                      toast.error('Account deletion requested');
-                    }}
+                    disabled={deleting}
+                    onClick={handleDelete}
                   >
-                    <Trash2 size={15} /> Yes, delete my account
+                    <Trash2 size={15} /> {deleting ? 'Deleting…' : 'Yes, delete my account'}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
+                  <Button variant="ghost" size="sm" disabled={deleting} onClick={() => setConfirmDelete(false)}>
                     Cancel
                   </Button>
                 </div>

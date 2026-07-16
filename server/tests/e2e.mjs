@@ -246,8 +246,12 @@ async function main() {
     const payload = decodeJwtPayload(A.token);
     const claimKeys = Object.keys(payload).filter((k) => !['iat', 'exp'].includes(k)).sort();
     check(
-      'JWT payload = { id, role (+tokenVersion) } only',
-      payload.id === A.id && payload.role === 'user' && claimKeys.every((k) => ['id', 'role', 'tokenVersion'].includes(k)),
+      'access JWT carries only { id, role, tokenVersion, sid, type }',
+      payload.id === A.id &&
+        payload.role === 'user' &&
+        payload.type === 'access' &&
+        typeof payload.sid === 'string' &&
+        claimKeys.every((k) => ['id', 'role', 'tokenVersion', 'sid', 'type'].includes(k)),
       `claims: ${claimKeys.join(',')}`
     );
   }

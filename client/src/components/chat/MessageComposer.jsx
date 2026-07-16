@@ -2,14 +2,31 @@ import { useRef, useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
-import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2, BarChart3, Eye, Radio, ShoppingBag } from 'lucide-react';
 import { useUI } from '../../store/useUI';
+import { useChat } from '../../store/useChat';
+import { useBusiness } from '../../store/useBusiness';
+import { useWorkspace } from '../../store/useWorkspace';
 import { emitSocket } from '../../hooks/useSocket';
-import { uploadFiles } from '../../lib/api';
+import { uploadFiles, mediaUrl } from '../../lib/api';
 import { cn, formatDuration } from '../../lib/utils';
+import Avatar from '../ui/Avatar';
+import Modal from '../ui/Modal';
+import Button from '../ui/Button';
+import Switch from '../ui/Switch';
 
-export default function MessageComposer({ chatId, replyTo, onClearReply, onSend }) {
+export default function MessageComposer({ chatId, replyTo, onClearReply, onSend, mentionables = [] }) {
   const theme = useUI((s) => s.theme);
+  const createPoll = useChat((s) => s.createPoll);
+  const startLiveLocation = useChat((s) => s.startLiveLocation);
+  const updateLiveLocation = useChat((s) => s.updateLiveLocation);
+  const stopLiveLocation = useChat((s) => s.stopLiveLocation);
+  const isTeamWorkspace = useWorkspace((s) => s.workspace && s.workspace.type !== 'personal');
+  const products = useBusiness((s) => s.products);
+  const loadBusiness = useBusiness((s) => s.load);
+  const shareProductToChat = useBusiness((s) => s.shareProduct);
+  const [liveShare, setLiveShare] = useState(null); // { messageId, watchId } while sharing
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -17,6 +34,10 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const [poll, setPoll] = useState({ question: '', options: ['', ''], multi: false });
+  const [viewOnceNext, setViewOnceNext] = useState(false); // send the next photo as view-once
+  const [mention, setMention] = useState(null); // { query, start } while typing an @mention
 
   const typingTimeout = useRef(null);
   const photoInputRef = useRef(null);
@@ -28,15 +49,56 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
   const recSecondsRef = useRef(0);
   const cancelledRef = useRef(false);
   const videoRef = useRef(null);
+  const textareaRef = useRef(null);
+  const liveWatchRef = useRef(null);
+
+  // ── Draft persistence (per chat, survives navigation & reload) ──
+  useEffect(() => {
+    setText(localStorage.getItem(`cc_draft_${chatId}`) || '');
+    setMention(null);
+  }, [chatId]);
+
+  const saveDraft = (val) => {
+    if (val) localStorage.setItem(`cc_draft_${chatId}`, val);
+    else localStorage.removeItem(`cc_draft_${chatId}`);
+  };
+
+  // ── @mention autocomplete ──────────────────────────────────────
+  const detectMention = (val, caret) => {
+    if (!mentionables.length) return setMention(null);
+    const upto = val.slice(0, caret ?? val.length);
+    const m = upto.match(/(?:^|\s)@([A-Za-z0-9_.]*)$/);
+    setMention(m ? { query: m[1].toLowerCase(), start: caret - m[1].length - 1 } : null);
+  };
+  const mentionMatches = mention
+    ? mentionables
+        .filter((u) => `${u.username || ''} ${u.name || ''}`.toLowerCase().includes(mention.query))
+        .slice(0, 6)
+    : [];
+  const insertMention = (user) => {
+    const caret = textareaRef.current?.selectionStart ?? text.length;
+    const next = `${text.slice(0, mention.start)}@${user.username} ${text.slice(caret)}`;
+    setText(next);
+    saveDraft(next);
+    setMention(null);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
 
   // Clean up any live mic/camera stream + timer if the composer unmounts mid-record.
   useEffect(() => () => {
     clearInterval(recTimerRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (liveWatchRef.current != null) navigator.geolocation?.clearWatch(liveWatchRef.current);
   }, []);
 
+  // Business users: make sure the catalog is loaded for the share picker.
+  useEffect(() => { if (isTeamWorkspace) loadBusiness(); }, [isTeamWorkspace, loadBusiness]);
+
   const handleChange = (e) => {
-    setText(e.target.value);
+    const val = e.target.value;
+    setText(val);
+    saveDraft(val);
+    detectMention(val, e.target.selectionStart);
     emitSocket('typing-start', { chatId });
     clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => emitSocket('typing-stop', { chatId }), 1500);
@@ -47,9 +109,29 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
     if (!value) return;
     onSend({ content: value, type: 'text', replyTo });
     setText('');
+    saveDraft('');
     setShowEmoji(false);
+    setMention(null);
     onClearReply?.();
     emitSocket('typing-stop', { chatId });
+  };
+
+  // ── Poll creation ──────────────────────────────────────────────
+  const setPollOption = (i, val) => setPoll((p) => ({ ...p, options: p.options.map((o, j) => (j === i ? val : o)) }));
+  const addPollOption = () => setPoll((p) => (p.options.length >= 12 ? p : { ...p, options: [...p.options, ''] }));
+  const removePollOption = (i) => setPoll((p) => ({ ...p, options: p.options.filter((_, j) => j !== i) }));
+  const submitPoll = async () => {
+    const question = poll.question.trim();
+    const options = poll.options.map((o) => o.trim()).filter(Boolean);
+    if (!question) return toast.error('Add a question for your poll.');
+    if (options.length < 2) return toast.error('A poll needs at least two options.');
+    try {
+      await createPoll({ chatId, question, options, multi: poll.multi });
+      setPollOpen(false);
+      setPoll({ question: '', options: ['', ''], multi: false });
+    } catch {
+      toast.error('Could not create the poll.');
+    }
   };
 
   const onKeyDown = (e) => {
@@ -69,7 +151,8 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
     try {
       const attachments = await uploadFiles(files);
       if (!attachments.length) throw new Error('empty');
-      onSend({ content: '', type, attachments });
+      onSend({ content: '', type, attachments, viewOnce: viewOnceNext && type === 'image' });
+      setViewOnceNext(false);
     } catch {
       toast.error('Upload failed. Please try again.');
     } finally {
@@ -84,6 +167,49 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
       (pos) => onSend({ content: '', type: 'location', location: { lat: pos.coords.latitude, lng: pos.coords.longitude, label: 'Shared location' } }),
       () => toast.error('Could not get your location.')
     );
+  };
+
+  // ── Live location: share for 1h, streaming updates until stopped/expired ──
+  const shareLiveLocation = () => {
+    setShowAttach(false);
+    if (liveShare) return; // already sharing in this chat
+    if (!navigator.geolocation) return toast.error('Location is not available.');
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          const message = await startLiveLocation(chatId, coords, 3600);
+          const watchId = navigator.geolocation.watchPosition(
+            (p) => updateLiveLocation(message._id, { lat: p.coords.latitude, lng: p.coords.longitude }),
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 10000 }
+          );
+          liveWatchRef.current = watchId;
+          setLiveShare({ messageId: message._id, watchId });
+          toast.success('Sharing live location for 1 hour.');
+        } catch (err) {
+          toast.error(err?.message || 'Could not start live location.');
+        }
+      },
+      () => toast.error('Could not get your location.')
+    );
+  };
+  const stopLiveShare = async () => {
+    if (!liveShare) return;
+    navigator.geolocation?.clearWatch(liveShare.watchId);
+    liveWatchRef.current = null;
+    await stopLiveLocation(liveShare.messageId);
+    setLiveShare(null);
+    toast('Stopped sharing live location.');
+  };
+
+  const shareCatalogProduct = async (productId) => {
+    setCatalogOpen(false);
+    try {
+      await shareProductToChat(productId, chatId);
+    } catch (err) {
+      toast.error(err?.message || 'Could not share product.');
+    }
   };
 
   // ── Voice recording ───────────────────────────────────────────
@@ -177,7 +303,8 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
     setUploading(true);
     try {
       const attachments = await uploadFiles([file]);
-      onSend({ content: '', type: 'image', attachments });
+      onSend({ content: '', type: 'image', attachments, viewOnce: viewOnceNext });
+      setViewOnceNext(false);
     } catch {
       toast.error('Could not send photo.');
     } finally {
@@ -190,6 +317,9 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
     { icon: Camera, label: 'Camera', color: 'text-brand-500 bg-brand-500/10', onClick: openCamera },
     { icon: FileText, label: 'Document', color: 'text-cyan-500 bg-cyan-500/10', onClick: () => docInputRef.current?.click() },
     { icon: MapPin, label: 'Location', color: 'text-emerald-500 bg-emerald-500/10', onClick: shareLocation },
+    { icon: Radio, label: 'Live location', color: 'text-rose-500 bg-rose-500/10', onClick: shareLiveLocation },
+    { icon: BarChart3, label: 'Poll', color: 'text-amber-500 bg-amber-500/10', onClick: () => { setShowAttach(false); setPollOpen(true); } },
+    ...(isTeamWorkspace ? [{ icon: ShoppingBag, label: 'Catalog', color: 'text-brand-500 bg-brand-500/10', onClick: () => { setShowAttach(false); setCatalogOpen(true); } }] : []),
   ];
 
   return (
@@ -197,6 +327,79 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
       {/* hidden file inputs */}
       <input ref={photoInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => handleFiles(e, 'image')} />
       <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" multiple hidden onChange={(e) => handleFiles(e, 'document')} />
+
+      {/* Poll creator */}
+      <Modal
+        open={pollOpen}
+        onClose={() => setPollOpen(false)}
+        title="Create a poll"
+        subtitle="Ask the chat a question."
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setPollOpen(false)}>Cancel</Button>
+            <Button variant="primary" onClick={submitPoll}><BarChart3 size={16} /> Create poll</Button>
+          </div>
+        }
+      >
+        <div className="space-y-3 py-1">
+          <input
+            value={poll.question}
+            onChange={(e) => setPoll((p) => ({ ...p, question: e.target.value }))}
+            placeholder="Question"
+            className="w-full rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-sm text-content outline-none focus:border-brand-500"
+          />
+          <div className="space-y-2">
+            {poll.options.map((opt, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  value={opt}
+                  onChange={(e) => setPollOption(i, e.target.value)}
+                  placeholder={`Option ${i + 1}`}
+                  className="w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-content outline-none focus:border-brand-500"
+                />
+                {poll.options.length > 2 && (
+                  <button onClick={() => removePollOption(i)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-content-muted hover:bg-content/5 hover:text-red-500">
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {poll.options.length < 12 && (
+            <button onClick={addPollOption} className="flex items-center gap-1.5 text-sm font-medium text-brand-500 hover:underline">
+              <Plus size={15} /> Add option
+            </button>
+          )}
+          <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5">
+            <span className="text-sm text-content">Allow multiple answers</span>
+            <Switch checked={poll.multi} onChange={(v) => setPoll((p) => ({ ...p, multi: v }))} />
+          </label>
+        </div>
+      </Modal>
+
+      {/* Catalog product picker (business) */}
+      <Modal open={catalogOpen} onClose={() => setCatalogOpen(false)} title="Share a product" subtitle="Send an item from your catalog." size="md">
+        <div className="space-y-2 py-1">
+          {products.length === 0 ? (
+            <p className="py-8 text-center text-sm text-content-muted">No products yet. Add them under Business → Catalog.</p>
+          ) : (
+            products.map((p) => (
+              <button key={p._id} onClick={() => shareCatalogProduct(p._id)} className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface-2/60 p-2.5 text-left transition-colors hover:bg-content/5">
+                {p.images?.[0] ? (
+                  <img src={mediaUrl(p.images[0])} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-brand-500/10 text-brand-500"><ShoppingBag size={20} /></span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-content">{p.name}</span>
+                  {p.price ? <span className="block text-xs text-brand-600 dark:text-brand-300">{p.currency} {p.price}</span> : null}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </Modal>
 
       {/* Camera overlay */}
       <AnimatePresence>
@@ -211,6 +414,15 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Live-location sharing banner */}
+      {liveShare && (
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+          <Radio size={16} className="animate-pulse text-rose-500" />
+          <span className="flex-1 text-xs font-medium text-content">Sharing your live location…</span>
+          <button onClick={stopLiveShare} className="rounded-lg bg-rose-500/15 px-2.5 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-500/25">Stop</button>
+        </div>
+      )}
 
       {/* Reply preview */}
       <AnimatePresence>
@@ -249,8 +461,40 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
                   <span className="text-xs font-medium text-content">{label}</span>
                 </button>
               ))}
+              <button
+                onClick={() => setViewOnceNext((v) => !v)}
+                className={cn('col-span-2 flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors', viewOnceNext ? 'bg-brand-500/15 text-brand-500' : 'text-content-muted hover:bg-content/5')}
+              >
+                <Eye size={15} /> {viewOnceNext ? 'View once is ON for the next photo' : 'Send next photo as view once'}
+              </button>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* @mention autocomplete */}
+      <AnimatePresence>
+        {mentionMatches.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="glass-strong absolute bottom-full left-3 z-30 mb-2 w-64 overflow-hidden rounded-2xl p-1 shadow-soft-lg"
+          >
+            {mentionMatches.map((u) => (
+              <button
+                key={u._id}
+                onClick={() => insertMention(u)}
+                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-content/5"
+              >
+                <Avatar src={u.avatar} name={u.name} size="xs" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-content">{u.name}</span>
+                  <span className="block truncate text-xs text-content-muted">@{u.username}</span>
+                </span>
+              </button>
+            ))}
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -275,6 +519,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend 
               <Smile size={21} />
             </button>
             <textarea
+              ref={textareaRef}
               value={text}
               onChange={handleChange}
               onKeyDown={onKeyDown}

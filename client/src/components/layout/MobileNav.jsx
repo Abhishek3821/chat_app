@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { MessageSquare, Phone, CalendarClock, CircleDashed, Users } from 'lucide-react';
+import { MessageSquare, Phone, CircleDashed, Users, Users2 } from 'lucide-react';
 import { CountBadge } from '../ui/Badge';
 import { useChat } from '../../store/useChat';
 import { cn } from '../../lib/utils';
@@ -8,9 +8,9 @@ import { cn } from '../../lib/utils';
 const items = [
   { to: '/', icon: MessageSquare, label: 'Chats' },
   { to: '/calls', icon: Phone, label: 'Calls' },
-  { to: '/meetings', icon: CalendarClock, label: 'Meet' },
   { to: '/status', icon: CircleDashed, label: 'Status' },
   { to: '/groups', icon: Users, label: 'Groups' },
+  { to: '/communities', icon: Users2, label: 'Circles' },
 ];
 
 export default function MobileNav() {

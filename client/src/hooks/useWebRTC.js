@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import api, { DEMO_MODE } from '../lib/api';
 import { useUI } from '../store/useUI';
 import { useAuth } from '../store/useAuth';
+import { useChat } from '../store/useChat';
 import { emitSocket } from './useSocket';
 
 /**
@@ -87,16 +88,58 @@ export function useWebRTC(call) {
   // from POST /api/calls/start (fallback id keeps demo/offline flows working).
   const callIdRef = useRef(call?.callId || `local-${Math.random().toString(36).slice(2, 10)}`);
 
-  const peerId = call?.peer?._id ? String(call.peer._id) : null; // primary peer
+  const peerId = call?.peer?._id ? String(call.peer._id) : null; // primary peer (1:1)
   const wantVideo = call?.type === 'video';
-  // Demo users have ids like "u1"; real users have Mongo ObjectIds → P2P only for real peers.
-  const hasSocketPeer = Boolean(getSocket() && peerId && !DEMO_MODE && !String(peerId).startsWith('u'));
+
+  // ── Group call context ──
+  // A group call carries the group chat (from the header) or just its id + the
+  // group flag (from an incoming invite). Every participant connects to every
+  // other via a full mesh keyed by user id.
+  const groupChatId = call?.chatId || (call?.group?.isGroup ? String(call.group._id) : null) || null;
+  const groupChatIdRef = useRef(groupChatId);
+  const isGroupCall = Boolean(groupChatId);
+  const hasGroup = Boolean(getSocket() && !DEMO_MODE && isGroupCall);
+  const myId = me?._id ? String(me._id) : null;
+  const helloBackRef = useRef(new Set()); // remoteIds we've already re-greeted (mesh glare control)
+
+  // Demo users have ids like "u1"; real users have Mongo ObjectIds → P2P only for
+  // real 1:1 peers (group calls use the mesh path, never this single-peer flow).
+  const hasSocketPeer = Boolean(
+    getSocket() && peerId && !DEMO_MODE && !isGroupCall && !String(peerId).startsWith('u')
+  );
 
   const addTimer = (fn, ms) => {
     const t = setTimeout(fn, ms);
     timersRef.current.push(t);
     return t;
   };
+
+  // Emit a call signal with the shared callId + (group) chatId attached. The
+  // server uses chatId to authorize signaling between group members who aren't
+  // personal contacts; it's undefined for 1:1 calls (contacts gate applies).
+  const emitSig = useCallback((event, extra = {}) => {
+    emitSocket(event, { callId: callIdRef.current, chatId: groupChatIdRef.current || undefined, ...extra });
+  }, []);
+
+  /** The other members of this group call, resolved from the group chat. */
+  const rosterUsers = useCallback(() => {
+    let chat = call?.group?.participants ? call.group : null;
+    if (!chat && groupChatId) chat = useChat.getState().chats.find((c) => c._id === groupChatId) || null;
+    return (chat?.participants || [])
+      .map((p) => {
+        const u = p.user || p;
+        return { _id: String(u._id || u), name: u.name, avatar: u.avatar };
+      })
+      .filter((u) => u._id && u._id !== myId);
+  }, [call, groupChatId, myId]);
+
+  /** Tell every roster member "I'm here and ready" so the mesh can form. */
+  const announceReady = useCallback(() => {
+    rosterUsers().forEach((u) => {
+      participantsRef.current.set(u._id, u);
+      emitSig('call:accept', { to: u._id });
+    });
+  }, [rosterUsers, emitSig]);
 
   const upsertRemote = useCallback((id, stream) => {
     const key = String(id);
@@ -217,11 +260,11 @@ export function useWebRTC(call) {
     try {
       const offer = await pc.createOffer({ iceRestart: true });
       await pc.setLocalDescription(offer);
-      emitSocket('call:offer', { to: key, offer, callId: callIdRef.current });
+      emitSig('call:offer', { to: key, offer });
     } catch {
       /* noop — the connectionstate handler will drop it if it stays failed */
     }
-  }, []);
+  }, [emitSig]);
 
   const createPeer = useCallback(
     (remoteId, stream, initiator = false) => {
@@ -236,7 +279,7 @@ export function useWebRTC(call) {
       }
       pc.onicecandidate = (e) => {
         if (e.candidate) {
-          emitSocket('call:ice-candidate', { to: key, candidate: e.candidate, callId: callIdRef.current });
+          emitSig('call:ice-candidate', { to: key, candidate: e.candidate });
         }
       };
       pc.ontrack = (e) => upsertRemote(key, e.streams[0]);
@@ -292,7 +335,7 @@ export function useWebRTC(call) {
       peersRef.current.set(key, pc);
       return pc;
     },
-    [closePeer, teardown, upsertRemote, attemptIceRestart, peerId]
+    [closePeer, teardown, upsertRemote, attemptIceRestart, peerId, emitSig]
   );
 
   const flushCandidates = useCallback(async (remoteId) => {
@@ -320,6 +363,31 @@ export function useWebRTC(call) {
       try {
         await getMedia();
         if (cancelled) return;
+
+        // ── GROUP call: ring every other member and let the mesh form ──
+        if (hasGroup) {
+          const roster = rosterUsers();
+          if (!roster.length) {
+            // Nobody else in the group is reachable — show a short local preview.
+            setStatus('calling');
+            addTimer(() => setStatus('demo'), 1800);
+            return;
+          }
+          setStatus('calling');
+          const caller = { _id: me?._id, name: me?.name, avatar: me?.avatar };
+          roster.forEach((u) => {
+            participantsRef.current.set(u._id, u);
+            emitSig('call:invite', { to: u._id, type: call.type, caller });
+          });
+          // If nobody has answered by the ring timeout, give up the whole call.
+          addTimer(() => {
+            if (connectedAtRef.current || peersRef.current.size > 0) return;
+            roster.forEach((u) => emitSig('call:cancel', { to: u._id }));
+            toast('No one answered.', { icon: '📵' });
+            teardown('noanswer', { linger: 1600 });
+          }, RING_TIMEOUT_MS);
+          return;
+        }
 
         if (!hasSocketPeer) {
           // No real peer (demo / group preview) — simulate a short ring.
@@ -388,8 +456,15 @@ export function useWebRTC(call) {
   const accept = useCallback(async () => {
     try {
       await getMedia();
-      if (hasSocketPeer) {
-        emitSocket('call:accept', { to: peerId, callId: callIdRef.current });
+      if (hasGroup) {
+        // Group: announce readiness to everyone; the mesh negotiates each leg.
+        announceReady();
+        setStatus('connecting');
+        addTimer(() => {
+          if (statusRef.current === 'connecting' && peersRef.current.size === 0) teardown('ended');
+        }, CONNECT_TIMEOUT_MS);
+      } else if (hasSocketPeer) {
+        emitSig('call:accept', { to: peerId });
         setStatus('connecting');
         // Caller never sent the offer (crashed / cancelled at the same moment)?
         addTimer(() => {
@@ -401,37 +476,41 @@ export function useWebRTC(call) {
     } catch (err) {
       failMedia(err);
       // Don't leave the caller ringing against a dead popup.
-      if (hasSocketPeer) emitSocket('call:reject', { to: peerId, callId: callIdRef.current });
+      if (hasGroup) rosterUsers().forEach((u) => emitSig('call:reject', { to: u._id }));
+      else if (hasSocketPeer) emitSig('call:reject', { to: peerId });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getMedia, peerId, hasSocketPeer, failMedia, teardown]);
+  }, [getMedia, peerId, hasSocketPeer, hasGroup, announceReady, rosterUsers, emitSig, failMedia, teardown]);
 
   const reject = useCallback(() => {
-    if (hasSocketPeer) emitSocket('call:reject', { to: peerId, callId: callIdRef.current });
+    if (hasGroup) rosterUsers().forEach((u) => emitSig('call:reject', { to: u._id }));
+    else if (hasSocketPeer) emitSig('call:reject', { to: peerId });
     teardown('ended');
-  }, [peerId, hasSocketPeer, teardown]);
+  }, [peerId, hasSocketPeer, hasGroup, rosterUsers, emitSig, teardown]);
 
   const hangUp = useCallback(() => {
-    if (hasSocketPeer) {
-      // End every leg: the primary peer + everyone added + anyone still connected.
-      const ids = new Set([peerId, ...participantsRef.current.keys(), ...peersRef.current.keys()].filter(Boolean));
+    if (hasSocketPeer || hasGroup) {
+      // End every leg: the primary peer + everyone added/ringed + anyone connected.
+      const ids = new Set(
+        [peerId, ...participantsRef.current.keys(), ...peersRef.current.keys()].filter(Boolean)
+      );
       ids.forEach((id) => {
         if (connectedAtRef.current) {
-          emitSocket('call:end', { to: id, callId: callIdRef.current, duration: liveDuration() });
+          emitSig('call:end', { to: id, duration: liveDuration() });
         } else if (call?.direction === 'outgoing') {
-          emitSocket('call:cancel', { to: id, callId: callIdRef.current });
+          emitSig('call:cancel', { to: id });
         } else {
-          emitSocket('call:end', { to: id, callId: callIdRef.current });
+          emitSig('call:end', { to: id });
         }
       });
     }
     teardown('ended');
-  }, [peerId, hasSocketPeer, call, teardown]);
+  }, [peerId, hasSocketPeer, hasGroup, call, emitSig, teardown]);
 
   /** Ring extra contacts into this call (they connect to you, the host). */
   const addParticipants = useCallback(
     (users = []) => {
-      if (!hasSocketPeer) {
+      if (!hasSocketPeer && !hasGroup) {
         toast('Group calling needs a live connection.');
         return;
       }
@@ -440,9 +519,8 @@ export function useWebRTC(call) {
         const id = u?._id ? String(u._id) : null;
         if (!id || id === String(me?._id) || peersRef.current.has(id) || legTimersRef.current.has(id)) return;
         participantsRef.current.set(id, u);
-        emitSocket('call:invite', {
+        emitSig('call:invite', {
           to: id,
-          callId: callIdRef.current,
           type: call.type,
           caller: { _id: me?._id, name: me?.name, avatar: me?.avatar },
         });
@@ -459,7 +537,7 @@ export function useWebRTC(call) {
         toast.success(`Ringing ${added.length} ${added.length === 1 ? 'person' : 'people'}…`);
       }
     },
-    [hasSocketPeer, me, call]
+    [hasSocketPeer, hasGroup, me, call, emitSig]
   );
 
   // ── Screen share (video calls): swap the outgoing video track on every leg ──
@@ -510,17 +588,40 @@ export function useWebRTC(call) {
     const isPrimary = (id) => String(id) === String(peerId);
     const nameFor = (id) => participantsRef.current.get(String(id))?.name || call?.peer?.name || 'User';
 
-    // A party accepted → create the peer + SDP offer for THAT party.
+    // A party is ready (accepted / said hello) → establish the leg to them.
     const onAccepted = async ({ from, callId: cid }) => {
       if (!mine(cid) || !localStreamRef.current) return;
       const remote = String(from || peerId);
-      if (peersRef.current.has(remote)) return;
+      if (!remote || peersRef.current.has(remote)) return;
+
+      // GROUP mesh: for each pair the LOWER user-id is the offerer (avoids glare).
+      // If I'm not the offerer, re-greet them once so THEY offer to me — this also
+      // fixes ordering (my earlier hello may have arrived before they were ready).
+      if (isGroupCall) {
+        if (!myId) return;
+        if (myId < remote) {
+          try {
+            if (statusRef.current !== 'connected') setStatus('connecting');
+            const pc = createPeer(remote, localStreamRef.current, true);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            emitSig('call:offer', { to: remote, offer });
+          } catch {
+            closePeer(remote);
+          }
+        } else if (!helloBackRef.current.has(remote)) {
+          helloBackRef.current.add(remote);
+          emitSig('call:accept', { to: remote });
+        }
+        return;
+      }
+
       try {
         if (statusRef.current !== 'connected') setStatus('connecting');
         const pc = createPeer(remote, localStreamRef.current, true);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        emitSocket('call:offer', { to: remote, offer, callId: callIdRef.current });
+        emitSig('call:offer', { to: remote, offer });
       } catch {
         closePeer(remote);
         if (isPrimary(remote) && !connectedAtRef.current) teardown('error');
@@ -539,7 +640,7 @@ export function useWebRTC(call) {
         await flushCandidates(remote);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        emitSocket('call:answer', { to: remote, answer, callId: callIdRef.current });
+        emitSig('call:answer', { to: remote, answer });
       } catch {
         closePeer(remote);
         if (isPrimary(remote) && !connectedAtRef.current) teardown('error');
@@ -648,7 +749,7 @@ export function useWebRTC(call) {
       s.off('call:handled', onHandled);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createPeer, flushCandidates, closePeer, teardown, peerId]);
+  }, [createPeer, flushCandidates, closePeer, teardown, peerId, emitSig, isGroupCall, myId]);
 
   useEffect(() => () => cleanup(), [cleanup]);
 

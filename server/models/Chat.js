@@ -32,6 +32,14 @@ const chatSchema = new mongoose.Schema(
 
     lastMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
     pinnedMessages: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' }],
+
+    // Disappearing messages: seconds after which new messages self-delete
+    // (0 = off). Applied to every message sent into this chat.
+    disappearingSeconds: { type: Number, default: 0, min: 0 },
+
+    // WhatsApp-Business labels applied to this chat. Labels are workspace-scoped;
+    // the client only surfaces labels belonging to the viewer's own workspace.
+    labels: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Label' }],
   },
   { timestamps: true }
 );

@@ -17,6 +17,12 @@ import adminRoutes from './adminRoutes.js';
 import workspaceRoutes from './workspaceRoutes.js';
 import keyRoutes from './keyRoutes.js';
 import v1Routes from './v1Routes.js';
+import pushRoutes from './pushRoutes.js';
+import communityRoutes from './communityRoutes.js';
+import catalogRoutes from './catalogRoutes.js';
+import agentRoutes from './agentRoutes.js';
+import broadcastRoutes from './broadcastRoutes.js';
+import liveLocationRoutes from './liveLocationRoutes.js';
 
 const router = Router();
 
@@ -45,6 +51,12 @@ router.use('/reports', reportRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/admin', adminRoutes);
 router.use('/workspaces', workspaceRoutes); // multi-tenant org management
+router.use('/push', pushRoutes); // Web Push subscriptions (notifications)
+router.use('/communities', communityRoutes); // groups-of-groups + announcements
+router.use('/catalog', catalogRoutes); // WhatsApp-Business product catalog
+router.use('/agent', agentRoutes); // agent tools: labels + quick replies
+router.use('/broadcasts', broadcastRoutes); // broadcast lists (one-to-many DMs)
+router.use('/live-location', liveLocationRoutes); // real-time location sharing
 router.use('/keys', keyRoutes); // manage your own API keys (JWT)
 router.use('/v1', v1Routes); // public third-party API (X-API-Key)
 

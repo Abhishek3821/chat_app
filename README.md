@@ -154,14 +154,24 @@ VITE_DEMO_MODE=false
 
 ## 📈 Scaling to many members
 
-- **Socket.IO across multiple instances:** add the Redis adapter (`@socket.io/redis-adapter`) so events fan out across nodes; run the server behind a load balancer with **sticky sessions** (or `transports: ['websocket']`).
-- **Database:** MongoDB Atlas scales vertically/horizontally; the schema is already indexed on hot paths (`chat+createdAt`, participants, text search). Add pagination (already supported via `?before=`) everywhere.
-- **Media/calls:** move uploads to Cloudinary/S3 (`STORAGE_DRIVER=cloudinary`), add a TURN server, and consider an SFU (mediasoup / LiveKit) for large group video instead of mesh WebRTC.
-- **Stateless API:** JWT auth is stateless, so the API scales horizontally behind a CDN/edge with no shared session store.
+The backend is **scale-ready and flag-driven**: with no extra config it runs single-instance (in-memory presence, in-memory rate limits, inline jobs). Set the env vars below and it scales horizontally behind a load balancer — **no code changes**.
+
+- **`REDIS_URL`** turns on all four at once: the **Socket.IO Redis adapter** (cross-instance message/presence fan-out), a **shared rate-limit store**, response **caching**, and a **BullMQ worker** that moves notification/push fan-out off the request path. Run multiple instances behind a load balancer with **sticky sessions** (or `transports: ['websocket']`).
+- **`STORAGE_DRIVER=cloudinary`** (+ `CLOUDINARY_URL`) pushes uploads to a CDN so media isn't tied to one instance's disk. An S3 driver slots in behind the same `persistFile()` contract.
+- **`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`** enable **Web Push**, so messages reach users with the app closed — and the server isn't forced to hold a socket open for everyone.
+- **Database:** MongoDB Atlas scales vertically/horizontally; the schema is indexed on hot paths (`chat+createdAt`, participants, `attachments.url`, text search, a TTL index for disappearing messages). For 10M+ add read replicas → sharding (by workspace/chat).
+- **Calls:** add a **TURN** server for cross-NAT, and an **SFU** (mediasoup / LiveKit) for large group video instead of mesh WebRTC.
+- **Stateless API:** JWT auth is stateless, so the API scales horizontally with no shared session store.
+
+See the full feature-gap & scaling roadmap report generated during development for the phased plan (→100k →10M →100M).
 
 ## 🔒 Security
 
-JWT auth (httpOnly cookie + Bearer), bcrypt password hashing, Helmet headers, CORS allow-list, express-rate-limit (global + strict auth limiter), role-based admin guard, input validation, and secured file uploads.
+**Auth & sessions:** short-lived access JWT + rotating refresh token (httpOnly cookie), with a tracked **session registry** — every request re-validates the session, so logout and "log out other devices" revoke access immediately (idle + absolute timeouts; per-device list in Settings). bcrypt hashing, tokenVersion revocation on password change, two-step PIN app-lock.
+
+**RBAC:** a central permission matrix ([utils/rbac.js](server/utils/rbac.js)) is the single source of truth across three role dimensions — platform (super-admin), workspace (owner/admin/member, incl. ownership transfer), and per-group (owner/admin/member) — enforced by one `authorize()` / `can()` / `groupCan()` layer.
+
+**Plus:** Helmet + client CSP, CORS allow-list + Origin-based CSRF guard, Redis-backed rate limiting, NoSQL-injection sanitization (HTTP + socket id validation), Web-Push host allowlist, audience-gated media, and validated/size-capped uploads. See the OWASP Top 10 audit report generated during development.
 
 ## 📝 Notes
 - The production bundle currently ships as a single chunk (>500 kB). For production you can lazy-load the Admin dashboard and emoji picker with `React.lazy` / `manualChunks` — noted as a follow-up, not a blocker.

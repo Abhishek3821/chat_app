@@ -22,6 +22,12 @@ export default function ChatArea({ chat }) {
   const messages = messagesByChat[chat._id] || [];
   const d = getChatDisplay(chat, currentUser);
   const peerIds = chatPeerIds(chat, currentUser);
+  // Group members you can @mention (populated user objects, excluding yourself).
+  const mentionables = d.isGroup
+    ? (chat.participants || [])
+        .map((p) => p.user)
+        .filter((u) => u && typeof u === 'object' && u.username && String(u._id) !== String(currentUser?._id))
+    : [];
   const typingIds = typing[chat._id] || [];
   const typingUser = typingIds.length && !d.isGroup ? d.peer : typingIds.length ? { name: 'Someone', avatar: '' } : null;
 
@@ -78,7 +84,7 @@ export default function ChatArea({ chat }) {
           onEdit={(m, content) => editMessage(chat._id, m._id, content)}
           onForward={(m) => openModal('forwardMessage', { message: m })}
         />
-        <MessageComposer chatId={chat._id} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={handleSend} />
+        <MessageComposer chatId={chat._id} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={handleSend} mentionables={mentionables} />
       </div>
       <RightPanel chat={chat} currentUser={currentUser} />
     </div>

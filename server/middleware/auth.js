@@ -1,6 +1,9 @@
 import { verifyToken } from '../utils/token.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import User from '../models/User.js';
+import Session from '../models/Session.js';
+import { isSessionValid } from '../utils/session.js';
+import { can, PERMISSIONS } from '../utils/rbac.js';
 
 /** Requires a valid JWT (from httpOnly cookie or Authorization: Bearer header). */
 export const protect = asyncHandler(async (req, res, next) => {
@@ -19,6 +22,9 @@ export const protect = asyncHandler(async (req, res, next) => {
   } catch {
     throw new ApiError(401, 'Session expired or invalid. Please log in again.');
   }
+  // Scoped tokens (e.g. the short-lived media token, which is designed to be
+  // placed in URLs) must never work as a full API session.
+  if (decoded.scope) throw new ApiError(401, 'Not authenticated. Please log in.');
 
   const user = await User.findById(decoded.id);
   if (!user) throw new ApiError(401, 'User no longer exists.');
@@ -30,13 +36,27 @@ export const protect = asyncHandler(async (req, res, next) => {
     throw new ApiError(401, 'Session has been revoked. Please log in again.');
   }
 
+  // Tracked-session validation: the access token must map to a live session, so
+  // logout / "log out other devices" / admin revocation take effect immediately
+  // (not only when the access token happens to expire).
+  if (!decoded.sid) throw new ApiError(401, 'Session expired or invalid. Please log in again.');
+  const session = await Session.findById(decoded.sid).select('user revokedAt expiresAt lastActiveAt');
+  if (!isSessionValid(session) || String(session.user) !== String(user._id)) {
+    throw new ApiError(401, 'Session expired or revoked. Please log in again.');
+  }
+  // Throttled last-active bump (avoid a write on every single request).
+  if (Date.now() - session.lastActiveAt.getTime() > 5 * 60 * 1000) {
+    Session.updateOne({ _id: session._id }, { $set: { lastActiveAt: new Date() } }).catch(() => {});
+  }
+
+  req.sessionId = String(session._id);
   req.user = user;
   next();
 });
 
-/** Requires an admin role. Use after `protect`. */
+/** Requires the platform-admin permission (super-admin). Use after `protect`. */
 export const adminOnly = (req, res, next) => {
-  if (req.user?.role !== 'admin') {
+  if (!can(req.user, PERMISSIONS.PLATFORM_ADMIN)) {
     return next(new ApiError(403, 'Admin access required.'));
   }
   next();

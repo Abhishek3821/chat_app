@@ -1,15 +1,17 @@
 import { cn } from '../../lib/utils';
 
-export default function Switch({ checked, onChange, className }) {
+export default function Switch({ checked, onChange, className, disabled = false }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      onClick={() => onChange?.(!checked)}
+      disabled={disabled}
+      onClick={() => !disabled && onChange?.(!checked)}
       className={cn(
         'ring-brand relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300',
         checked ? 'bg-brand-gradient' : 'bg-content/15',
+        disabled && 'cursor-not-allowed opacity-50',
         className
       )}
     >

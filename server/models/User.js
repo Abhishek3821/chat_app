@@ -59,6 +59,11 @@ const userSchema = new mongoose.Schema(
     // Bumped on password change / reset to invalidate all previously-issued JWTs.
     tokenVersion: { type: Number, default: 0 },
 
+    // Two-step verification: an app-lock PIN required to open ChatConnect on a
+    // device. Stored bcrypt-hashed; never returned to the client.
+    twoStepEnabled: { type: Boolean, default: false },
+    twoStepPin: { type: String, select: false },
+
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
 
@@ -69,6 +74,8 @@ const userSchema = new mongoose.Schema(
     pinnedChats: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
     archivedChats: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
     mutedChats: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
+    // Chat lock: chats hidden from the main list behind the two-step PIN.
+    lockedChats: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
 
     privacy: { type: Object, default: privacyDefaults },
     settings: {
@@ -107,6 +114,7 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
   delete obj.otpExpires;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
+  delete obj.twoStepPin;
   return obj;
 };
 

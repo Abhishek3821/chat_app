@@ -2,7 +2,7 @@ import Call from '../models/Call.js';
 import Chat from '../models/Chat.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { emitToUser, isOnline } from '../socket/index.js';
+import { emitToUser, isUserOnline } from '../socket/index.js';
 import { transitionCall } from '../utils/callService.js';
 
 const USER_FIELDS = 'name username avatar isOnline';
@@ -31,7 +31,7 @@ export const startDirectCall = asyncHandler(async (req, res) => {
   if (String(receiverId) === String(req.user._id)) throw new ApiError(400, "You can't call yourself.");
   await assertMutualContacts(req.user._id, receiverId);
 
-  const receiverOnline = isOnline(receiverId);
+  const receiverOnline = await isUserOnline(receiverId);
   const call = await Call.create({
     type,
     isGroup: false,
@@ -73,6 +73,7 @@ export const rejectCall = asyncHandler(async (req, res) => {
 // POST /api/calls  — legacy/group entry point: log a call and ring the callees
 export const startCall = asyncHandler(async (req, res) => {
   const { type = 'audio', chatId, participants = [], isGroup = false } = req.body;
+  if (!Array.isArray(participants)) throw new ApiError(400, 'participants must be a list.');
 
   // SECURITY: you may only ring people you're allowed to reach — group members
   // (for a group call) or mutual contacts (for a 1:1). Anyone else is dropped.

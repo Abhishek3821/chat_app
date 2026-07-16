@@ -7,8 +7,8 @@ const reportSchema = new mongoose.Schema(
     targetUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     targetChat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat' },
     targetMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
-    reason: { type: String, required: true },
-    description: { type: String, default: '' },
+    reason: { type: String, required: true, maxlength: 120 },
+    description: { type: String, default: '', maxlength: 2000 },
     status: { type: String, enum: ['open', 'reviewing', 'resolved', 'dismissed'], default: 'open' },
   },
   { timestamps: true }

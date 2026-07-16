@@ -7,6 +7,7 @@ import { Lock, Eye, EyeOff, ShieldCheck, Check, X, ArrowLeft, Loader2 } from 'lu
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/store/useAuth';
 import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.jsx';
 
 function Requirement({ met, children }) {
@@ -28,6 +29,7 @@ function Requirement({ met, children }) {
 export default function ResetPassword() {
   const { token } = useParams();
   const navigate = useNavigate();
+  const resetPassword = useAuth((s) => s.resetPassword);
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ password: '', confirm: '' });
@@ -36,7 +38,7 @@ export default function ResetPassword() {
 
   const checks = useMemo(
     () => ({
-      length: form.password.length >= 6,
+      length: form.password.length >= 8,
       mixed: /[A-Za-z]/.test(form.password) && /\d/.test(form.password),
       match: form.password.length > 0 && form.password === form.confirm,
     }),
@@ -48,15 +50,19 @@ export default function ResetPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return;
-    if (!checks.length) return toast.error('Password must be at least 6 characters.');
+    if (!checks.length) return toast.error('Password must be at least 8 characters.');
     if (!checks.match) return toast.error('Passwords do not match.');
+    if (!token) return toast.error('This reset link is invalid. Request a new one.');
 
     setSubmitting(true);
-    // Simulated reset — token would be posted to the API in a real backend.
-    await new Promise((r) => setTimeout(r, 900));
-    setSubmitting(false);
-    toast.success('Password updated — please sign in.');
-    navigate('/login');
+    try {
+      await resetPassword(token, form.password);
+      toast.success('Password updated — you’re signed in.');
+      navigate('/');
+    } catch (err) {
+      toast.error(err?.message || 'Reset link is invalid or has expired.');
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -136,7 +142,7 @@ export default function ResetPassword() {
           </motion.div>
 
           <motion.ul variants={rise} className="space-y-1.5 rounded-2xl border border-border bg-surface-2/60 px-4 py-3 text-xs">
-            <Requirement met={checks.length}>At least 6 characters</Requirement>
+            <Requirement met={checks.length}>At least 8 characters</Requirement>
             <Requirement met={checks.mixed}>Letters and numbers (recommended)</Requirement>
             <Requirement met={checks.match}>Both passwords match</Requirement>
           </motion.ul>

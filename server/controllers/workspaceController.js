@@ -3,10 +3,12 @@ import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import { createWorkspaceForUser } from '../utils/workspaceService.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
+import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
 
 const MEMBER_FIELDS = 'name username avatar isOnline lastSeen workspaceRole accountStatus createdAt';
 
-const isManager = (user) => ['owner', 'admin'].includes(user.workspaceRole);
+// Member-management gate, sourced from the central RBAC matrix (owner + admin).
+const isManager = (user) => workspaceCan(user, PERMISSIONS.MEMBERS_MANAGE);
 
 function publicWorkspace(ws, { includeInvite = false } = {}) {
   return {
@@ -16,11 +18,14 @@ function publicWorkspace(ws, { includeInvite = false } = {}) {
     type: ws.type || 'team',
     plan: ws.plan,
     owner: ws.owner,
+    businessProfile: ws.businessProfile || {},
     createdAt: ws.createdAt,
     ...(includeInvite
       ? {
           inviteCode: ws.inviteCode,
           inviteLink: `${(process.env.CLIENT_URL || '').replace(/\/+$/, '')}/signup?invite=${ws.inviteCode}`,
+          // Auto-replies are business-internal config — only exposed to managers.
+          autoReplies: ws.autoReplies || {},
         }
       : {}),
   };
@@ -47,17 +52,49 @@ export const getMyWorkspace = asyncHandler(async (req, res) => {
 
 // PATCH /api/workspaces/me — rename (owner/admin)
 export const updateWorkspace = asyncHandler(async (req, res) => {
-  if (!isManager(req.user)) throw new ApiError(403, 'Only workspace owners/admins can change settings.');
+  if (!workspaceCan(req.user, PERMISSIONS.WORKSPACE_SETTINGS)) throw new ApiError(403, 'Only workspace owners/admins can change settings.');
   const ws = await Workspace.findById(req.user.workspace);
   if (!ws) throw new ApiError(404, 'No workspace.');
   if (typeof req.body.name === 'string' && req.body.name.trim()) ws.name = req.body.name.trim().slice(0, 80);
+
+  // WhatsApp-Business-style storefront profile (never let `verified` be self-set —
+  // that badge is granted by a platform admin only).
+  const bp = req.body.businessProfile;
+  if (bp && typeof bp === 'object') {
+    ws.businessProfile = ws.businessProfile || {};
+    for (const f of ['category', 'description', 'hours', 'address', 'website', 'email']) {
+      if (typeof bp[f] === 'string') ws.businessProfile[f] = bp[f].slice(0, 1000);
+    }
+    ws.markModified('businessProfile');
+  }
+
+  // WhatsApp-Business auto-replies (greeting on first contact, away out-of-hours).
+  const ar = req.body.autoReplies;
+  if (ar && typeof ar === 'object') {
+    ws.autoReplies = ws.autoReplies || {};
+    if (ar.greeting && typeof ar.greeting === 'object') {
+      ws.autoReplies.greeting = ws.autoReplies.greeting || {};
+      if (ar.greeting.enabled !== undefined) ws.autoReplies.greeting.enabled = Boolean(ar.greeting.enabled);
+      if (typeof ar.greeting.text === 'string') ws.autoReplies.greeting.text = ar.greeting.text.slice(0, 1000);
+    }
+    if (ar.away && typeof ar.away === 'object') {
+      ws.autoReplies.away = ws.autoReplies.away || {};
+      if (ar.away.enabled !== undefined) ws.autoReplies.away.enabled = Boolean(ar.away.enabled);
+      if (typeof ar.away.text === 'string') ws.autoReplies.away.text = ar.away.text.slice(0, 1000);
+      const clampHour = (v) => Math.max(0, Math.min(23, Math.trunc(Number(v))));
+      if (ar.away.startHour !== undefined && Number.isFinite(Number(ar.away.startHour))) ws.autoReplies.away.startHour = clampHour(ar.away.startHour);
+      if (ar.away.endHour !== undefined && Number.isFinite(Number(ar.away.endHour))) ws.autoReplies.away.endHour = clampHour(ar.away.endHour);
+    }
+    ws.markModified('autoReplies');
+  }
+
   await ws.save();
   res.json({ success: true, workspace: publicWorkspace(ws, { includeInvite: true }) });
 });
 
 // POST /api/workspaces/me/invite/rotate — new invite code (owner/admin)
 export const rotateInvite = asyncHandler(async (req, res) => {
-  if (!isManager(req.user)) throw new ApiError(403, 'Only workspace owners/admins can rotate the invite.');
+  if (!workspaceCan(req.user, PERMISSIONS.WORKSPACE_INVITE)) throw new ApiError(403, 'Only workspace owners/admins can rotate the invite.');
   const ws = await Workspace.findById(req.user.workspace);
   if (!ws) throw new ApiError(404, 'No workspace.');
   for (let i = 0; i < 5; i += 1) {
@@ -122,13 +159,45 @@ export const removeMember = asyncHandler(async (req, res) => {
   if (member.workspaceRole === 'owner') throw new ApiError(400, "The workspace owner can't be removed.");
 
   const oldWorkspace = req.user.workspace;
-  // Stop them receiving this workspace's group messages.
+  // Remove them from EVERY chat in this workspace — group AND 1:1 — so they lose
+  // access to their prior conversations (chat access is membership-based, so a
+  // leftover 1:1 would otherwise keep them reading/sending after removal).
   await Chat.updateMany(
-    { workspace: oldWorkspace, isGroup: true, 'participants.user': member._id },
+    { workspace: oldWorkspace, 'participants.user': member._id },
     { $pull: { participants: { user: member._id } } }
   );
+  // Scrub mutual contact links: drop them from everyone else's lists in this
+  // workspace, and clear their own (they're starting fresh in a personal space).
+  await User.updateMany(
+    { workspace: oldWorkspace, _id: { $ne: member._id } },
+    { $pull: { contacts: member._id, favorites: member._id, blockedUsers: member._id } }
+  );
+  await User.updateOne({ _id: member._id }, { $set: { contacts: [], favorites: [] } });
   // Give them their own empty workspace and revoke sessions (forces a re-login).
   await createWorkspaceForUser(member, `${member.name}'s workspace`);
   await User.updateOne({ _id: member._id }, { $inc: { tokenVersion: 1 } });
   res.json({ success: true, message: 'Member removed from the workspace.' });
+});
+
+// POST /api/workspaces/me/transfer  { userId } — hand ownership to another member.
+// Only the current owner may do this; they step down to admin and the target
+// becomes the new owner. Also updates the Workspace.owner pointer.
+export const transferOwnership = asyncHandler(async (req, res) => {
+  if (!workspaceCan(req.user, PERMISSIONS.WORKSPACE_TRANSFER)) {
+    throw new ApiError(403, 'Only the workspace owner can transfer ownership.');
+  }
+  const targetId = req.body.userId;
+  if (!targetId || String(targetId) === String(req.user._id)) {
+    throw new ApiError(400, 'Choose another member to transfer ownership to.');
+  }
+  const target = await User.findOne({ _id: targetId, workspace: req.user.workspace });
+  if (!target) throw new ApiError(404, 'Member not found in this workspace.');
+  if (target.accountStatus !== 'active') throw new ApiError(400, 'That member is not active.');
+
+  target.workspaceRole = 'owner';
+  await target.save({ validateBeforeSave: false });
+  await User.updateOne({ _id: req.user._id }, { $set: { workspaceRole: 'admin' } });
+  await Workspace.updateOne({ _id: req.user.workspace }, { $set: { owner: target._id } });
+
+  res.json({ success: true, message: `Ownership transferred to ${target.name}.` });
 });

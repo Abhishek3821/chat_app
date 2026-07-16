@@ -41,4 +41,23 @@ export const useMeetings = create((set, get) => ({
     set((s) => ({ meetings: s.meetings.map((m) => (m._id === id ? data.meeting : m)) }));
     return data.meeting;
   },
+
+  // Start an instant meeting (no schedule) → a shareable room you can join now.
+  createInstant: async (type = 'video') => {
+    const { data } = await api.post('/meetings', { type });
+    set((s) => ({ meetings: [data.meeting, ...s.meetings] }));
+    return data.meeting;
+  },
+
+  // Look up a meeting by its shareable room code (before joining the room).
+  getByCode: async (code) => {
+    const { data } = await api.get(`/meetings/code/${encodeURIComponent(code)}`);
+    return data.meeting;
+  },
+
+  // Join a meeting via its shareable link (Google-Meet style) → returns the meeting.
+  joinByCode: async (code) => {
+    const { data } = await api.post(`/meetings/code/${encodeURIComponent(code)}/join`);
+    return data.meeting;
+  },
 }));

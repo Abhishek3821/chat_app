@@ -34,6 +34,7 @@ export const useAuth = create((set, get) => ({
     }
     const { data } = await api.post('/auth/login', { email, password });
     if (data.token) localStorage.setItem('cc_token', data.token);
+    sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
     set({ user: data.user });
     ensureMediaToken(true);
     return data.user;
@@ -61,6 +62,7 @@ export const useAuth = create((set, get) => ({
     }
     const { data } = await api.post('/auth/verify-otp', { email, otp });
     if (data.token) localStorage.setItem('cc_token', data.token);
+    sessionStorage.setItem('cc_unlocked', '1');
     set({ user: data.user });
     ensureMediaToken(true);
     return data.user;
@@ -70,6 +72,41 @@ export const useAuth = create((set, get) => ({
     if (DEMO_MODE) return {};
     const { data } = await api.post('/auth/resend-otp', { email });
     return data; // may include devOtp when email isn't configured
+  },
+
+  /** Request a password-reset email. Server always responds success (no email enumeration). */
+  forgotPassword: async (email) => {
+    if (DEMO_MODE) return { success: true };
+    const { data } = await api.post('/auth/forgot-password', { email });
+    return data;
+  },
+
+  /** Complete a password reset with the emailed token. Logs the user straight in. */
+  resetPassword: async (token, password) => {
+    if (DEMO_MODE) return { success: true };
+    const { data } = await api.post(`/auth/reset-password/${token}`, { password });
+    if (data.token) localStorage.setItem('cc_token', data.token);
+    if (data.user) set({ user: data.user });
+    if (data.user) ensureMediaToken(true);
+    return data;
+  },
+
+  /** Change password while logged in. Server re-issues a token for THIS session. */
+  changePassword: async ({ currentPassword, newPassword }) => {
+    if (DEMO_MODE) return { success: true };
+    const { data } = await api.patch('/auth/change-password', { currentPassword, newPassword });
+    if (data.token) localStorage.setItem('cc_token', data.token);
+    return data;
+  },
+
+  /** Permanently delete the account and all its data, then tear down the session. */
+  deleteAccount: async () => {
+    if (!DEMO_MODE) await api.delete('/users/me');
+    localStorage.removeItem('cc_token');
+    localStorage.removeItem('cc_demo_authed');
+    clearMediaToken();
+    useUI.getState().resetAppearance();
+    set({ user: null });
   },
 
   updateUser: (patch) => set((s) => ({ user: { ...s.user, ...patch } })),
@@ -97,8 +134,51 @@ export const useAuth = create((set, get) => ({
     return data.settings;
   },
 
+  /** Download a JSON archive of the account's data. */
+  exportMyData: async () => {
+    if (DEMO_MODE) return;
+    const res = await api.get('/users/me/export', { responseType: 'blob' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chatconnect-export.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  // ── Two-step verification (app-lock PIN) ──
+  enableTwoStep: async (pin) => {
+    await api.post('/auth/two-step/enable', { pin });
+    set((s) => ({ user: { ...s.user, twoStepEnabled: true } }));
+    sessionStorage.setItem('cc_unlocked', '1'); // enabling counts as unlocked now
+  },
+  disableTwoStep: async (pin) => {
+    await api.post('/auth/two-step/disable', { pin });
+    set((s) => ({ user: { ...s.user, twoStepEnabled: false } }));
+  },
+  verifyTwoStep: async (pin) => {
+    await api.post('/auth/two-step/verify', { pin });
+    sessionStorage.setItem('cc_unlocked', '1');
+  },
+
+  // ── Active sessions / devices (secure session handling) ──
+  listSessions: async () => {
+    if (DEMO_MODE) return [];
+    const { data } = await api.get('/auth/sessions');
+    return data.sessions || [];
+  },
+  revokeSession: async (id) => {
+    await api.delete(`/auth/sessions/${id}`);
+  },
+  revokeOtherSessions: async () => {
+    await api.post('/auth/sessions/revoke-others');
+  },
+
   /** Local-only session teardown (used when the API says our token is dead). */
   forceLogout: () => {
+    sessionStorage.removeItem('cc_unlocked');
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
@@ -116,6 +196,7 @@ export const useAuth = create((set, get) => ({
     }
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
+    sessionStorage.removeItem('cc_unlocked');
     clearMediaToken();
     useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null });

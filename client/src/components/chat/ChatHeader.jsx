@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Phone, Video, Search, MoreVertical, PanelRight, X, Info, Eraser, Trash2 } from 'lucide-react';
+import { ArrowLeft, Phone, Video, Search, MoreVertical, PanelRight, X, Info, Eraser, Trash2, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Avatar from '../ui/Avatar';
 import { useUI } from '../../store/useUI';
+import { useAuth } from '../../store/useAuth';
 import { useChat } from '../../store/useChat';
 import { getChatDisplay } from '../../lib/chat';
 import { formatLastSeen, cn } from '../../lib/utils';
@@ -12,6 +13,8 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
   const { startCall, toggleRightPanel, setChatListOpen } = useUI();
   const clearChat = useChat((s) => s.clearChat);
   const deleteChat = useChat((s) => s.deleteChat);
+  const lockChat = useChat((s) => s.lockChat);
+  const twoStepEnabled = useAuth((s) => s.user?.twoStepEnabled);
   const navigate = useNavigate();
   const d = getChatDisplay(chat, currentUser);
   const typing = useChat((s) => (s.typing[chat._id] || []).length > 0);
@@ -43,6 +46,21 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
     toast.success('Chat deleted');
     setChatListOpen(true);
     navigate('/');
+  };
+  const handleLock = async () => {
+    setMenuOpen(false);
+    if (!twoStepEnabled) {
+      toast.error('Set up a two-step PIN in Settings first to lock chats.');
+      return;
+    }
+    try {
+      await lockChat(chat._id);
+      toast.success('Chat locked. Find it under “Locked chats”.');
+      setChatListOpen(true);
+      navigate('/');
+    } catch (err) {
+      toast.error(err?.message || 'Could not lock this chat.');
+    }
   };
 
   const status = typing ? (
@@ -89,8 +107,8 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
       </button>
 
       <div className="relative flex items-center gap-1">
-        <HeaderBtn icon={Phone} onClick={() => startCall({ type: 'audio', peer: d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
-        <HeaderBtn icon={Video} onClick={() => startCall({ type: 'video', peer: d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
+        <HeaderBtn icon={Phone} onClick={() => startCall({ type: 'audio', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
+        <HeaderBtn icon={Video} onClick={() => startCall({ type: 'video', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
         <HeaderBtn icon={Search} onClick={openSearch} className="hidden sm:grid" />
         <HeaderBtn icon={PanelRight} onClick={toggleRightPanel} className="hidden lg:grid" />
         <HeaderBtn icon={MoreVertical} onClick={() => setMenuOpen((v) => !v)} />
@@ -101,6 +119,7 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
             <div className="absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg">
               <MenuRow icon={Info} label={d.isGroup ? 'Group info' : 'Contact info'} onClick={() => { toggleRightPanel(); setMenuOpen(false); }} />
               <MenuRow icon={Search} label="Search messages" onClick={openSearch} />
+              <MenuRow icon={Lock} label="Lock chat" onClick={handleLock} />
               <MenuRow icon={Eraser} label="Clear messages" onClick={handleClear} />
               <MenuRow icon={Trash2} label={d.isGroup ? 'Delete group chat' : 'Delete chat'} danger onClick={handleDelete} />
             </div>

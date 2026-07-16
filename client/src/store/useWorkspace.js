@@ -27,6 +27,13 @@ export const useWorkspace = create((set) => ({
     set((s) => ({ workspace: { ...s.workspace, ...data.workspace } }));
   },
 
+  // Update business storefront profile and/or auto-replies (owner/admin).
+  updateBusiness: async (patch) => {
+    const { data } = await api.patch('/workspaces/me', patch);
+    set((s) => ({ workspace: { ...s.workspace, ...data.workspace } }));
+    return data.workspace;
+  },
+
   rotateInvite: async () => {
     const { data } = await api.post('/workspaces/me/invite/rotate');
     set((s) => ({ workspace: { ...s.workspace, ...data.workspace } }));
@@ -36,6 +43,19 @@ export const useWorkspace = create((set) => ({
   setMemberRole: async (userId, role) => {
     await api.patch(`/workspaces/me/members/${userId}/role`, { role });
     set((s) => ({ members: s.members.map((m) => (m._id === userId ? { ...m, workspaceRole: role } : m)) }));
+  },
+
+  // Hand ownership to another member; the current owner steps down to admin.
+  transferOwnership: async (userId) => {
+    await api.post('/workspaces/me/transfer', { userId });
+    set((s) => ({
+      myRole: 'admin',
+      members: s.members.map((m) => {
+        if (m._id === userId) return { ...m, workspaceRole: 'owner' };
+        if (m.workspaceRole === 'owner') return { ...m, workspaceRole: 'admin' };
+        return m;
+      }),
+    }));
   },
 
   // Pause (suspend) or resume a member's access. status: 'suspended' | 'active'.

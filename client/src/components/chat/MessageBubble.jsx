@@ -1,10 +1,14 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X } from 'lucide-react';
+import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X, Eye, EyeOff, ShoppingBag, ExternalLink, Radio } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { formatTime, formatBytes, formatDuration, cn } from '../../lib/utils';
 import { mediaUrl } from '../../lib/api';
+import { Rich } from '../../lib/format';
+import PollCard from './PollCard';
+import { useAuth } from '../../store/useAuth';
+import { useChat } from '../../store/useChat';
 
 const QUICK = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
 
@@ -114,7 +118,9 @@ export default function MessageBubble({ message, isMine, showAvatar, isGroup, st
 
               <MessageMedia message={message} isMine={isMine} />
 
-              {message.content && <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>}
+              {message.type === 'poll' && message.poll && <PollCard message={message} mine={isMine} />}
+
+              {message.content && <Rich text={message.content} mine={isMine} />}
             </>
           )}
 
@@ -205,17 +211,63 @@ function MenuItem({ icon: Icon, label, danger, onClick }) {
 /** Renders whatever media a message carries (image/video/voice/document/location). */
 function MessageMedia({ message, isMine }) {
   const atts = message.attachments || [];
+  const meId = useAuth((s) => s.user?._id);
+  const consumeViewOnce = useChat((s) => s.consumeViewOnce);
+
+  // View-once media: openable exactly once per recipient, then it's gone.
+  if (message.viewOnce && (message.type === 'image' || message.type === 'video')) {
+    const consumed = isMine || !atts.length || (message.viewedBy || []).some((v) => String(v?._id ?? v) === String(meId));
+    if (consumed) {
+      return (
+        <div className={cn('mb-1 flex items-center gap-2 rounded-xl px-3 py-2 text-sm italic', isMine ? 'bg-white/15 text-white/80' : 'bg-content/5 text-content-muted')}>
+          <EyeOff size={16} /> {isMine ? 'View-once media' : 'Opened'}
+        </div>
+      );
+    }
+    const openOnce = () => {
+      const url = mediaUrl(atts[0]?.url);
+      if (url) window.open(url, '_blank', 'noopener');
+      consumeViewOnce(message.chat?._id || message.chat, message._id);
+    };
+    return (
+      <button onClick={openOnce} className={cn('mb-1 flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold', isMine ? 'bg-white/15 text-white' : 'bg-brand-500/10 text-brand-500')}>
+        <Eye size={16} /> View once · tap to open
+      </button>
+    );
+  }
 
   if (message.type === 'voice' || message.type === 'audio') {
     return <VoiceBubble mine={isMine} url={atts[0]?.url} duration={atts[0]?.duration} />;
   }
 
+  if (message.type === 'product' && message.product) {
+    const p = message.product;
+    const Wrapper = p.link ? 'a' : 'div';
+    const wrapProps = p.link ? { href: p.link, target: '_blank', rel: 'noreferrer' } : {};
+    return (
+      <Wrapper {...wrapProps} className={cn('mb-1 block w-56 overflow-hidden rounded-xl', isMine ? 'bg-white/15' : 'bg-content/5')}>
+        {p.image ? (
+          <img src={mediaUrl(p.image)} alt={p.name} className="h-32 w-full object-cover" loading="lazy" />
+        ) : (
+          <div className={cn('grid h-24 w-full place-items-center', isMine ? 'bg-white/10' : 'bg-brand-500/10')}><ShoppingBag size={26} className={isMine ? 'text-white/80' : 'text-brand-500'} /></div>
+        )}
+        <div className="p-2.5">
+          <p className={cn('truncate text-sm font-semibold', isMine ? 'text-white' : 'text-content')}>{p.name}</p>
+          {p.price ? <p className={cn('text-sm font-bold', isMine ? 'text-white' : 'text-brand-600 dark:text-brand-300')}>{p.currency || 'USD'} {p.price}</p> : null}
+          {p.description && <p className={cn('mt-0.5 line-clamp-2 text-xs', isMine ? 'text-white/75' : 'text-content-muted')}>{p.description}</p>}
+          {p.link && <span className={cn('mt-1 inline-flex items-center gap-1 text-[11px] font-medium', isMine ? 'text-white/80' : 'text-brand-500')}><ExternalLink size={11} /> View</span>}
+        </div>
+      </Wrapper>
+    );
+  }
+
   if (message.type === 'location' && message.location) {
     const { lat, lng, label } = message.location;
+    const live = message.liveLocation?.active && (!message.liveLocation.expiresAt || new Date(message.liveLocation.expiresAt) > new Date());
     return (
       <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noreferrer" className={cn('mb-1 flex items-center gap-2 rounded-xl px-3 py-2', isMine ? 'bg-white/15' : 'bg-content/5')}>
-        <MapPin size={18} className={isMine ? 'text-white' : 'text-emerald-500'} />
-        <span className="text-sm underline">{label || 'Shared location'}</span>
+        {live ? <Radio size={18} className={cn('animate-pulse', isMine ? 'text-white' : 'text-emerald-500')} /> : <MapPin size={18} className={isMine ? 'text-white' : 'text-emerald-500'} />}
+        <span className="text-sm underline">{live ? 'Live location · sharing' : (label || 'Shared location')}</span>
       </a>
     );
   }

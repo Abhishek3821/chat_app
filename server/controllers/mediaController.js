@@ -3,8 +3,10 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import Message from '../models/Message.js';
 import Chat from '../models/Chat.js';
+import Status from '../models/Status.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { verifyToken, signMediaToken } from '../utils/token.js';
+import { assertAudience } from './statusController.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -36,7 +38,11 @@ export const serveUpload = asyncHandler(async (req, res) => {
 
   let userId;
   try {
-    userId = verifyToken(raw).id;
+    const decoded = verifyToken(raw);
+    // A token arriving via the query string must be the short-lived media token —
+    // never the 30-day session JWT (URLs leak via history/referrers/logs).
+    if (req.query.token && decoded.scope !== 'media') throw new Error('wrong scope');
+    userId = decoded.id;
   } catch {
     throw new ApiError(401, 'Invalid or expired media token.');
   }
@@ -44,8 +50,15 @@ export const serveUpload = asyncHandler(async (req, res) => {
   const rel = `/uploads/${filename}`;
   const msg = await Message.findOne({ 'attachments.url': rel }).select('chat');
   if (msg) {
+    // Chat attachment → must be a participant of the owning conversation.
     const member = await Chat.findOne({ _id: msg.chat, 'participants.user': userId }).select('_id');
     if (!member) throw new ApiError(403, 'You do not have access to this file.');
+  } else {
+    // Status media → must pass the status's privacy audience (owner / allowed
+    // contacts), matching the /api/status checks. Avatars (referenced by no
+    // message or status) remain readable by any authenticated user.
+    const status = await Status.findOne({ media: rel }).select('user privacy');
+    if (status) await assertAudience(status, userId); // throws 403 if not allowed
   }
 
   const filePath = path.join(uploadDir, filename);

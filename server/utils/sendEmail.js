@@ -49,7 +49,13 @@ export async function sendEmail({ to, subject, html, text }) {
     console.log('\n📧 [Email not configured — logging instead]');
     console.log(`   To:      ${to}`);
     console.log(`   Subject: ${subject}`);
-    console.log(`   Body:    ${text || html}\n`);
+    // Never print the body (OTPs, reset links with raw tokens) to logs in
+    // production — log access would otherwise hand out account-takeover material.
+    if (process.env.NODE_ENV === 'production') {
+      console.log('   Body:    [redacted — configure EMAIL_HOST/USER/PASS to actually send]\n');
+    } else {
+      console.log(`   Body:    ${text || html}\n`);
+    }
     return { sent: false, logged: true };
   }
   const info = await getTransport().sendMail({

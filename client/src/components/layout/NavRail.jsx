@@ -6,6 +6,8 @@ import {
   CalendarClock,
   CircleDashed,
   Users,
+  Users2,
+  Store,
   Contact,
   Settings,
   LayoutDashboard,
@@ -17,14 +19,16 @@ import Avatar from '../ui/Avatar';
 import Tooltip from '../ui/Tooltip';
 import { useAuth } from '../../store/useAuth';
 import { useUI } from '../../store/useUI';
+import { useWorkspace } from '../../store/useWorkspace';
 import { cn } from '../../lib/utils';
 
-const items = [
+const baseItems = [
   { to: '/', icon: MessageSquare, label: 'Chats' },
   { to: '/calls', icon: Phone, label: 'Calls' },
   { to: '/meetings', icon: CalendarClock, label: 'Meetings' },
   { to: '/status', icon: CircleDashed, label: 'Status' },
   { to: '/groups', icon: Users, label: 'Groups' },
+  { to: '/communities', icon: Users2, label: 'Communities' },
   { to: '/contacts', icon: Contact, label: 'Contacts' },
 ];
 
@@ -32,7 +36,13 @@ export default function NavRail() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const openModal = useUI((s) => s.openModal);
+  const wsType = useWorkspace((s) => s.workspace?.type);
   const navigate = useNavigate();
+
+  // Business tools only make sense for team workspaces (not the shared Personal space).
+  const items = wsType && wsType !== 'personal'
+    ? [...baseItems, { to: '/business', icon: Store, label: 'Business' }]
+    : baseItems;
 
   return (
     <nav className="z-30 hidden h-full w-[76px] shrink-0 flex-col items-center gap-1 border-r border-border bg-surface/60 py-4 backdrop-blur-xl md:flex">

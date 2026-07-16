@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { format, isToday, isTomorrow, isSameDay, addDays } from 'date-fns';
 import {
@@ -10,6 +11,11 @@ import {
   MoreHorizontal,
   Plus,
   Users,
+  Check,
+  HelpCircle,
+  XCircle,
+  Copy,
+  LogIn,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -20,6 +26,9 @@ import { cn } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useMeetings } from '@/store/useMeetings';
+
+/** The shareable room code for a meeting (falls back to parsing the link). */
+const roomCodeOf = (meeting) => meeting.roomCode || (meeting.link || '').split('/meet/')[1] || '';
 
 const container = {
   hidden: { opacity: 0 },
@@ -75,8 +84,17 @@ function TypeChip({ type }) {
   );
 }
 
+const RSVP_OPTIONS = [
+  { value: 'going', label: 'Going', icon: Check, active: 'bg-emerald-500 text-white' },
+  { value: 'maybe', label: 'Maybe', icon: HelpCircle, active: 'bg-amber-500 text-white' },
+  { value: 'not_going', label: "Can't go", icon: XCircle, active: 'bg-red-500 text-white' },
+];
+
 function MeetingCard({ meeting, me }) {
-  const startCall = useUI((s) => s.startCall);
+  const rsvp = useMeetings((s) => s.rsvp);
+  const navigate = useNavigate();
+  const [savingRsvp, setSavingRsvp] = useState(null); // the response value being saved
+  const roomCode = roomCodeOf(meeting);
   const start = new Date(meeting.startAt);
   const end = new Date(start.getTime() + (meeting.durationMinutes || 30) * 60 * 1000);
   const soon = isToday(start);
@@ -84,13 +102,33 @@ function MeetingCard({ meeting, me }) {
   const participantUsers = (meeting.participants || []).map((p) => p.user || p).filter(Boolean);
   const people = [meeting.host, ...participantUsers].filter(Boolean);
 
+  const amHost = String(meeting.host?._id) === String(me?._id);
+  // My invite entry (if I'm a participant) → drives the RSVP control + its current state.
+  const myEntry = (meeting.participants || []).find(
+    (p) => String(p.user?._id || p.user) === String(me?._id)
+  );
+  const myResponse = myEntry?.response;
+
+  const handleRsvp = async (value) => {
+    if (savingRsvp) return;
+    setSavingRsvp(value);
+    try {
+      await rsvp(meeting._id, value);
+    } catch (err) {
+      toast.error(err?.message || 'Could not update your RSVP.');
+    } finally {
+      setSavingRsvp(null);
+    }
+  };
+
+  // Join the shareable room (Google-Meet style) — everyone lands in the same room.
   const join = () => {
-    // Join opens the call overlay with the other side (host, or first invitee if I host).
-    const amHost = String(meeting.host?._id) === String(me?._id);
-    const peer = amHost ? participantUsers[0] : meeting.host;
-    if (!peer) return toast('No one else to connect to yet.', { icon: '👤' });
-    startCall({ type: meeting.type, peer, direction: 'outgoing' });
-    toast.success(`Joining “${meeting.title}”`);
+    if (!roomCode) return toast.error('This meeting has no room link.');
+    navigate(`/meet/${roomCode}`);
+  };
+  const copyLink = () => {
+    const url = `${window.location.origin}/meet/${roomCode}`;
+    navigator.clipboard?.writeText(url).then(() => toast.success('Meeting link copied — share it with anyone.')).catch(() => toast(url));
   };
 
   return (
@@ -151,6 +189,32 @@ function MeetingCard({ meeting, me }) {
         </span>
       </div>
 
+      {/* RSVP — only for invitees (the host doesn't RSVP to their own meeting). */}
+      {!amHost && myEntry && (
+        <div className="relative mt-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted">Your response</p>
+          <div className="flex gap-2">
+            {RSVP_OPTIONS.map(({ value, label, icon: Icon, active }) => {
+              const selected = myResponse === value;
+              return (
+                <button
+                  key={value}
+                  onClick={() => handleRsvp(value)}
+                  disabled={!!savingRsvp}
+                  className={cn(
+                    'inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-semibold transition-colors disabled:opacity-60',
+                    selected ? `border-transparent ${active}` : 'border-border text-content-muted hover:bg-content/5'
+                  )}
+                >
+                  <Icon size={14} strokeWidth={2.4} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="relative mt-5 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <ParticipantStack people={people} />
@@ -159,10 +223,13 @@ function MeetingCard({ meeting, me }) {
           </p>
         </div>
 
-        <Button onClick={join} className="shrink-0">
-          {meeting.type === 'video' ? <Video size={17} /> : <Phone size={17} />}
-          Join
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={copyLink} title="Copy meeting link"><Copy size={15} /></Button>
+          <Button onClick={join}>
+            {meeting.type === 'video' ? <Video size={17} /> : <Phone size={17} />}
+            Join
+          </Button>
+        </div>
       </div>
     </motion.article>
   );
@@ -172,12 +239,37 @@ export default function MeetingsPage() {
   const openModal = useUI((s) => s.openModal);
   const meetings = useMeetings((s) => s.meetings);
   const loadMeetings = useMeetings((s) => s.load);
+  const createInstant = useMeetings((s) => s.createInstant);
   const me = useAuth((s) => s.user);
+  const navigate = useNavigate();
   const [selectedDay, setSelectedDay] = useState(null); // Date | null (null = show all upcoming)
+  const [joinCode, setJoinCode] = useState('');
+  const [starting, setStarting] = useState(false);
 
   useEffect(() => {
     loadMeetings();
   }, [loadMeetings]);
+
+  // Start an instant meeting and drop straight into its room (like Meet's "New meeting").
+  const startInstant = async () => {
+    setStarting(true);
+    try {
+      const meeting = await createInstant('video');
+      const code = roomCodeOf(meeting);
+      if (code) navigate(`/meet/${code}`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not start the meeting.');
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // Accept a raw code OR a pasted full link.
+  const goJoin = (e) => {
+    e.preventDefault();
+    const code = (joinCode.includes('/meet/') ? joinCode.split('/meet/')[1] : joinCode).trim().replace(/\/+$/, '');
+    if (code) navigate(`/meet/${code}`);
+  };
 
   const sorted = useMemo(
     () => [...meetings].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)),
@@ -229,12 +321,38 @@ export default function MeetingsPage() {
           </div>
         </div>
 
-        <Button onClick={schedule} className="shrink-0">
-          <Plus size={17} />
-          <span className="hidden sm:inline">Schedule meeting</span>
-          <span className="sm:hidden">Schedule</span>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" onClick={schedule}>
+            <Plus size={17} />
+            <span className="hidden sm:inline">Schedule</span>
+          </Button>
+          <Button onClick={startInstant} disabled={starting}>
+            <Video size={17} />
+            <span className="hidden sm:inline">{starting ? 'Starting…' : 'New meeting'}</span>
+            <span className="sm:hidden">New</span>
+          </Button>
+        </div>
       </motion.header>
+
+      {/* Join with a code / pasted link (like Google Meet). */}
+      <motion.form
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        onSubmit={goJoin}
+        className="mt-4 flex items-center gap-2"
+      >
+        <div className="relative flex-1 sm:max-w-xs">
+          <LogIn className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={16} />
+          <input
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+            placeholder="Enter a code or link"
+            className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm placeholder:text-content-muted"
+          />
+        </div>
+        <Button type="submit" variant="subtle" disabled={!joinCode.trim()}>Join</Button>
+      </motion.form>
 
       {/* 7-day calendar strip */}
       <motion.div

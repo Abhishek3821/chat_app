@@ -2,11 +2,15 @@
 node_modules/
 */node_modules/
 
-# Env
+# Env — never commit real secrets. Server env files ALWAYS hold secrets, so
+# ignore every variant there (a future server/.env.production must not slip in).
+# Client .env.* hold only public VITE_ URLs and may be committed intentionally.
 .env
 .env.local
 */.env
 */.env.local
+server/.env.*
+!server/.env.example
 
 # Build output
 client/dist/

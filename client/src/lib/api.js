@@ -29,21 +29,52 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Endpoints where a 401 means "wrong credentials", not "session expired" —
-// they must NOT force a logout (e.g. a wrong current password on change-password).
-const CREDENTIAL_401_PATHS = /\/auth\/(login|signup|verify-otp|resend-otp|forgot-password|reset-password|change-password)/;
+// Auth-flow endpoints: a 401 here means "wrong credentials" or "no session yet",
+// NOT "access token expired" — so we must NOT try to refresh or force a logout.
+const AUTH_FLOW_PATHS = /\/auth\/(login|signup|verify-otp|resend-otp|forgot-password|reset-password|change-password|refresh)/;
 
-// Normalise errors to a friendly message; auto-logout on an expired/invalid session.
+// Single-flight refresh: many requests can 401 at once when the access token
+// expires; they all await one /auth/refresh call (authenticated by the httpOnly
+// refresh cookie) rather than stampeding it.
+let refreshing = null;
+export async function refreshAccessToken() {
+  if (!refreshing) {
+    refreshing = api
+      .post('/auth/refresh')
+      .then((r) => {
+        const t = r.data?.token;
+        if (t) localStorage.setItem('cc_token', t);
+        return t || null;
+      })
+      .catch(() => null)
+      .finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
+
+// Normalise errors to a friendly message; on an expired access token, refresh
+// once and retry transparently; if refresh fails, the session is gone → logout.
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
-    const message = err.response?.data?.message || err.message || 'Something went wrong';
-    if (err.response?.status === 401 && !CREDENTIAL_401_PATHS.test(err.config?.url || '')) {
+  async (err) => {
+    const original = err.config || {};
+    const status = err.response?.status;
+    const url = original.url || '';
+
+    if (status === 401 && !AUTH_FLOW_PATHS.test(url) && !original._retried) {
+      original._retried = true;
+      const token = await refreshAccessToken();
+      if (token) {
+        original.headers = { ...(original.headers || {}), Authorization: `Bearer ${token}` };
+        return api(original); // replay the original request with the fresh token
+      }
+      // Refresh failed → session revoked/expired. useAuth clears state and
+      // ProtectedRoute redirects to /login. An event avoids an api ⇄ store cycle.
       localStorage.removeItem('cc_token');
-      // useAuth listens for this and clears the session; ProtectedRoute then
-      // redirects to /login. An event avoids an api ⇄ store import cycle.
       window.dispatchEvent(new Event('cc:unauthorized'));
     }
+
+    const message = err.response?.data?.message || err.message || 'Something went wrong';
     return Promise.reject(new Error(message));
   }
 );
