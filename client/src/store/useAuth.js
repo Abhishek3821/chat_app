@@ -54,6 +54,17 @@ export const useAuth = create((set, get) => ({
     return data;
   },
 
+  // Sign in / up with a Google ID token (from Google Identity Services). The
+  // server verifies it and returns our own session, so it behaves like login.
+  googleAuth: async (credential) => {
+    const { data } = await api.post('/auth/google', { credential });
+    if (data.token) localStorage.setItem('cc_token', data.token);
+    sessionStorage.setItem('cc_unlocked', '1');
+    set({ user: data.user });
+    ensureMediaToken(true);
+    return data.user;
+  },
+
   verifyOtp: async ({ email, otp }) => {
     if (DEMO_MODE) {
       localStorage.setItem('cc_demo_authed', '1');

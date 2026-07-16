@@ -17,6 +17,7 @@ import {
 
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
+import GoogleButton from '@/components/auth/GoogleButton';
 import { LogoFull, LogoMark } from '@/components/brand/Logo';
 import { useAuth } from '@/store/useAuth';
 import { DEMO_MODE } from '@/lib/api';
@@ -280,6 +281,10 @@ export default function Login() {
             </Button>
           </motion.div>
         </form>
+
+        <motion.div variants={rise}>
+          <GoogleButton text="signin_with" />
+        </motion.div>
 
         {DEMO_MODE && (
           <motion.p

@@ -131,7 +131,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       const decoded = verifyToken(token);
       // Scoped tokens (media token — lives in URLs) can't open a socket session.
       if (decoded.scope) return next(new Error('Invalid auth token'));
-      const user = await User.findById(decoded.id).select('accountStatus tokenVersion privacy name avatar');
+      const user = await User.findById(decoded.id).select('accountStatus tokenVersion privacy name avatar email');
       if (!user) return next(new Error('User no longer exists'));
       if (user.accountStatus !== 'active') return next(new Error('Account is not active'));
       if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
@@ -146,6 +146,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.userId = String(user._id);
       socket.userName = user.name;
       socket.userAvatar = user.avatar;
+      socket.userEmail = user.email;
       // Reciprocal read receipts: if this user turned them OFF, we still record
       // their reads server-side (for their own unread counts) but never tell the
       // sender — so they don't reveal read state either.
@@ -163,6 +164,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.data.userId = userId;
     socket.data.name = socket.userName;
     socket.data.avatar = socket.userAvatar;
+    socket.data.email = socket.userEmail;
     socket.join(`user:${userId}`);
 
     // IMPORTANT: register ALL event listeners synchronously FIRST. Clients emit
@@ -346,24 +348,43 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       if (!isId(meetingId)) return typeof cb === 'function' && cb({ ok: false, error: 'Invalid meeting.' });
       let meeting;
       try {
-        meeting = await Meeting.findById(meetingId).select('status');
+        meeting = await Meeting.findById(meetingId).select('status host settings');
       } catch {
         meeting = null;
       }
       if (!meeting || meeting.status === 'cancelled') {
         return typeof cb === 'function' && cb({ ok: false, error: 'Meeting not available.' });
       }
+      const isHost = String(meeting.host) === userId;
       const peers = await meetingPeers(meetingId, socket.id);
+      // Host-controlled "join anytime": if off, a guest can't enter until the
+      // host is actually in the room.
+      if (meeting.settings?.joinAnytime === false && !isHost) {
+        const hostPresent = peers.some((p) => String(p.userId) === String(meeting.host));
+        if (!hostPresent) {
+          return typeof cb === 'function' && cb({ ok: false, waiting: true, error: 'The host hasn’t started this meeting yet.' });
+        }
+      }
       socket.join(meetingRoom(meetingId));
       if (!socket.data.meetings) socket.data.meetings = new Set();
       socket.data.meetings.add(String(meetingId));
+      if (!socket.data.meetingJoinAt) socket.data.meetingJoinAt = {};
+      socket.data.meetingJoinAt[String(meetingId)] = Date.now();
+      // Attendance record (best-effort): stamp the meeting's start on the first
+      // join, and add this person's row once (name/email snapshot).
+      const nowJoin = new Date();
+      Meeting.updateOne({ _id: meetingId, startedAt: null }, { $set: { startedAt: nowJoin, status: 'ongoing' } }).catch(() => {});
+      Meeting.updateOne(
+        { _id: meetingId, 'attendees.user': { $ne: userId } },
+        { $push: { attendees: { user: userId, name: socket.data.name, email: socket.data.email, joinedAt: nowJoin, durationSeconds: 0 } } }
+      ).catch(() => {});
       socket.to(meetingRoom(meetingId)).emit('meeting:peer-joined', {
         socketId: socket.id,
         userId,
         name: socket.data.name,
         avatar: socket.data.avatar,
       });
-      if (typeof cb === 'function') cb({ ok: true, peers });
+      if (typeof cb === 'function') cb({ ok: true, peers, isHost });
     });
 
     // Relay an opaque SDP/ICE payload to ONE specific socket, only if the sender
@@ -373,20 +394,44 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       ioRef.to(to).emit('meeting:signal', { from: socket.id, data });
     });
 
+    // Finalize this socket's attendance for a meeting: add the session's duration,
+    // stamp leftAt/endedAt, and mark the meeting completed once the room empties.
+    async function finalizeAttendance(meetingId) {
+      const startedMs = socket.data.meetingJoinAt?.[String(meetingId)];
+      if (socket.data.meetingJoinAt) delete socket.data.meetingJoinAt[String(meetingId)];
+      const now = new Date();
+      const session = startedMs ? Math.max(0, Math.round((Date.now() - startedMs) / 1000)) : 0;
+      try {
+        await Meeting.updateOne(
+          { _id: meetingId, 'attendees.user': userId },
+          { $inc: { 'attendees.$.durationSeconds': session }, $set: { 'attendees.$.leftAt': now, endedAt: now } }
+        );
+        const remaining = (await ioRef.in(meetingRoom(meetingId)).fetchSockets()).filter((s) => s.id !== socket.id);
+        if (remaining.length === 0) {
+          await Meeting.updateOne({ _id: meetingId, status: 'ongoing' }, { $set: { status: 'completed' } });
+        }
+      } catch {
+        /* attendance is best-effort — never break the socket */
+      }
+    }
+
     const leaveMeeting = (meetingId) => {
-      if (!meetingId) return;
+      if (!meetingId || !isId(meetingId)) return;
       socket.leave(meetingRoom(meetingId));
       socket.data.meetings?.delete(String(meetingId));
       socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: socket.id });
+      finalizeAttendance(meetingId);
     };
     socket.on('meeting:leave', ({ meetingId } = {}) => leaveMeeting(meetingId));
 
     // ── Disconnect / presence ─────────────────────────────────────
     socket.on('disconnect', async () => {
-      // Tell every meeting room this socket was in that the peer is gone.
+      // Tell every meeting room this socket was in that the peer is gone, and
+      // finalize its attendance record.
       if (socket.data.meetings) {
         for (const mId of socket.data.meetings) {
           socket.to(meetingRoom(mId)).emit('meeting:peer-left', { socketId: socket.id });
+          await finalizeAttendance(mId);
         }
       }
       const set = onlineUsers.get(userId);

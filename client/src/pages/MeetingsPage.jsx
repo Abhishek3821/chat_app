@@ -8,7 +8,6 @@ import {
   Phone,
   Clock,
   Repeat,
-  MoreHorizontal,
   Plus,
   Users,
   Check,
@@ -16,11 +15,13 @@ import {
   XCircle,
   Copy,
   LogIn,
+  ClipboardList,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
+import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
 import { cn } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
@@ -29,6 +30,16 @@ import { useMeetings } from '@/store/useMeetings';
 
 /** The shareable room code for a meeting (falls back to parsing the link). */
 const roomCodeOf = (meeting) => meeting.roomCode || (meeting.link || '').split('/meet/')[1] || '';
+
+/** Human-readable duration from seconds ("45s" / "12m" / "1h 5m"). */
+function fmtDuration(sec) {
+  const s = Math.round(sec || 0);
+  if (s <= 0) return '—';
+  if (s < 60) return `${s}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
 
 const container = {
   hidden: { opacity: 0 },
@@ -92,9 +103,26 @@ const RSVP_OPTIONS = [
 
 function MeetingCard({ meeting, me }) {
   const rsvp = useMeetings((s) => s.rsvp);
+  const getReport = useMeetings((s) => s.getReport);
   const navigate = useNavigate();
   const [savingRsvp, setSavingRsvp] = useState(null); // the response value being saved
+  const [reportOpen, setReportOpen] = useState(false);
+  const [report, setReport] = useState(null);
+  const [loadingReport, setLoadingReport] = useState(false);
   const roomCode = roomCodeOf(meeting);
+
+  const openReport = async () => {
+    setReportOpen(true);
+    setLoadingReport(true);
+    try {
+      setReport(await getReport(meeting._id));
+    } catch (err) {
+      toast.error(err?.message || 'Could not load the report.');
+      setReportOpen(false);
+    } finally {
+      setLoadingReport(false);
+    }
+  };
   const start = new Date(meeting.startAt);
   const end = new Date(start.getTime() + (meeting.durationMinutes || 30) * 60 * 1000);
   const soon = isToday(start);
@@ -158,15 +186,11 @@ function MeetingCard({ meeting, me }) {
           )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Meeting options"
-          onClick={() => toast('Meeting options', { icon: '⚙️' })}
-          className="shrink-0"
-        >
-          <MoreHorizontal size={18} />
-        </Button>
+        {amHost && (
+          <Button variant="ghost" size="sm" aria-label="Attendance report" onClick={openReport} className="shrink-0">
+            <ClipboardList size={16} /> Report
+          </Button>
+        )}
       </div>
 
       <h3 className="relative mt-3 text-lg font-bold leading-snug text-content">{meeting.title}</h3>
@@ -231,7 +255,64 @@ function MeetingCard({ meeting, me }) {
           </Button>
         </div>
       </div>
+
+      <MeetingReportModal open={reportOpen} onClose={() => setReportOpen(false)} report={report} loading={loadingReport} />
     </motion.article>
+  );
+}
+
+function ReportStat({ label, value }) {
+  return (
+    <div className="rounded-xl bg-surface-2/60 p-3 text-center">
+      <p className="truncate text-base font-bold text-content">{value}</p>
+      <p className="text-[11px] font-medium text-content-muted">{label}</p>
+    </div>
+  );
+}
+
+function MeetingReportModal({ open, onClose, report, loading }) {
+  return (
+    <Modal open={open} onClose={onClose} title="Meeting report" subtitle={report?.title} size="lg">
+      {loading || !report ? (
+        <p className="py-10 text-center text-sm text-content-muted">Loading attendance…</p>
+      ) : (
+        <div className="space-y-4 pb-2">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            <ReportStat label="Date" value={report.startedAt ? format(new Date(report.startedAt), 'd MMM') : '—'} />
+            <ReportStat label="Started" value={report.startedAt ? format(new Date(report.startedAt), 'h:mm a') : 'Not yet'} />
+            <ReportStat label="Duration" value={report.durationSeconds ? fmtDuration(report.durationSeconds) : report.status === 'ongoing' ? 'Live' : '—'} />
+            <ReportStat label="Attended" value={report.attendeeCount} />
+          </div>
+          {report.timezone && <p className="text-center text-xs text-content-muted">Times shown in your local zone · scheduled for {report.timezone}</p>}
+
+          <div>
+            <p className="mb-2 text-sm font-medium text-content">Participants ({report.attendeeCount})</p>
+            {report.attendees.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border p-5 text-center text-sm text-content-muted">No one has joined this meeting yet.</p>
+            ) : (
+              <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
+                {report.attendees.map((a, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3">
+                    <Avatar name={a.name} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-content">{a.name || 'Guest'}</p>
+                      <p className="truncate text-xs text-content-muted">{a.email || '—'}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs text-content-muted">
+                        {a.joinedAt ? format(new Date(a.joinedAt), 'h:mm a') : '—'}
+                        {a.leftAt ? ` – ${format(new Date(a.leftAt), 'h:mm a')}` : ''}
+                      </p>
+                      <p className="text-xs font-semibold text-content">{fmtDuration(a.durationSeconds)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

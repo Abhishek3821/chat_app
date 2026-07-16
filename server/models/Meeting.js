@@ -9,6 +9,21 @@ const rsvpSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One row per person who actually JOINED the live room (attendance record).
+// name/email are snapshotted at join time; durationSeconds accumulates across
+// any rejoins; joinedAt is the first entry, leftAt the last exit.
+const attendeeSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    name: { type: String },
+    email: { type: String },
+    joinedAt: { type: Date },
+    leftAt: { type: Date },
+    durationSeconds: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const meetingSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 120 },
@@ -26,10 +41,25 @@ const meetingSchema = new mongoose.Schema(
     // the code/link can join the live room. Unguessable so it can't be brute-forced.
     roomCode: { type: String, unique: true, index: true },
     link: { type: String },
+    // Host-controlled meeting policy — enforced for participants (not the host):
+    //  • joinAnytime  — if false, guests can only join once the host is present.
+    //  • muteOnEntry  — guests join with their mic muted.
+    //  • autoRecord   — guests' clients auto-start a local recording on join.
+    settings: {
+      joinAnytime: { type: Boolean, default: true },
+      muteOnEntry: { type: Boolean, default: false },
+      autoRecord: { type: Boolean, default: false },
+    },
     recurrence: { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
     reminderMinutes: { type: Number, default: 10 },
 
     status: { type: String, enum: ['scheduled', 'ongoing', 'completed', 'cancelled'], default: 'scheduled' },
+
+    // Live-attendance record: when the room actually started/ended (first join →
+    // last leave) and everyone who attended. Populated by the socket room events.
+    startedAt: { type: Date, default: null },
+    endedAt: { type: Date },
+    attendees: [attendeeSchema],
   },
   { timestamps: true }
 );

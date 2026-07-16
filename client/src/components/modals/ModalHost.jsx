@@ -1,12 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward } from 'lucide-react';
+import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward, Globe, Mail, X, Plus } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
 import { Input, Field, Textarea } from '../ui/Input';
+import Switch from '../ui/Switch';
 import { Chip } from '../ui/Badge';
+
+// Full IANA zone list where the browser supports it, else a sensible short list.
+const TIMEZONES =
+  typeof Intl.supportedValuesOf === 'function'
+    ? Intl.supportedValuesOf('timeZone')
+    : ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'];
+const BROWSER_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+})();
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useAuth } from '../../store/useAuth';
@@ -154,9 +165,15 @@ function CreateGroupModal({ open, onClose }) {
   );
 }
 
+const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none', timezone: BROWSER_TZ });
+const EMPTY_SETTINGS = { joinAnytime: true, muteOnEntry: false, autoRecord: false };
+
 function ScheduleMeetingModal({ open, onClose }) {
-  const [form, setForm] = useState({ title: '', date: '', time: '', type: 'video', recurrence: 'none' });
+  const [form, setForm] = useState(EMPTY_SCHEDULE);
+  const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [invitees, setInvitees] = useState([]);
+  const [emails, setEmails] = useState([]);
+  const [emailInput, setEmailInput] = useState('');
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const createMeeting = useMeetings((s) => s.create);
@@ -164,10 +181,19 @@ function ScheduleMeetingModal({ open, onClose }) {
 
   useEffect(() => {
     if (open) load();
-    if (!open) { setForm({ title: '', date: '', time: '', type: 'video', recurrence: 'none' }); setInvitees([]); }
+    if (!open) { setForm(EMPTY_SCHEDULE()); setSettings(EMPTY_SETTINGS); setInvitees([]); setEmails([]); setEmailInput(''); }
   }, [open, load]);
 
   const toggleInvitee = (id) => setInvitees((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+  const setToggle = (k) => (v) => setSettings((s) => ({ ...s, [k]: v }));
+
+  const addEmail = () => {
+    const e = emailInput.trim().toLowerCase();
+    if (!e) return;
+    if (!EMAIL_RE.test(e)) return toast.error('That doesn’t look like an email.');
+    if (!emails.includes(e)) setEmails((list) => [...list, e]);
+    setEmailInput('');
+  };
 
   const schedule = async () => {
     if (!form.title.trim()) return toast.error('Add a meeting title');
@@ -176,7 +202,16 @@ function ScheduleMeetingModal({ open, onClose }) {
     if (Number.isNaN(startAt.getTime())) return toast.error('That date/time looks off');
     setSaving(true);
     try {
-      await createMeeting({ title: form.title.trim(), startAt: startAt.toISOString(), type: form.type, recurrence: form.recurrence, participants: invitees });
+      await createMeeting({
+        title: form.title.trim(),
+        startAt: startAt.toISOString(),
+        type: form.type,
+        recurrence: form.recurrence,
+        timezone: form.timezone,
+        participants: invitees,
+        inviteEmails: emails,
+        settings,
+      });
       toast.success('Meeting scheduled 📅');
       onClose();
     } catch (err) {
@@ -200,6 +235,18 @@ function ScheduleMeetingModal({ open, onClose }) {
           <Field label="Date"><Input type="date" icon={Calendar} value={form.date} onChange={set('date')} /></Field>
           <Field label="Time"><Input type="time" icon={Clock} value={form.time} onChange={set('time')} /></Field>
         </div>
+        <Field label="Time zone">
+          <div className="relative">
+            <Globe className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-content-muted" size={16} />
+            <select
+              value={form.timezone}
+              onChange={set('timezone')}
+              className="ring-brand h-11 w-full appearance-none rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm text-content"
+            >
+              {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>))}
+            </select>
+          </div>
+        </Field>
         <Field label="Type">
           <div className="flex gap-2">
             <TypeChip active={form.type === 'video'} onClick={() => setForm((f) => ({ ...f, type: 'video' }))} icon={Video} label="Video" />
@@ -213,8 +260,41 @@ function ScheduleMeetingModal({ open, onClose }) {
             ))}
           </div>
         </Field>
+
+        {/* Host controls — enforced for participants who join. */}
+        <div className="rounded-2xl border border-border bg-surface-2/40 px-3.5 py-1">
+          <ToggleLine label="Let participants join anytime" hint="Off = they wait until you (the host) join." checked={settings.joinAnytime} onChange={setToggle('joinAnytime')} />
+          <ToggleLine label="Mute participants on entry" hint="Everyone but you joins muted." checked={settings.muteOnEntry} onChange={setToggle('muteOnEntry')} />
+          <ToggleLine label="Auto-record on join" hint="Each participant's device records locally." checked={settings.autoRecord} onChange={setToggle('autoRecord')} />
+        </div>
+
+        {/* Invite by email (registered or not — they get the link). */}
         <div>
-          <p className="mb-2 text-sm font-medium text-content">Invite <span className="text-content-muted">({invitees.length})</span></p>
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-content"><Mail size={15} /> Invite by email</p>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="name@example.com"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
+            />
+            <Button type="button" variant="subtle" size="md" onClick={addEmail}><Plus size={16} /></Button>
+          </div>
+          {emails.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {emails.map((e) => (
+                <span key={e} className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 py-1 pl-2.5 pr-1.5 text-xs text-brand-600 dark:text-brand-300">
+                  {e}
+                  <button onClick={() => setEmails((list) => list.filter((x) => x !== e))} className="grid h-4 w-4 place-items-center rounded-full hover:bg-brand-500/20"><X size={11} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-medium text-content">Invite contacts <span className="text-content-muted">({invitees.length})</span></p>
           <div className="scrollbar-thin max-h-40 space-y-0.5 overflow-y-auto">
             {contacts.length === 0 && <p className="py-4 text-center text-xs text-content-muted">Add contacts to invite them.</p>}
             {contacts.map((u) => (
@@ -224,6 +304,18 @@ function ScheduleMeetingModal({ open, onClose }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+function ToggleLine({ label, hint, checked, onChange }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-2.5 last:border-0">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-content">{label}</p>
+        {hint && <p className="text-xs text-content-muted">{hint}</p>}
+      </div>
+      <Switch checked={checked} onChange={onChange} />
+    </div>
   );
 }
 

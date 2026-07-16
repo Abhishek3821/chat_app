@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, Copy, Users, Loader2, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
@@ -86,16 +86,40 @@ export default function MeetingRoom() {
 }
 
 function Room({ meeting, code, me, onLeave }) {
-  const room = useMeetingRoom(meeting._id, { video: meeting.type !== 'audio' });
-  const { localStream, remotes, status, muted, camOff, sharingScreen, mediaError, toggleMute, toggleCamera, toggleScreenShare, leave } = room;
+  const isHost = String(meeting.host?._id || meeting.host) === String(me?._id);
+  const room = useMeetingRoom(meeting._id, {
+    video: meeting.type !== 'audio',
+    muteOnEntry: meeting.settings?.muteOnEntry,
+    autoRecord: meeting.settings?.autoRecord,
+    isHost,
+  });
+  const { localStream, remotes, status, muted, camOff, sharingScreen, recording, mediaError, toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave } = room;
 
   useEffect(() => { if (status === 'left') onLeave(); }, [status, onLeave]);
 
   const doLeave = () => { leave(); onLeave(); };
+  const copyId = () => {
+    navigator.clipboard?.writeText(code).then(() => toast.success('Meeting ID copied.')).catch(() => toast(code));
+  };
   const copyLink = () => {
     const url = `${window.location.origin}/meet/${code}`;
     navigator.clipboard?.writeText(url).then(() => toast.success('Meeting link copied — share it with anyone.')).catch(() => toast(url));
   };
+
+  // "Join anytime" is off and the host hasn't arrived — hold in a lobby.
+  if (status === 'waiting') {
+    return (
+      <div className="grid h-[100dvh] place-items-center bg-navy-950 p-6 text-center text-white">
+        <div className="flex max-w-sm flex-col items-center gap-3">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10"><Hourglass size={24} className="animate-pulse" /></span>
+          <h1 className="text-lg font-bold">Waiting for the host</h1>
+          <p className="text-sm text-white/70">{mediaError || 'The meeting will start once the host joins.'}</p>
+          <p className="text-xs text-white/50">Meeting ID <span className="font-mono">{code}</span></p>
+          <Button variant="glass" onClick={doLeave}>Leave</Button>
+        </div>
+      </div>
+    );
+  }
 
   const total = remotes.length + 1;
   const cols = total <= 1 ? 'grid-cols-1' : total <= 4 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2 lg:grid-cols-3';
@@ -105,9 +129,14 @@ function Room({ meeting, code, me, onLeave }) {
       <header className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <p className="truncate font-semibold">{meeting.title}</p>
-          <p className="flex items-center gap-1.5 text-xs text-white/60"><Users size={12} /> {total} in call · <span className="font-mono">{code}</span></p>
+          <button onClick={copyId} title="Copy meeting ID" className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white/90">
+            <Users size={12} /> {total} in call · Meeting ID <span className="font-mono">{code}</span> <Copy size={11} />
+          </button>
         </div>
-        <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> Copy link</Button>
+        <div className="flex items-center gap-2">
+          {recording && <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-300"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC</span>}
+          <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> Copy link</Button>
+        </div>
       </header>
 
       {mediaError && (
@@ -116,14 +145,14 @@ function Room({ meeting, code, me, onLeave }) {
 
       <div className="min-h-0 flex-1 px-4">
         <div className={cn('grid h-full gap-3 place-content-center', cols)}>
-          <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror={!sharingScreen} label={`${me?.name || 'You'} (you)`} />
+          <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror={!sharingScreen} label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`} />
           {remotes.map((r) => (
             <VideoTile key={r.socketId} stream={r.stream} name={r.user?.name} avatar={r.user?.avatar} label={r.user?.name || 'Guest'} />
           ))}
         </div>
         {remotes.length === 0 && (
           <p className="mt-3 text-center text-sm text-white/50">
-            {status === 'connecting' ? 'Connecting…' : 'You’re the only one here. Share the link to invite others.'}
+            {status === 'connecting' ? 'Connecting…' : 'You’re the only one here. Share the meeting ID or link to invite others.'}
           </p>
         )}
       </div>
@@ -136,6 +165,7 @@ function Room({ meeting, code, me, onLeave }) {
         {meeting.type !== 'audio' && (
           <CtrlButton active={sharingScreen} onClick={toggleScreenShare} on={<MonitorUp size={20} />} off={<MonitorUp size={20} />} label="Share screen" highlightWhenActive />
         )}
+        <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
         <button onClick={doLeave} className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105" title="Leave">
           <PhoneOff size={22} />
         </button>

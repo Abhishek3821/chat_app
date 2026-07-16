@@ -19,18 +19,18 @@ export const useMeetings = create((set, get) => ({
     }
   },
 
-  create: async ({ title, description = '', startAt, durationMinutes = 30, type = 'video', recurrence = 'none', participants = [] }) => {
+  create: async ({ title, description = '', startAt, durationMinutes = 30, type = 'video', recurrence = 'none', participants = [], timezone, settings, inviteEmails = [] }) => {
     if (DEMO_MODE) {
       const me = useAuth.getState().user;
       const meeting = {
         _id: `m-${Date.now()}`, title, description, host: me, participants: [],
-        startAt, durationMinutes, type, recurrence, status: 'scheduled',
+        startAt, durationMinutes, type, recurrence, timezone, settings, status: 'scheduled',
         link: `/meet/${Math.random().toString(36).slice(2, 10)}`,
       };
       set((s) => ({ meetings: [meeting, ...s.meetings] }));
       return meeting;
     }
-    const { data } = await api.post('/meetings', { title, description, startAt, durationMinutes, type, recurrence, participants });
+    const { data } = await api.post('/meetings', { title, description, startAt, durationMinutes, type, recurrence, participants, timezone, settings, inviteEmails });
     set((s) => ({ meetings: [data.meeting, ...s.meetings].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)) }));
     return data.meeting;
   },
@@ -59,5 +59,11 @@ export const useMeetings = create((set, get) => ({
   joinByCode: async (code) => {
     const { data } = await api.post(`/meetings/code/${encodeURIComponent(code)}/join`);
     return data.meeting;
+  },
+
+  // Host-only attendance record: date/time, duration, who attended (name/email).
+  getReport: async (id) => {
+    const { data } = await api.get(`/meetings/${id}/report`);
+    return data.report;
   },
 }));

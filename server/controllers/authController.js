@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User.js';
 import Workspace from '../models/Workspace.js';
 import Session from '../models/Session.js';
@@ -48,6 +49,65 @@ async function generateUsername(email, explicit) {
   }
   return `${padded.slice(0, 18)}${Date.now().toString(36)}`;
 }
+
+// Google Identity Services verifier — only active when GOOGLE_CLIENT_ID is set.
+const googleClient = process.env.GOOGLE_CLIENT_ID ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID) : null;
+
+// POST /api/auth/google  { credential }
+// Sign in / up with a Google ID token (from Google Identity Services on the
+// client). Verifies the token with Google, then finds-or-creates the account and
+// issues our own session — so Google users get the exact same session/RBAC as
+// password users. No-op (501) unless GOOGLE_CLIENT_ID is configured.
+export const googleAuth = asyncHandler(async (req, res) => {
+  if (!googleClient) throw new ApiError(501, 'Google sign-in is not configured on this server.');
+  const credential = typeof req.body.credential === 'string' ? req.body.credential : '';
+  if (!credential) throw new ApiError(400, 'Missing Google credential.');
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+    payload = ticket.getPayload();
+  } catch {
+    throw new ApiError(401, 'Could not verify your Google account. Please try again.');
+  }
+  const email = cleanEmail(payload?.email);
+  if (!email || payload.email_verified === false) throw new ApiError(401, 'Your Google email could not be verified.');
+
+  let user = await User.findOne({ email });
+  let isNew = false;
+  if (!user) {
+    isNew = true;
+    // New Google account: passwordless in practice (a strong random password is
+    // stored so the schema is satisfied; they sign in with Google). Personal
+    // account so they're reachable, and pre-verified (Google verified the email).
+    const randomPassword = crypto.randomBytes(24).toString('base64url');
+    for (let attempt = 0; ; attempt += 1) {
+      const username = await generateUsername(email);
+      try {
+        user = await User.create({
+          name: (payload.name || email.split('@')[0]).slice(0, 60),
+          email,
+          username,
+          password: randomPassword,
+          role: 'user',
+          isVerified: true,
+          avatar: safeAvatar(payload.picture) || `https://api.dicebear.com/9.x/glass/svg?seed=${encodeURIComponent(username)}`,
+        });
+        break;
+      } catch (err) {
+        if (err?.code === 11000 && err.keyValue?.username && attempt < 2) continue;
+        throw err;
+      }
+    }
+    await joinPersonalSpace(user);
+  } else if (!user.isVerified) {
+    user.isVerified = true; // Google has now verified this email
+    await user.save({ validateBeforeSave: false });
+  }
+  if (user.accountStatus !== 'active') throw new ApiError(403, 'This account is not active.');
+  securityEvent('auth.google', req, { userId: String(user._id), isNew });
+  await sendTokenResponse(req, res, user, isNew ? 201 : 200, { isNew });
+});
 
 // POST /api/auth/signup
 export const signup = asyncHandler(async (req, res) => {

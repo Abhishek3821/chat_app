@@ -4,6 +4,7 @@ import {
   verifyOtp,
   resendOtp,
   login,
+  googleAuth,
   logout,
   getMe,
   forgotPassword ,
@@ -26,6 +27,7 @@ router.post('/signup', authLimiter, signup);
 router.post('/verify-otp', authLimiter, verifyOtp);
 router.post('/resend-otp', authLimiter, resendOtp);
 router.post('/login', authLimiter, login);
+router.post('/google', authLimiter, googleAuth); // sign in / up with a Google ID token
 router.post('/logout', protect, logout);
 router.post('/refresh', authLimiter, refresh); // authenticated by the refresh cookie
 router.get('/me', protect, getMe);
