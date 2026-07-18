@@ -318,7 +318,15 @@ function identifierQuery(identifier) {
   const or = [];
   if (id.includes('@')) or.push({ email: id.toLowerCase() });
   const phone = normalizePhone(id);
-  if (phone) or.push({ phone });
+  if (phone) {
+    // Stored phones vary in format ("+919876543210" vs "9876543210") and users
+    // type them either way — match with/without the "+", and for full-length
+    // numbers also by their last 10 digits so a missing country code still
+    // finds the account. The password check disambiguates any suffix overlap.
+    const digits = phone.replace(/^\+/, '');
+    or.push({ phone: { $in: [digits, `+${digits}`] } });
+    if (digits.length >= 10) or.push({ phone: new RegExp(`${digits.slice(-10)}$`) });
+  }
   if (/^[a-z0-9_.]{3,30}$/i.test(id)) or.push({ username: id.toLowerCase() });
   return or.length ? { $or: or } : null;
 }
@@ -329,8 +337,18 @@ async function checkCredentials(req, identifier, password) {
   if (!query || typeof password !== 'string' || !password) {
     throw new ApiError(400, 'Enter your email, username or phone number, and your password.');
   }
-  const user = await User.findOne(query).select('+password');
-  if (!user || !(await user.matchPassword(password))) {
+  // A phone identifier can match more than one stored format — the password
+  // decides which (bcrypt compare, so wrong-account matches are impossible).
+  const candidates = await User.find(query).select('+password').limit(5);
+  let user = null;
+  for (const candidate of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await candidate.matchPassword(password)) {
+      user = candidate;
+      break;
+    }
+  }
+  if (!user) {
     securityEvent('login.failure', req, { identifier: String(identifier).slice(0, 60) });
     throw new ApiError(401, 'Invalid credentials. Check your details and try again.');
   }
