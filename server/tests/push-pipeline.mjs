@@ -74,6 +74,7 @@ async function startServer() {
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
       EMAIL_HOST: '', EMAIL_USER: '', EMAIL_PASS: '',
+      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '',
       CLIENT_URL: 'http://localhost:5290',
       VAPID_PUBLIC_KEY: vapid.publicKey,
       VAPID_PRIVATE_KEY: vapid.privateKey,

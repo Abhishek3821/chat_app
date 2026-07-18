@@ -101,6 +101,11 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
   if (emailConfigured && !sent) {
     throw new ApiError(502, 'We could not send the verification email right now. Please try again in a moment.');
   }
+  // In production a missing mailer is a server misconfiguration — say so
+  // plainly instead of returning success with no way to get a code.
+  if (!emailConfigured && process.env.NODE_ENV === 'production') {
+    throw new ApiError(503, 'Email sending is not configured on the server. Please contact support.');
+  }
   securityEvent('signup.email.code', req, { email });
   res.json({
     success: true,

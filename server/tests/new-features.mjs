@@ -92,9 +92,10 @@ async function startServer() {
       MONGO_URI: TEST_URI,
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'true', // signup must verify the email before login works
-      EMAIL_HOST: '', // force "email not configured" so dev OTPs come back in responses
-      EMAIL_USER: '',
-      EMAIL_PASS: '',
+      // Force "email not configured" (both naming schemes) so dev OTPs come
+      // back in API responses instead of being sent.
+      EMAIL_HOST: '', EMAIL_USER: '', EMAIL_PASS: '',
+      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '',
       CLIENT_URL: 'http://localhost:5290',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -3,20 +3,33 @@ import nodemailer from 'nodemailer';
 /**
  * Email delivery via Nodemailer/SMTP.
  *
+ * Config is read from EMAIL_* variables, with SMTP_* accepted as aliases
+ * (EMAIL_HOST or SMTP_HOST, etc.) — both namings are common and people mix
+ * them up when copying provider docs.
+ *
  * SMTP is considered configured only when HOST, USER and PASS are ALL set — a
  * host with blank credentials (the old default) silently failed to send. When
  * not configured, sendEmail logs the message instead so dev/OTP flows still work.
  */
+const smtpEnv = () => ({
+  host: process.env.EMAIL_HOST || process.env.SMTP_HOST,
+  port: Number(process.env.EMAIL_PORT || process.env.SMTP_PORT) || 587,
+  user: process.env.EMAIL_USER || process.env.SMTP_USER,
+  pass: process.env.EMAIL_PASS || process.env.SMTP_PASS,
+});
+
 export function isEmailConfigured() {
-  return Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+  const { host, user, pass } = smtpEnv();
+  return Boolean(host && user && pass);
 }
 
 function makeTransport(port) {
+  const { host, user, pass } = smtpEnv();
   return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
+    host,
     port,
     secure: port === 465, // 465 = implicit TLS; 587/2525 = STARTTLS
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+    auth: { user, pass },
     // Fail fast instead of hanging a request if the SMTP host is unreachable.
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
@@ -31,7 +44,7 @@ function makeTransport(port) {
 let transporter = null;
 function getTransport() {
   if (transporter) return transporter;
-  transporter = makeTransport(Number(process.env.EMAIL_PORT) || 587);
+  transporter = makeTransport(smtpEnv().port);
   return transporter;
 }
 
@@ -45,7 +58,7 @@ async function sendWithFallback(mail) {
     return await getTransport().sendMail(mail);
   } catch (err) {
     if (!isConnectionError(err)) throw err;
-    const primary = Number(process.env.EMAIL_PORT) || 587;
+    const primary = smtpEnv().port;
     const alternate = primary === 465 ? 587 : 465;
     console.warn(`⚠️  SMTP port ${primary} unreachable (${err.code || err.message}) — retrying on ${alternate}…`);
     const fallback = makeTransport(alternate);
@@ -75,7 +88,7 @@ export async function verifyEmailTransport() {
  */
 function fromHeader() {
   const raw = (process.env.EMAIL_FROM || '').trim().replace(/^"|"$/g, '');
-  const user = process.env.EMAIL_USER || 'no-reply@chatconnect.app';
+  const user = smtpEnv().user || 'no-reply@chatconnect.app';
   if (raw.includes('@')) return raw; // already a full address / "Name <addr>"
   return `"${raw || 'ChatConnect'}" <${user}>`;
 }
