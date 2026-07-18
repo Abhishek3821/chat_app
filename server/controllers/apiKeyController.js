@@ -3,7 +3,7 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { generateApiKey, API_SCOPES } from '../utils/apiKey.js';
 import { securityEvent } from '../utils/securityLog.js';
 
-const MAX_KEYS_PER_USER = 20;
+const MAX_KEYS_PER_USER =  20;
 
 // GET /api/keys — list my keys (never returns the secret, only the prefix).
 export const listKeys = asyncHandler(async (req, res) => {
