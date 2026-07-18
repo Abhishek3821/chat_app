@@ -32,6 +32,18 @@ export const useNotifications = create((set, get) => ({
       ].slice(0, 50),
     })),
 
+  /** Mark ONE notification read (clicking it). Live (`live-…`) ids are local-only. */
+  markRead: async (id) => {
+    set((s) => ({ items: s.items.map((n) => (n._id === id ? { ...n, isRead: true } : n)) }));
+    if (!DEMO_MODE && !String(id).startsWith('live-')) {
+      try {
+        await api.patch(`/notifications/${id}/read`);
+      } catch {
+        /* optimistic state stands */
+      }
+    }
+  },
+
   markAllRead: async () => {
     set((s) => ({ items: s.items.map((n) => ({ ...n, isRead: true })) }));
     if (!DEMO_MODE) {

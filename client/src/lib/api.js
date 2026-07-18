@@ -22,6 +22,14 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+// Warm-up ping, fired the moment the app loads: free-tier hosts (Render) put
+// idle backends to sleep and the first request eats the ~50 s cold start. By
+// pinging /health immediately, the server is waking up WHILE the user types
+// their credentials instead of when they hit "Sign in". Fire-and-forget.
+if (typeof window !== 'undefined') {
+  fetch(`${baseURL}/health`, { method: 'GET', cache: 'no-store' }).catch(() => {});
+}
+
 // Attach bearer token (kept in localStorage as a fallback to the httpOnly cookie).
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('cc_token');

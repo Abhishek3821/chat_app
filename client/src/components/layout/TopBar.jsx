@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Search, Bell, Sun, Moon, Plus, Check } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
@@ -8,6 +8,7 @@ import Button from '../ui/Button';
 import { CountBadge } from '../ui/Badge';
 import { useUI } from '../../store/useUI';
 import { useAuth } from '../../store/useAuth';
+import { useChat } from '../../store/useChat';
 import { useNotifications } from '../../store/useNotifications';
 import { formatRelative, cn } from '../../lib/utils';
 
@@ -24,17 +25,50 @@ const titles = {
 
 export default function TopBar() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { theme, toggleTheme, openModal } = useUI();
   const user = useAuth((s) => s.user);
   const notifs = useNotifications((s) => s.items);
   const loadNotifs = useNotifications((s) => s.load);
   const markAllRead = useNotifications((s) => s.markAllRead);
+  const markRead = useNotifications((s) => s.markRead);
   const [notifOpen, setNotifOpen] = useState(false);
   const unread = notifs.filter((n) => !n.isRead).length;
 
   useEffect(() => {
     loadNotifs();
   }, [loadNotifs]);
+
+  // Clicking a notification takes you to the thing it's about.
+  const openNotification = (n) => {
+    markRead(n._id);
+    setNotifOpen(false);
+    const chatId = n.data?.chatId;
+    switch (n.type) {
+      case 'message':
+      case 'group_message':
+      case 'mention':
+        if (chatId) useChat.getState().setActiveChat(chatId);
+        navigate('/');
+        break;
+      case 'incoming_call':
+      case 'missed_call':
+        navigate('/calls');
+        break;
+      case 'contact_request':
+      case 'contact_accepted':
+        navigate('/contacts');
+        break;
+      case 'meeting_reminder':
+        navigate('/meetings');
+        break;
+      case 'status_reply':
+        navigate('/status');
+        break;
+      default:
+        navigate('/');
+    }
+  };
 
   return (
     <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/60 px-4 backdrop-blur-xl md:px-6">
@@ -103,7 +137,11 @@ export default function TopBar() {
                       <p className="px-4 py-8 text-center text-sm text-content-muted">You're all caught up 🎉</p>
                     )}
                     {notifs.map((n) => (
-                      <div key={n._id} className={cn('flex gap-3 px-4 py-3 transition-colors hover:bg-content/5', !n.isRead && 'bg-brand-500/5')}>
+                      <button
+                        key={n._id}
+                        onClick={() => openNotification(n)}
+                        className={cn('flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-content/5', !n.isRead && 'bg-brand-500/5')}
+                      >
                         {n.from ? (
                           <Avatar src={n.from.avatar} name={n.from.name} size="sm" />
                         ) : (
@@ -115,7 +153,7 @@ export default function TopBar() {
                           <p className="mt-0.5 text-[10px] text-content-muted">{formatRelative(n.createdAt)}</p>
                         </div>
                         {!n.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-gradient" />}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </motion.div>

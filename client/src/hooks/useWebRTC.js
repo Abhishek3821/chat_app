@@ -32,13 +32,27 @@ import { emitSocket } from './useSocket';
 const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
 ];
-// TURN relay(s) — required for calls behind symmetric NAT / strict firewalls.
+// TURN relay(s) — required for MEDIA to flow between users behind symmetric NAT
+// / strict firewalls (mobile networks, most home routers across the internet).
+// Without one, calls ring and "connect" but no video/audio ever arrives.
 // VITE_TURN_URL may be a single URL or a comma-separated list (turn: and turns:).
 if (import.meta.env.VITE_TURN_URL) {
   ICE_SERVERS.push({
     urls: import.meta.env.VITE_TURN_URL.split(',').map((u) => u.trim()).filter(Boolean),
     username: import.meta.env.VITE_TURN_USERNAME || '',
     credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
+  });
+} else {
+  // Default: Open Relay (metered.ca) — a free public TURN service. Replace with
+  // your own TURN (set VITE_TURN_URL/-USERNAME/-CREDENTIAL) for production scale.
+  ICE_SERVERS.push({
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
   });
 }
 

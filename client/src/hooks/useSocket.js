@@ -6,6 +6,7 @@ import { useAuth } from '../store/useAuth';
 import { useChat } from '../store/useChat';
 import { useUI } from '../store/useUI';
 import { useNotifications } from '../store/useNotifications';
+import { useContacts } from '../store/useContacts';
 
 /** Short preview of a message for notifications. */
 function preview(m) {
@@ -117,13 +118,15 @@ export function useSocket() {
     socket.on('typing-start', ({ chatId, userId }) => setTyping(chatId, userId, true));
     socket.on('typing-stop', ({ chatId, userId }) => setTyping(chatId, userId, false));
     // `chat-updated` fires for every inbound message, but `receive-message`
-    // already patched lastMessage/unread locally — the refetch only reconciles
-    // ordering / brand-new chats. Debounce it so a burst of messages triggers at
-    // most one GET /chats instead of one per message.
+    // already patched lastMessage/unread locally. Refetch the list ONLY when
+    // the chat is unknown here (a brand-new conversation) — refetching on every
+    // message made the sidebar visibly reload each time. Debounced for bursts.
     let chatsRefetchTimer = null;
-    socket.on('chat-updated', () => {
+    socket.on('chat-updated', ({ chatId } = {}) => {
+      const known = chatId && useChat.getState().chats.some((c) => c._id === chatId);
+      if (known) return;
       clearTimeout(chatsRefetchTimer);
-      chatsRefetchTimer = setTimeout(() => useChat.getState().loadChats(), 800);
+      chatsRefetchTimer = setTimeout(() => useChat.getState().loadChats(), 400);
     });
     socket.on('chat-disappearing', ({ chatId, seconds }) => useChat.getState().applyDisappearing(chatId, seconds));
 
@@ -135,10 +138,12 @@ export function useSocket() {
     socket.on('contact-request', ({ from }) => {
       useNotifications.getState().pushLocal({ type: 'contact_request', title: 'New contact request', body: `${from?.name || 'Someone'} wants to connect`, from });
       toast(`${from?.name || 'Someone'} sent you a contact request`, { icon: '👋' });
+      useContacts.getState().load(); // the request appears in Contacts instantly
     });
     socket.on('contact-accepted', ({ by }) => {
       useNotifications.getState().pushLocal({ type: 'contact_accepted', title: 'Request accepted', body: `${by || 'Someone'} accepted your request` });
       toast.success(`${by || 'Someone'} accepted your contact request`);
+      useContacts.getState().load(); // the new contact appears instantly
     });
     socket.on('status-reply', ({ from, text }) => {
       useNotifications.getState().pushLocal({ type: 'status_reply', title: 'Status reply', body: `${from || 'Someone'}: ${text || ''}` });

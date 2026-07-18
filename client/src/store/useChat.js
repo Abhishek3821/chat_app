@@ -26,7 +26,10 @@ export const useChat = create((set, get) => ({
 
   loadChats: async () => {
     if (DEMO_MODE) return set({ chats: CHATS });
-    set({ loadingChats: true });
+    // Skeletons only on the FIRST load. Background refreshes (socket
+    // chat-updated) must never blank the visible list — that reads as the
+    // whole app "refreshing" on every message.
+    if (get().chats.length === 0) set({ loadingChats: true });
     try {
       const { data } = await api.get('/chats');
       set({ chats: data.chats });
