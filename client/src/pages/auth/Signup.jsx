@@ -18,11 +18,13 @@ import {
   X,
   Building2,
   Phone,
+  BadgeCheck,
 } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { useAuth } from '@/store/useAuth';
+import { DEMO_MODE } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.jsx';
 
@@ -72,7 +74,7 @@ function fileToAvatarDataUrl(file, size = 384) {
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { signup, loading } = useAuth();
+  const { signup, sendEmailCode, verifyEmailCode, loading } = useAuth();
   const [params] = useSearchParams();
   const inviteCode = (params.get('invite') || '').trim();
   const [showPw, setShowPw] = useState(false);
@@ -83,8 +85,60 @@ export default function Signup() {
   const [avatar, setAvatar] = useState(null); // data-URL preview, optional
   const fileRef = useRef(null);
 
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  // Email must be verified BEFORE the account can be created.
+  const [emailStep, setEmailStep] = useState('idle'); // idle → sent → verified
+  const [emailToken, setEmailToken] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [devOtp, setDevOtp] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+
+  const set = (key) => (e) => {
+    const value = e.target.value;
+    setForm((f) => ({ ...f, [key]: value }));
+    // Changing the address invalidates any earlier verification.
+    if (key === 'email' && emailStep !== 'idle') {
+      setEmailStep('idle');
+      setEmailToken('');
+      setEmailCode('');
+      setDevOtp('');
+    }
+  };
   const blur = (key) => () => setTouched((t) => ({ ...t, [key]: true }));
+
+  const sendCode = async () => {
+    if (!emailRe.test(form.email)) {
+      setTouched((t) => ({ ...t, email: true }));
+      return toast.error('Enter a valid email address first.');
+    }
+    setEmailBusy(true);
+    try {
+      const r = await sendEmailCode(form.email.trim().toLowerCase());
+      if (r?.devOtp) setDevOtp(r.devOtp);
+      setEmailStep('sent');
+      setEmailCode('');
+      toast.success(r?.message || 'Verification code sent — check your inbox.');
+    } catch (err) {
+      toast.error(err?.message || 'Could not send the code.');
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const confirmCode = async () => {
+    if (emailCode.length !== 6) return toast.error('Enter the 6-digit code from your email.');
+    setEmailBusy(true);
+    try {
+      const r = await verifyEmailCode({ email: form.email.trim().toLowerCase(), otp: emailCode });
+      setEmailToken(r.emailToken);
+      setEmailStep('verified');
+      toast.success('Email verified!');
+    } catch (err) {
+      toast.error(err?.message || 'Invalid or expired code.');
+      setEmailCode('');
+    } finally {
+      setEmailBusy(false);
+    }
+  };
 
   const errors = useMemo(() => {
     const e = {};
@@ -119,27 +173,26 @@ export default function Signup() {
       toast.error('Please fix the highlighted fields.');
       return;
     }
+    if (!DEMO_MODE && emailStep !== 'verified') {
+      return toast.error('Please verify your email address first — click Verify next to it.');
+    }
     setSubmitting(true);
     try {
-      const data = await signup({
+      await signup({
         name: form.name.trim(),
         email: form.email.trim(),
         phone: cleanPhone(form.phone),
         password: form.password,
         confirmPassword: form.confirmPassword,
+        emailToken,
         ...(inviteCode ? { inviteCode } : { accountType }),
         ...(!inviteCode && accountType === 'workspace' && form.workspaceName.trim()
           ? { workspaceName: form.workspaceName.trim() }
           : {}),
         ...(avatar ? { avatar } : {}),
       });
-      if (data?.requiresVerification) {
-        toast.success('Account created — verify your email to continue.');
-        navigate('/verify-otp', { state: { email: form.email.trim(), devOtp: data.devOtp } });
-      } else {
-        toast.success('Your ChatConnect account is ready!');
-        navigate('/');
-      }
+      toast.success('Your ChatConnect account is ready!');
+      navigate('/');
     } catch (err) {
       toast.error(err?.message || 'Could not create your account. Please try again.');
     } finally {
@@ -285,22 +338,77 @@ export default function Signup() {
           )}
 
           <motion.div variants={rise}>
-            <Field label="Email address" hint={fieldError('email')}>
-              <Input
-                icon={Mail}
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                value={form.email}
-                onChange={set('email')}
-                onBlur={blur('email')}
-                className={cn(fieldError('email') && 'border-red-500/70 focus-visible:ring-red-500/40')}
-              />
+            <Field
+              label="Email address"
+              hint={fieldError('email') || (emailStep !== 'verified' ? 'Click Verify — we’ll email you a 6-digit code.' : undefined)}
+            >
+              <div className="flex items-stretch gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    icon={Mail}
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    value={form.email}
+                    onChange={set('email')}
+                    onBlur={blur('email')}
+                    readOnly={emailStep === 'verified'}
+                    className={cn(
+                      fieldError('email') && 'border-red-500/70 focus-visible:ring-red-500/40',
+                      emailStep === 'verified' && 'border-emerald-500/60 pr-24'
+                    )}
+                  />
+                  {emailStep === 'verified' && (
+                    <span className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                      <BadgeCheck size={12} /> Verified
+                    </span>
+                  )}
+                </div>
+                {emailStep !== 'verified' && (
+                  <Button
+                    type="button"
+                    variant={emailStep === 'sent' ? 'outline' : 'subtle'}
+                    onClick={sendCode}
+                    disabled={emailBusy || !emailRe.test(form.email)}
+                    className="shrink-0"
+                  >
+                    {emailBusy && emailStep === 'idle' ? <Loader2 size={15} className="animate-spin" /> : null}
+                    {emailStep === 'sent' ? 'Resend' : 'Verify'}
+                  </Button>
+                )}
+              </div>
             </Field>
+
+            {/* Code entry appears after the email is sent, until verified */}
+            {emailStep === 'sent' && (
+              <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="mt-2 space-y-2">
+                <div className="flex items-stretch gap-2">
+                  <input
+                    value={emailCode}
+                    onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="Enter the 6-digit code"
+                    aria-label="Email verification code"
+                    className="ring-brand w-full flex-1 rounded-xl border border-border bg-surface-2 px-4 py-3 text-center text-base font-bold tracking-[0.35em] text-content placeholder:text-sm placeholder:font-normal placeholder:tracking-normal placeholder:text-content-muted"
+                  />
+                  <Button type="button" variant="primary" onClick={confirmCode} disabled={emailBusy || emailCode.length !== 6} className="shrink-0">
+                    {emailBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                    Confirm
+                  </Button>
+                </div>
+                {devOtp && (
+                  <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-center text-xs text-amber-600 dark:text-amber-300">
+                    Email isn&apos;t configured on the server — your development code is{' '}
+                    <span className="text-sm font-extrabold tracking-[0.3em]">{devOtp}</span>
+                  </p>
+                )}
+              </motion.div>
+            )}
           </motion.div>
 
           <motion.div variants={rise}>
-            <Field label="Phone number" hint={fieldError('phone') || 'Used for login codes — one account per number.'}>
+            <Field label="Phone number" hint={fieldError('phone') || 'One account per number — contacts can find you by it.'}>
               <Input
                 icon={Phone}
                 type="tel"
@@ -375,7 +483,13 @@ export default function Signup() {
           </motion.div>
 
           <motion.div variants={rise} className="pt-1">
-            <Button type="submit" variant="primary" size="lg" className="w-full" disabled={busy}>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              className="w-full"
+              disabled={busy || (!DEMO_MODE && emailStep !== 'verified')}
+            >
               {busy ? (
                 <>
                   <Loader2 size={18} className="animate-spin" /> Creating account…
@@ -386,6 +500,9 @@ export default function Signup() {
                 </>
               )}
             </Button>
+            {!DEMO_MODE && emailStep !== 'verified' && (
+              <p className="mt-2 text-center text-xs text-content-muted">Verify your email above to enable this button.</p>
+            )}
           </motion.div>
         </form>
 

@@ -31,7 +31,7 @@ api.interceptors.request.use((config) => {
 
 // Auth-flow endpoints: a 401 here means "wrong credentials" or "no session yet",
 // NOT "access token expired" — so we must NOT try to refresh or force a logout.
-const AUTH_FLOW_PATHS = /\/auth\/(login|signup|verify-otp|resend-otp|forgot-password|reset-password|change-password|refresh)/;
+const AUTH_FLOW_PATHS = /\/auth\/(login|signup|email\/(send|verify)-code|verify-otp|resend-otp|forgot-password|reset-password|change-password|refresh)/;
 
 // Single-flight refresh: many requests can 401 at once when the access token
 // expires; they all await one /auth/refresh call (authenticated by the httpOnly

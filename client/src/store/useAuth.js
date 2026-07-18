@@ -45,6 +45,21 @@ export const useAuth = create((set, get) => ({
     return data;
   },
 
+  /** Send a verification code to an email BEFORE the account exists (signup step 1). */
+  sendEmailCode: async (email) => {
+    if (DEMO_MODE) return { devOtp: '000000' };
+    const { data } = await api.post('/auth/email/send-code', { email });
+    return data; // { message, devOtp? }
+  },
+
+  /** Check the emailed code (signup step 2) → returns the proof for /signup. */
+  verifyEmailCode: async ({ email, otp }) => {
+    if (DEMO_MODE) return { verified: true, emailToken: 'demo' };
+    const { data } = await api.post('/auth/email/verify-code', { email, otp });
+    return data; // { verified: true, emailToken }
+  },
+
+  /** Final signup — requires the emailToken proof; returns a full session. */
   signup: async (payload) => {
     if (DEMO_MODE) {
       localStorage.setItem('cc_demo_authed', '1');
@@ -54,7 +69,9 @@ export const useAuth = create((set, get) => ({
     const { data } = await api.post('/auth/signup', payload);
     if (data.token) {
       localStorage.setItem('cc_token', data.token);
+      sessionStorage.setItem('cc_unlocked', '1');
       set({ user: data.user });
+      ensureMediaToken(true);
     }
     return data;
   },

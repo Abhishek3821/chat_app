@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import EmailVerification from '../models/EmailVerification.js';
 import Workspace from '../models/Workspace.js';
 import Session from '../models/Session.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
@@ -50,6 +52,90 @@ async function generateUsername(email, explicit) {
   return `${padded.slice(0, 18)}${Date.now().toString(36)}`;
 }
 
+/** Short-lived proof that THIS email's inbox was just verified (pre-signup). */
+const EMAIL_PROOF_TTL = '30m';
+function signEmailProof(email) {
+  return jwt.sign({ email, purpose: 'signup-email' }, process.env.JWT_SECRET, {
+    algorithm: 'HS256',
+    expiresIn: EMAIL_PROOF_TTL,
+  });
+}
+function emailProofValid(token, email) {
+  try {
+    const p = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    return p.purpose === 'signup-email' && p.email === email;
+  } catch {
+    return false;
+  }
+}
+
+// POST /api/auth/email/send-code  { email }
+// Step 1 of signup: send a verification code to the address BEFORE any account
+// exists. The Verify button on the signup form calls this.
+export const sendSignupEmailCode = asyncHandler(async (req, res) => {
+  const email = cleanEmail(req.body.email);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new ApiError(400, 'Please provide a valid email address.');
+  if (await User.exists({ email })) throw new ApiError(409, 'An account with that email already exists.');
+
+  const otp = generateOTP();
+  await EmailVerification.findOneAndUpdate(
+    { email },
+    { otp, expires: new Date(Date.now() + 10 * 60 * 1000), attempts: 0, verifiedAt: null },
+    { upsert: true, new: true }
+  );
+
+  const emailConfigured = isEmailConfigured();
+  let sent = false;
+  try {
+    const r = await sendEmail({
+      to: email,
+      subject: 'Verify your email for ChatConnect',
+      html: otpEmailTemplate('there', otp),
+      text: `Your ChatConnect verification code is ${otp}. It expires in 10 minutes.`,
+    });
+    sent = !!r?.sent;
+  } catch (err) {
+    console.error('❌ Signup email code failed:', err.message);
+  }
+  securityEvent('signup.email.code', req, { email });
+  res.json({
+    success: true,
+    message: sent
+      ? `We sent a verification code to ${email}.`
+      : emailConfigured
+        ? 'We could not send the code right now — please try again.'
+        : 'Email is not configured — the code is shown below (development only).',
+    // Dev convenience only: surface the OTP when SMTP isn't set up.
+    ...(!emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
+  });
+});
+
+// POST /api/auth/email/verify-code  { email, otp } → { emailToken }
+// Step 2 of signup: check the code; on success return a short-lived signed
+// proof the client must include in the final signup request.
+export const verifySignupEmailCode = asyncHandler(async (req, res) => {
+  const email = cleanEmail(req.body.email);
+  const rec = await EmailVerification.findOne({ email }).select('+otp');
+  if (!rec || !rec.otp) throw new ApiError(400, 'No code was requested for that email. Click Verify first.');
+  if ((rec.attempts || 0) >= 5) {
+    securityEvent('signup.email.locked', req, { email });
+    throw new ApiError(429, 'Too many incorrect attempts. Request a new code.');
+  }
+  if (String(rec.otp) !== String(req.body.otp || '')) {
+    rec.attempts = (rec.attempts || 0) + 1;
+    await rec.save();
+    securityEvent('signup.email.failure', req, { email });
+    throw new ApiError(400, 'Invalid verification code.');
+  }
+  if (rec.expires < Date.now()) throw new ApiError(400, 'That code has expired. Request a new one.');
+
+  rec.verifiedAt = new Date();
+  rec.otp = undefined;
+  await rec.save();
+  securityEvent('signup.email.verified', req, { email });
+  res.json({ success: true, verified: true, emailToken: signEmailProof(email) });
+});
+
 // POST /api/auth/signup
 export const signup = asyncHandler(async (req, res) => {
   // SECURITY: pick ONLY the fields a new account may set. `role`, `isAdmin`,
@@ -78,6 +164,13 @@ export const signup = asyncHandler(async (req, res) => {
   const phoneTaken = await User.findOne({ phone });
   if (phoneTaken) throw new ApiError(409, 'That phone number is already linked to another account.');
 
+  // The email must be verified BEFORE the account is created: the client's
+  // Verify button (send-code → verify-code) yields a short-lived signed proof.
+  // Without it, signup fails — no unverified accounts exist at all.
+  if (EMAIL_VERIFY_ON && !emailProofValid(req.body.emailToken, email.trim().toLowerCase())) {
+    throw new ApiError(400, 'Please verify your email address before signing up.');
+  }
+
   // Multi-tenant: an optional invite code makes the user JOIN that workspace;
   // otherwise the account type decides — 'personal' joins the shared Personal
   // space; 'workspace' (default) creates their own company workspace. Validate
@@ -95,16 +188,13 @@ export const signup = asyncHandler(async (req, res) => {
   // where they can never contact anyone. Company workspaces are explicit opt-in.
   const accountType = inviteCode || req.body.accountType === 'workspace' ? 'workspace' : 'personal';
 
-  const otp = generateOTP();
   const baseDoc = {
     name: name.trim().slice(0, 60),
     email,
     phone,
     password, // hashed by the User pre-save hook (bcrypt, cost 12)
     role: 'user', // ALWAYS user — admins are created only via seed/manual promotion
-    isVerified: !EMAIL_VERIFY_ON,
-    otp: EMAIL_VERIFY_ON ? otp : undefined,
-    otpExpires: EMAIL_VERIFY_ON ? new Date(Date.now() + 10 * 60 * 1000) : undefined,
+    isVerified: true, // email was proven above (or verification is disabled)
   };
 
   let user;
@@ -130,37 +220,10 @@ export const signup = asyncHandler(async (req, res) => {
   else if (accountType === 'personal') await joinPersonalSpace(user);
   else await createWorkspaceForUser(user, req.body.workspaceName);
 
-  if (EMAIL_VERIFY_ON) {
-    const emailConfigured = isEmailConfigured();
-    let emailSent = false;
-    try {
-      const r = await sendEmail({
-        to: user.email,
-        subject: 'Verify your ChatConnect account',
-        html: otpEmailTemplate(name, otp),
-        text: `Your ChatConnect verification code is ${otp}`,
-      });
-      emailSent = !!r?.sent;
-    } catch (err) {
-      // Don't fail signup on a mail hiccup — the account exists and the user can
-      // request a new code once SMTP is healthy.
-      console.error('❌ OTP email send failed:', err.message);
-      securityEvent('otp.email.failed', req, { email: user.email });
-    }
-    return res.status(201).json({
-      success: true,
-      requiresVerification: true,
-      message: emailSent
-        ? 'Account created. Check your email for the verification code.'
-        : emailConfigured
-          ? 'Account created, but we could not send the code. Please use “Resend code”.'
-          : 'Account created. Email is not configured — the code is shown below (development only).',
-      email: user.email,
-      // Dev convenience only: surface the OTP when SMTP isn't set up.
-      ...(!emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
-    });
-  }
+  // The verification record has served its purpose.
+  EmailVerification.deleteOne({ email: email.trim().toLowerCase() }).catch(() => {});
 
+  securityEvent('signup.success', req, { userId: String(user._id) });
   await sendTokenResponse(req, res, user, 201);
 });
 

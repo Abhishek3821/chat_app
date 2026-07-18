@@ -128,30 +128,46 @@ async function main() {
   await startServer();
   console.log('Server is up. Running tests…\n');
 
-  // ── users: signup → MUST verify the email before the account is usable ──
+  // ── users: the email must be verified BEFORE signup succeeds ──
   const A = { name: 'Busy A', email: 'busy.a@chatconnect.app', password: 'PasswordA1!', phone: '+15551110001' };
   const B = { name: 'Busy B', email: 'busy.b@chatconnect.app', password: 'PasswordB1!', phone: '+15551110002' };
+
+  // Get the signed email proof the way the Verify button does: send → confirm.
+  async function verifyEmailFirst(email) {
+    const s = await http('POST', '/auth/email/send-code', { body: { email } });
+    const v = await http('POST', '/auth/email/verify-code', { body: { email, otp: s.data?.devOtp } });
+    return { send: s, verify: v, token: v.data?.emailToken };
+  }
+
+  {
+    const noToken = await http('POST', '/auth/signup', { body: { ...A, confirmPassword: A.password } });
+    check('signup WITHOUT a verified email is unsuccessful (400)', noToken.status === 400, `status ${noToken.status}: ${noToken.data?.message}`);
+  }
+  {
+    const s = await http('POST', '/auth/email/send-code', { body: { email: A.email } });
+    check('Verify button sends a code to the email', s.status === 200 && !!s.data?.devOtp, JSON.stringify(s.data)?.slice(0, 140));
+    const bad = await http('POST', '/auth/email/verify-code', { body: { email: A.email, otp: '000000' } });
+    check('wrong email code rejected (400)', bad.status === 400, `status ${bad.status}`);
+    const good = await http('POST', '/auth/email/verify-code', { body: { email: A.email, otp: s.data?.devOtp } });
+    check('correct code → email shows as VERIFIED (proof issued)', good.status === 200 && good.data?.verified === true && !!good.data?.emailToken, JSON.stringify(good.data)?.slice(0, 140));
+    A.emailToken = good.data?.emailToken;
+  }
+  {
+    const forged = await http('POST', '/auth/signup', { body: { ...B, confirmPassword: B.password, emailToken: A.emailToken } });
+    check("someone ELSE's email proof is rejected (400)", forged.status === 400, `status ${forged.status}`);
+  }
+  B.emailToken = (await verifyEmailFirst(B.email)).token;
+
   const sa = await http('POST', '/auth/signup', { body: { ...A, confirmPassword: A.password } });
   const sb = await http('POST', '/auth/signup', { body: { ...B, confirmPassword: B.password } });
   check(
-    'signup requires email verification (no session yet)',
-    sa.status === 201 && sa.data?.requiresVerification === true && !sa.data?.token && !!sa.data?.devOtp,
+    'signup with a verified email succeeds → session + isVerified',
+    sa.status === 201 && !!sa.data?.token && sa.data?.user?.isVerified === true && sb.status === 201,
     JSON.stringify(sa.data)?.slice(0, 140)
   );
-  {
-    const early = await http('POST', '/auth/login', { body: { identifier: A.email, password: A.password } });
-    check('login BLOCKED before the email is verified (403)', early.status === 403, `status ${early.status}`);
-  }
-  {
-    const bad = await http('POST', '/auth/verify-otp', { body: { email: A.email, otp: '000000' } });
-    check('wrong verification code rejected (400)', bad.status === 400, `status ${bad.status}`);
-  }
-  const va = await http('POST', '/auth/verify-otp', { body: { email: A.email, otp: sa.data?.devOtp } });
-  const vb = await http('POST', '/auth/verify-otp', { body: { email: B.email, otp: sb.data?.devOtp } });
-  check('email verified → session issued', va.status === 200 && vb.status === 200 && !!va.data?.token && va.data?.user?.isVerified === true, JSON.stringify(va.data)?.slice(0, 140));
-  const tokA = va.data?.token; const tokB = vb.data?.token;
-  const idA = va.data?.user?._id; const idB = vb.data?.user?._id;
-  const usernameA = va.data?.user?.username;
+  const tokA = sa.data?.token; const tokB = sb.data?.token;
+  const idA = sa.data?.user?._id; const idB = sb.data?.user?._id;
+  const usernameA = sa.data?.user?.username;
 
   // ── phone rules at signup ──
   {

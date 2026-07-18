@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import {
   signup,
+  sendSignupEmailCode,
+  verifySignupEmailCode,
   verifyOtp,
   resendOtp,
   login,
@@ -25,6 +27,10 @@ import { authLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
+// Pre-signup email verification: Verify button → code → signed proof, which
+// /signup then requires. No unverified accounts are ever created.
+router.post('/email/send-code', authLimiter, sendSignupEmailCode);
+router.post('/email/verify-code', authLimiter, verifySignupEmailCode);
 router.post('/signup', authLimiter, signup);
 router.post('/verify-otp', authLimiter, verifyOtp);
 router.post('/resend-otp', authLimiter, resendOtp);
