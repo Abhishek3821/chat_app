@@ -40,6 +40,19 @@ export async function verifyEmailTransport() {
 }
 
 /**
+ * The From header MUST contain an address on the authenticated account's domain
+ * (GoDaddy/most SMTP relays reject otherwise — "550 mailfrom domain must match").
+ * EMAIL_FROM may be a full "Name <addr>" or just a display name; when it has no
+ * address we bind it to the authenticated mailbox.
+ */
+function fromHeader() {
+  const raw = (process.env.EMAIL_FROM || '').trim().replace(/^"|"$/g, '');
+  const user = process.env.EMAIL_USER || 'no-reply@chatconnect.app';
+  if (raw.includes('@')) return raw; // already a full address / "Name <addr>"
+  return `"${raw || 'ChatConnect'}" <${user}>`;
+}
+
+/**
  * Send an email. Returns { sent: true } on success, { sent: false, logged: true }
  * when SMTP isn't configured (dev fallback). Throws only on a real send failure
  * so callers can decide how to surface it.
@@ -59,7 +72,7 @@ export async function sendEmail({ to, subject, html, text }) {
     return { sent: false, logged: true };
   }
   const info = await getTransport().sendMail({
-    from: process.env.EMAIL_FROM || 'ChatConnect <no-reply@chatconnect.app>',
+    from: fromHeader(),
     to,
     subject,
     text,

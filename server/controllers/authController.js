@@ -97,14 +97,16 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
   } catch (err) {
     console.error('❌ Signup email code failed:', err.message);
   }
+  // SMTP is set up but the send failed → surface a real error, not a fake success.
+  if (emailConfigured && !sent) {
+    throw new ApiError(502, 'We could not send the verification email right now. Please try again in a moment.');
+  }
   securityEvent('signup.email.code', req, { email });
   res.json({
     success: true,
     message: sent
       ? `We sent a verification code to ${email}.`
-      : emailConfigured
-        ? 'We could not send the code right now — please try again.'
-        : 'Email is not configured — the code is shown below (development only).',
+      : 'Email is not configured — the code is shown below (development only).',
     // Dev convenience only: surface the OTP when SMTP isn't set up.
     ...(!emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
   });

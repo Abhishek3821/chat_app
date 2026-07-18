@@ -59,6 +59,8 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
+      # Display name only is fine — the code binds it to the authenticated
+      # mailbox (relays reject a From that isn't on the account's domain).
       - key: EMAIL_FROM
         value: ChatConnect
       # Web Push (VAPID) — notifications when the app is closed.
