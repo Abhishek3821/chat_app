@@ -8,7 +8,7 @@ import Session from '../models/Session.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken, generateOTP } from '../utils/token.js';
 import { sendTokenResponse, setAuthCookies, clearAuthCookies, rotateSession, isSessionValid, hashToken } from '../utils/session.js';
-import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
+import { sendEmail, otpEmailTemplate, isEmailConfigured, classifySendError } from '../utils/sendEmail.js';
 import { normalizePhone } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
@@ -86,6 +86,7 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
 
   const emailConfigured = isEmailConfigured();
   let sent = false;
+  let sendErr = null;
   try {
     const r = await sendEmail({
       to: email,
@@ -95,11 +96,21 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
     });
     sent = !!r?.sent;
   } catch (err) {
+    sendErr = err;
     console.error('❌ Signup email code failed:', err.message);
   }
-  // SMTP is set up but the send failed → surface a real error, not a fake success.
+  // SMTP is set up but the send failed → surface an ACTIONABLE error (which of
+  // credentials / connectivity broke), not a mystery.
   if (emailConfigured && !sent) {
-    throw new ApiError(502, 'We could not send the verification email right now. Please try again in a moment.');
+    const kind = classifySendError(sendErr);
+    throw new ApiError(
+      502,
+      kind === 'auth'
+        ? 'The email service rejected the server’s email login. Fix EMAIL_USER / EMAIL_PASS in the server’s environment settings.'
+        : kind === 'connection'
+          ? 'The email server is unreachable from this host right now. Please try again shortly.'
+          : 'We could not send the verification email right now. Please try again in a moment.'
+    );
   }
   // In production a missing mailer is a server misconfiguration — say so
   // plainly instead of returning success with no way to get a code.

@@ -53,6 +53,19 @@ function isConnectionError(err) {
   return CONNECTION_ERRORS.has(err?.code) || /timed?\s*out|connection/i.test(err?.message || '');
 }
 
+/**
+ * Classify a send failure so callers can surface an actionable message:
+ * 'auth' → the relay rejected the username/password (fix credentials);
+ * 'connection' → the SMTP host is unreachable from this machine;
+ * 'other' → policy/recipient/unknown.
+ */
+export function classifySendError(err) {
+  if (!err) return 'other';
+  if (err.responseCode === 535 || /535|invalid login|credentials|username and password/i.test(err.message || '')) return 'auth';
+  if (isConnectionError(err)) return 'connection';
+  return 'other';
+}
+
 async function sendWithFallback(mail) {
   try {
     return await getTransport().sendMail(mail);
