@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User.js';
 import Workspace from '../models/Workspace.js';
 import Session from '../models/Session.js';
@@ -8,14 +7,11 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken, generateOTP } from '../utils/token.js';
 import { sendTokenResponse, setAuthCookies, clearAuthCookies, rotateSession, isSessionValid, hashToken } from '../utils/session.js';
 import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
-import { sendSms, isSmsConfigured, normalizePhone, maskPhone, maskEmail } from '../utils/sendSms.js';
+import { normalizePhone } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
-// Second factor on login (OTP to the phone, or email fallback). On by default;
-// set ENABLE_LOGIN_OTP=false to sign users in with just the password.
-const LOGIN_OTP_ON = process.env.ENABLE_LOGIN_OTP !== 'false';
 
 /** Coerce untrusted input to a normalized email string ('' if not a string). */
 const cleanEmail = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
@@ -53,65 +49,6 @@ async function generateUsername(email, explicit) {
   }
   return `${padded.slice(0, 18)}${Date.now().toString(36)}`;
 }
-
-// Google Identity Services verifier — only active when GOOGLE_CLIENT_ID is set.
-const googleClient = process.env.GOOGLE_CLIENT_ID ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID) : null;
-
-// POST /api/auth/google  { credential }
-// Sign in / up with a Google ID token (from Google Identity Services on the
-// client). Verifies the token with Google, then finds-or-creates the account and
-// issues our own session — so Google users get the exact same session/RBAC as
-// password users. No-op (501) unless GOOGLE_CLIENT_ID is configured.
-export const googleAuth = asyncHandler(async (req, res) => {
-  if (!googleClient) throw new ApiError(501, 'Google sign-in is not configured on this server.');
-  const credential = typeof req.body.credential === 'string' ? req.body.credential : '';
-  if (!credential) throw new ApiError(400, 'Missing Google credential.');
-
-  let payload;
-  try {
-    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
-    payload = ticket.getPayload();
-  } catch {
-    throw new ApiError(401, 'Could not verify your Google account. Please try again.');
-  }
-  const email = cleanEmail(payload?.email);
-  if (!email || payload.email_verified === false) throw new ApiError(401, 'Your Google email could not be verified.');
-
-  let user = await User.findOne({ email });
-  let isNew = false;
-  if (!user) {
-    isNew = true;
-    // New Google account: passwordless in practice (a strong random password is
-    // stored so the schema is satisfied; they sign in with Google). Personal
-    // account so they're reachable, and pre-verified (Google verified the email).
-    const randomPassword = crypto.randomBytes(24).toString('base64url');
-    for (let attempt = 0; ; attempt += 1) {
-      const username = await generateUsername(email);
-      try {
-        user = await User.create({
-          name: (payload.name || email.split('@')[0]).slice(0, 60),
-          email,
-          username,
-          password: randomPassword,
-          role: 'user',
-          isVerified: true,
-          avatar: safeAvatar(payload.picture) || `https://api.dicebear.com/9.x/glass/svg?seed=${encodeURIComponent(username)}`,
-        });
-        break;
-      } catch (err) {
-        if (err?.code === 11000 && err.keyValue?.username && attempt < 2) continue;
-        throw err;
-      }
-    }
-    await joinPersonalSpace(user);
-  } else if (!user.isVerified) {
-    user.isVerified = true; // Google has now verified this email
-    await user.save({ validateBeforeSave: false });
-  }
-  if (user.accountStatus !== 'active') throw new ApiError(403, 'This account is not active.');
-  securityEvent('auth.google', req, { userId: String(user._id), isNew });
-  await sendTokenResponse(req, res, user, isNew ? 201 : 200, { isNew });
-});
 
 // POST /api/auth/signup
 export const signup = asyncHandler(async (req, res) => {
@@ -305,39 +242,7 @@ function identifierQuery(identifier) {
   return or.length ? { $or: or } : null;
 }
 
-/** Generate, store and deliver a login OTP (SMS first, email fallback). */
-async function issueLoginOtp(req, user) {
-  const otp = generateOTP();
-  user.loginOtp = otp;
-  user.loginOtpExpires = new Date(Date.now() + 10 * 60 * 1000);
-  user.loginOtpAttempts = 0;
-  await user.save({ validateBeforeSave: false });
-
-  let channel = 'email';
-  let sent = false;
-  if (user.phone && isSmsConfigured()) {
-    const r = await sendSms({ to: user.phone, body: `${otp} is your ChatConnect login code. It expires in 10 minutes.` });
-    if (r.sent) { channel = 'sms'; sent = true; }
-  }
-  if (!sent) {
-    channel = 'email';
-    try {
-      const r = await sendEmail({
-        to: user.email,
-        subject: 'Your ChatConnect login code',
-        html: otpEmailTemplate(user.name, otp),
-        text: `Your ChatConnect login code is ${otp}. It expires in 10 minutes.`,
-      });
-      sent = !!r?.sent;
-    } catch (err) {
-      console.error('❌ Login OTP email failed:', err.message);
-    }
-  }
-  securityEvent('login.otp.sent', req, { userId: String(user._id), channel });
-  return { otp, channel, sent };
-}
-
-/** Shared credential check for login + OTP resend. Throws on any failure. */
+/** Shared credential check for login. Throws on any failure. */
 async function checkCredentials(req, identifier, password) {
   const query = identifierQuery(identifier);
   if (!query || typeof password !== 'string' || !password) {
@@ -358,87 +263,16 @@ async function checkCredentials(req, identifier, password) {
 }
 
 // POST /api/auth/login  { identifier | email, password }
-// Step 1 of sign-in: verify the password, then send an OTP to the account's
-// phone (or email as fallback). The session is only issued by verify-login-otp.
+// Single-step sign-in: email/username/phone + password → session. The email
+// must already be verified (checkCredentials rejects unverified accounts).
 export const login = asyncHandler(async (req, res) => {
   const identifier = req.body.identifier ?? req.body.email; // legacy clients send `email`
   const user = await checkCredentials(req, identifier, req.body.password);
-
-  if (!LOGIN_OTP_ON) {
-    // OTP disabled → classic single-step login.
-    user.isOnline = true;
-    user.lastSeen = new Date();
-    await user.save({ validateBeforeSave: false });
-    securityEvent('login.success', req, { userId: String(user._id) });
-    return sendTokenResponse(req, res, user);
-  }
-
-  const { otp, channel, sent } = await issueLoginOtp(req, user);
-  const emailConfigured = isEmailConfigured();
-  res.json({
-    success: true,
-    requiresOtp: true,
-    channel,
-    sentTo: channel === 'sms' ? maskPhone(user.phone) : maskEmail(user.email),
-    message:
-      channel === 'sms'
-        ? `We sent a login code to ${maskPhone(user.phone)}.`
-        : sent
-          ? `We sent a login code to ${maskEmail(user.email)}.`
-          : 'We could not deliver the code — use “Resend code”.',
-    // Dev convenience only: surface the OTP when no delivery channel is set up.
-    ...(!sent && !emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
-  });
-});
-
-// POST /api/auth/login/verify-otp  { identifier, otp }
-// Step 2 of sign-in: check the OTP and mint the session.
-export const verifyLoginOtp = asyncHandler(async (req, res) => {
-  const query = identifierQuery(req.body.identifier ?? req.body.email);
-  if (!query) throw new ApiError(400, 'Missing account identifier.');
-  const user = await User.findOne(query).select('+loginOtp +loginOtpExpires +loginOtpAttempts');
-  if (!user || !user.loginOtp) throw new ApiError(400, 'No pending login. Please sign in again.');
-
-  // Same brute-force cap as the other OTPs: 5 wrong guesses kills the code.
-  if ((user.loginOtpAttempts || 0) >= 5) {
-    user.loginOtp = undefined;
-    user.loginOtpExpires = undefined;
-    await user.save({ validateBeforeSave: false });
-    securityEvent('login.otp.locked', req, { userId: String(user._id) });
-    throw new ApiError(429, 'Too many incorrect attempts. Please sign in again.');
-  }
-  if (String(user.loginOtp) !== String(req.body.otp || '')) {
-    user.loginOtpAttempts = (user.loginOtpAttempts || 0) + 1;
-    await user.save({ validateBeforeSave: false });
-    securityEvent('login.otp.failure', req, { userId: String(user._id) });
-    throw new ApiError(400, 'Invalid login code.');
-  }
-  if (user.loginOtpExpires < Date.now()) throw new ApiError(400, 'That code has expired. Please sign in again.');
-
-  user.loginOtp = undefined;
-  user.loginOtpExpires = undefined;
-  user.loginOtpAttempts = 0;
   user.isOnline = true;
   user.lastSeen = new Date();
   await user.save({ validateBeforeSave: false });
-  securityEvent('login.success', req, { userId: String(user._id), otp: true });
-  await sendTokenResponse(req, res, user);
-});
-
-// POST /api/auth/login/resend-otp  { identifier, password }
-// Requires the password again so an attacker can't spam codes at someone's
-// phone knowing only their username.
-export const resendLoginOtp = asyncHandler(async (req, res) => {
-  const user = await checkCredentials(req, req.body.identifier ?? req.body.email, req.body.password);
-  const { otp, channel, sent } = await issueLoginOtp(req, user);
-  const emailConfigured = isEmailConfigured();
-  res.json({
-    success: true,
-    channel,
-    sentTo: channel === 'sms' ? maskPhone(user.phone) : maskEmail(user.email),
-    message: 'A new code has been sent.',
-    ...(!sent && !emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
-  });
+  securityEvent('login.success', req, { userId: String(user._id) });
+  return sendTokenResponse(req, res, user);
 });
 
 // POST /api/auth/logout — revoke THIS session (not just clear the cookie).

@@ -56,11 +56,6 @@ const userSchema = new mongoose.Schema(
     otp: { type: String, select: false },
     otpExpires: { type: Date, select: false },
     otpAttempts: { type: Number, default: 0, select: false },
-    // Login OTP (second factor after the password, sent to the phone via SMS —
-    // or to the email when SMS isn't configured / the account has no phone).
-    loginOtp: { type: String, select: false },
-    loginOtpExpires: { type: Date, select: false },
-    loginOtpAttempts: { type: Number, default: 0, select: false },
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpires: { type: Date, select: false },
 
@@ -136,9 +131,6 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
   delete obj.twoStepResetOtp;
   delete obj.twoStepResetExpires;
   delete obj.twoStepResetAttempts;
-  delete obj.loginOtp;
-  delete obj.loginOtpExpires;
-  delete obj.loginOtpAttempts;
   return obj;
 };
 

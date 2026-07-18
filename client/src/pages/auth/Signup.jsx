@@ -22,7 +22,6 @@ import {
 
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
-import GoogleButton from '@/components/auth/GoogleButton';
 import { useAuth } from '@/store/useAuth';
 import { cn } from '@/lib/utils';
 import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.jsx';
@@ -389,10 +388,6 @@ export default function Signup() {
             </Button>
           </motion.div>
         </form>
-
-        <motion.div variants={rise}>
-          <GoogleButton text="signup_with" />
-        </motion.div>
 
         <motion.p variants={rise} className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-content-muted">
           <Check size={13} className="text-emerald-500" />

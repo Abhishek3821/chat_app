@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { ShieldCheck, ArrowLeft, ArrowRight, RotateCw, MessageSquareLock, Loader2 } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, ArrowRight, RotateCw, MessageSquareLock, Loader2, BadgeCheck } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ export default function VerifyOtp() {
   const inputsRef = useRef([]);
   const [digits, setDigits] = useState(Array(LENGTH).fill(''));
   const [submitting, setSubmitting] = useState(false);
+  const [verified, setVerified] = useState(false); // success screen before entering the app
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const [devOtp, setDevOtp] = useState(location.state?.devOtp || '');
 
@@ -46,8 +47,9 @@ export default function VerifyOtp() {
     setSubmitting(true);
     try {
       await verifyOtp({ email, otp: value });
-      toast.success('Verified! Welcome to ChatConnect.');
-      navigate('/');
+      setVerified(true);
+      toast.success('Email verified!');
+      setTimeout(() => navigate('/'), 2000); // let the success state land, then enter
     } catch (err) {
       toast.error(err?.message || 'Invalid or expired code.');
       setDigits(Array(LENGTH).fill(''));
@@ -161,6 +163,24 @@ export default function VerifyOtp() {
       <AuthPanel>
         <MobileBrand />
 
+        {verified ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+            className="flex flex-col items-center py-10 text-center"
+          >
+            <span className="grid h-20 w-20 place-items-center rounded-full bg-emerald-500/15 text-emerald-500">
+              <BadgeCheck size={44} strokeWidth={2.2} />
+            </span>
+            <h2 className="mt-5 font-display text-2xl font-extrabold tracking-tight text-content">Email verified!</h2>
+            <p className="mt-2 max-w-xs text-sm text-content-muted">
+              <span className="font-semibold text-content">{email}</span> is confirmed. Your account is ready — taking you in…
+            </p>
+            <Loader2 size={20} className="mt-6 animate-spin text-brand-500" />
+          </motion.div>
+        ) : (
+          <>
         <motion.div variants={rise} className="mb-8 flex justify-center lg:justify-start">
           <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
             <MessageSquareLock size={26} />
@@ -249,6 +269,8 @@ export default function VerifyOtp() {
             <ArrowLeft size={16} /> Back to sign in
           </Link>
         </motion.div>
+          </>
+        )}
       </AuthPanel>
     </motion.div>
   );

@@ -116,7 +116,14 @@ function ProfilePanel({ user }) {
                 @{user?.username}
               </span>
             </div>
-            <p className="mt-1 text-sm text-content-muted">{user?.email}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-content-muted">
+              {user?.email}
+              {user?.isVerified && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                  <ShieldCheck size={11} /> Verified
+                </span>
+              )}
+            </p>
           </div>
           <Button variant="primary" size="md" onClick={() => openModal('editProfile')} className="shrink-0">
             <Pencil size={16} /> Edit profile

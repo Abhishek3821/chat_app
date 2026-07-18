@@ -116,7 +116,6 @@ async function startServer() {
       MONGO_URI: TEST_URI,
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
-      ENABLE_LOGIN_OTP: 'false', // this suite exercises classic single-step login
       CLIENT_URL: 'http://localhost:5290',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

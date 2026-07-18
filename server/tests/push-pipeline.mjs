@@ -73,7 +73,6 @@ async function startServer() {
       MONGO_URI: TEST_URI,
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
-      ENABLE_LOGIN_OTP: 'false',
       EMAIL_HOST: '', EMAIL_USER: '', EMAIL_PASS: '',
       CLIENT_URL: 'http://localhost:5290',
       VAPID_PUBLIC_KEY: vapid.publicKey,
