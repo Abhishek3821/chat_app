@@ -267,6 +267,20 @@ async function main() {
     check('old PIN no longer works', oldPin.status === 400, `status ${oldPin.status}`);
     const newPin = await http('POST', '/auth/two-step/verify', { token: tokA, body: { pin: '5678' } });
     check('new PIN unlocks', newPin.status === 200);
+
+    // change PIN: previous PIN must match before the new one is accepted
+    const reEnable = await http('POST', '/auth/two-step/enable', { token: tokA, body: { pin: '9999' } });
+    check('enable cannot silently overwrite an existing PIN', reEnable.status === 400, `status ${reEnable.status}`);
+    const badChange = await http('POST', '/auth/two-step/change', { token: tokA, body: { currentPin: '0000', newPin: '4321' } });
+    check('change PIN with wrong current PIN rejected', badChange.status === 400, `status ${badChange.status}`);
+    const samePin = await http('POST', '/auth/two-step/change', { token: tokA, body: { currentPin: '5678', newPin: '5678' } });
+    check('change PIN to the same PIN rejected', samePin.status === 400, `status ${samePin.status}`);
+    const goodChange = await http('POST', '/auth/two-step/change', { token: tokA, body: { currentPin: '5678', newPin: '4321' } });
+    check('change PIN with correct current PIN succeeds', goodChange.status === 200, JSON.stringify(goodChange.data)?.slice(0, 120));
+    const oldAfterChange = await http('POST', '/auth/two-step/verify', { token: tokA, body: { pin: '5678' } });
+    check('previous PIN stops working after change', oldAfterChange.status === 400, `status ${oldAfterChange.status}`);
+    const newAfterChange = await http('POST', '/auth/two-step/verify', { token: tokA, body: { pin: '4321' } });
+    check('changed PIN unlocks', newAfterChange.status === 200);
   }
 
   const failed = results.filter((r) => !r.pass);

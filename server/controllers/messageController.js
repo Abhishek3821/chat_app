@@ -3,6 +3,7 @@ import Chat from '../models/Chat.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat, emitToUser } from '../socket/index.js';
 import { enqueue } from '../utils/queue.js';
+import { notifyUser } from '../utils/notify.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
 
 const SENDER_FIELDS = 'name username avatar';
@@ -110,22 +111,14 @@ export const sendMessage = asyncHandler(async (req, res) => {
     // Off the request path (BullMQ when Redis is set, else inline): persist the
     // in-app notification AND fire a Web Push so recipients with no live socket
     // still get pinged.
-    enqueue('notification.create', {
-      user: uid,
+    notifyUser(uid, {
       from: req.user._id,
       type: chat.isGroup ? 'group_message' : 'message',
-      title: req.user.name,
-      body: preview,
+      title: chat.isGroup ? chat.name || 'New group message' : req.user.name,
+      body: chat.isGroup ? `${req.user.name}: ${preview}` : preview,
+      tag: `chat:${chatId}`,
+      url: `/?chat=${chatId}`,
       data: { chatId },
-    });
-    enqueue('push.send', {
-      userId: uid,
-      payload: {
-        title: chat.isGroup ? chat.name || 'New group message' : req.user.name,
-        body: chat.isGroup ? `${req.user.name}: ${preview}` : preview,
-        tag: `chat:${chatId}`,
-        data: { url: `/?chat=${chatId}`, chatId },
-      },
     });
   }
 

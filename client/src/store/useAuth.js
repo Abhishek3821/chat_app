@@ -198,6 +198,10 @@ export const useAuth = create((set, get) => ({
     await api.post('/auth/two-step/disable', { pin });
     set((s) => ({ user: { ...s.user, twoStepEnabled: false } }));
   },
+  /** Rotate the PIN — the server verifies currentPin before accepting newPin. */
+  changeTwoStepPin: async ({ currentPin, newPin }) => {
+    await api.post('/auth/two-step/change', { currentPin, newPin });
+  },
   verifyTwoStep: async (pin) => {
     await api.post('/auth/two-step/verify', { pin });
     sessionStorage.setItem('cc_unlocked', '1');

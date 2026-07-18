@@ -2,6 +2,7 @@ import ContactRequest from '../models/ContactRequest.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
+import { notifyUser } from '../utils/notify.js';
 
 const USER_FIELDS = 'name username email avatar bio isOnline lastSeen';
 
@@ -31,6 +32,14 @@ export const sendRequest = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(req.user._id, { $addToSet: { contacts: to } });
     await User.findByIdAndUpdate(to, { $addToSet: { contacts: req.user._id } });
     emitToUser(to, 'contact-accepted', { by: req.user.name });
+    notifyUser(to, {
+      from: req.user._id,
+      type: 'contact_request',
+      title: 'Contact request accepted',
+      body: `${req.user.name} accepted your contact request.`,
+      tag: `contact:${req.user._id}`,
+      url: '/contacts',
+    });
     return res.status(200).json({ success: true, request: reverse, autoAccepted: true });
   }
 
@@ -46,6 +55,14 @@ export const sendRequest = asyncHandler(async (req, res) => {
     request = await ContactRequest.create({ from: req.user._id, to, message: req.body.message });
   }
   emitToUser(to, 'contact-request', { from: { _id: req.user._id, name: req.user.name, avatar: req.user.avatar } });
+  notifyUser(to, {
+    from: req.user._id,
+    type: 'contact_request',
+    title: 'New contact request',
+    body: `${req.user.name} wants to connect with you.`,
+    tag: `contact:${req.user._id}`,
+    url: '/contacts',
+  });
   res.status(201).json({ success: true, request });
 });
 
@@ -69,6 +86,14 @@ export const respondRequest = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(request.from, { $addToSet: { contacts: request.to } });
     await User.findByIdAndUpdate(request.to, { $addToSet: { contacts: request.from } });
     emitToUser(String(request.from), 'contact-accepted', { by: req.user.name });
+    notifyUser(request.from, {
+      from: req.user._id,
+      type: 'contact_request',
+      title: 'Contact request accepted',
+      body: `${req.user.name} accepted your contact request.`,
+      tag: `contact:${req.user._id}`,
+      url: '/contacts',
+    });
   } else {
     request.status = 'rejected';
     await request.save();

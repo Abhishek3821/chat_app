@@ -3,6 +3,7 @@ import Meeting, { generateRoomCode } from '../models/Meeting.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
+import { notifyUser } from '../utils/notify.js';
 import { sendEmail } from '../utils/sendEmail.js';
 
 const USER_FIELDS = 'name username avatar email';
@@ -106,9 +107,18 @@ export const createMeeting = asyncHandler(async (req, res) => {
   });
 
   meeting = await populate(Meeting.findById(meeting._id));
-  invited.forEach((u) =>
-    emitToUser(String(u._id), 'meeting-invited', { meetingId: String(meeting._id), title: meeting.title, startAt: meeting.startAt })
-  );
+  invited.forEach((u) => {
+    emitToUser(String(u._id), 'meeting-invited', { meetingId: String(meeting._id), title: meeting.title, startAt: meeting.startAt });
+    notifyUser(u._id, {
+      from: req.user._id,
+      type: 'meeting_reminder',
+      title: 'Meeting invitation',
+      body: `${req.user.name} invited you to "${meeting.title}".`,
+      tag: `meeting:${meeting._id}`,
+      url: '/meetings',
+      data: { meetingId: String(meeting._id) },
+    });
+  });
 
   // Email invitations (in-workspace invitees + any raw email addresses) — the
   // shareable link is included so anyone can join. Best-effort, off the response.

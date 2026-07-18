@@ -11,6 +11,7 @@ import {
   Settings2,
   Pencil,
   Eye,
+  EyeOff,
   Activity,
   CheckCheck,
   Image as ImageIcon,
@@ -838,15 +839,44 @@ function DeveloperPanel() {
   );
 }
 
+/* ── PIN input with a show/hide toggle ────────────────────────── */
+function PinInput({ value, onChange, placeholder, autoComplete = 'off' }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={18} />
+      <input
+        type={show ? 'text' : 'password'}
+        inputMode="numeric"
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 8))}
+        className="ring-brand w-full rounded-xl border border-border bg-surface-2 py-3 pl-11 pr-11 text-sm text-content tracking-widest placeholder:tracking-normal placeholder:text-content-muted transition-colors"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={show ? 'Hide PIN' : 'Show PIN'}
+        onClick={() => setShow((s) => !s)}
+        className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
 /* ── Account ──────────────────────────────────────────────────── */
 function AccountPanel() {
-  const { logout, changePassword: doChangePassword, deleteAccount, exportMyData, enableTwoStep, disableTwoStep, listSessions, revokeSession, revokeOtherSessions } = useAuth();
+  const { logout, changePassword: doChangePassword, deleteAccount, exportMyData, enableTwoStep, disableTwoStep, changeTwoStepPin, listSessions, revokeSession, revokeOtherSessions } = useAuth();
   const twoStepEnabled = useAuth((s) => s.user?.twoStepEnabled);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [pin, setPin] = useState('');
+  const [pin, setPin] = useState(''); // current PIN (or the new PIN when enabling)
+  const [newPin, setNewPin] = useState(''); // "change PIN" flow only
   const [twoBusy, setTwoBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [sessions, setSessions] = useState([]);
@@ -913,8 +943,27 @@ function AccountPanel() {
         toast.success('Two-step verification enabled.');
       }
       setPin('');
+      setNewPin('');
     } catch (err) {
       toast.error(err?.message || 'Could not update two-step verification.');
+    } finally {
+      setTwoBusy(false);
+    }
+  };
+
+  // Change PIN: the server verifies the previous PIN before accepting the new one.
+  const changePin = async () => {
+    if (!/^\d{4,8}$/.test(pin)) return toast.error('Enter your current PIN (4–8 digits).');
+    if (!/^\d{4,8}$/.test(newPin)) return toast.error('Enter a new 4–8 digit PIN.');
+    if (pin === newPin) return toast.error('The new PIN must be different from the current one.');
+    setTwoBusy(true);
+    try {
+      await changeTwoStepPin({ currentPin: pin, newPin });
+      toast.success('Your PIN has been changed.');
+      setPin('');
+      setNewPin('');
+    } catch (err) {
+      toast.error(err?.message || 'Could not change your PIN.');
     } finally {
       setTwoBusy(false);
     }
@@ -981,31 +1030,58 @@ function AccountPanel() {
               {twoStepEnabled ? 'Two-step verification is on' : 'Add an extra layer of security'}
             </p>
             <p className="text-xs text-content-muted">
-              {twoStepEnabled ? 'Enter your PIN to turn it off.' : 'Choose a 4–8 digit PIN, asked whenever the app is reopened.'}
+              {twoStepEnabled
+                ? 'Change your PIN (your current PIN is required), or enter it to turn two-step off.'
+                : 'Choose a 4–8 digit PIN, asked whenever the app is reopened.'}
             </p>
           </div>
         </div>
-        <div className="mt-3 flex items-end gap-2">
-          <div className="flex-1">
-            <Input
-              icon={KeyRound}
-              type="password"
-              inputMode="numeric"
-              placeholder={twoStepEnabled ? 'Current PIN' : 'New PIN'}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            />
+
+        {twoStepEnabled ? (
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Current PIN">
+                <PinInput placeholder="Current PIN" value={pin} onChange={setPin} autoComplete="current-password" />
+              </Field>
+              <Field label="New PIN" hint="Leave empty if you only want to turn two-step off.">
+                <PinInput placeholder="New 4–8 digit PIN" value={newPin} onChange={setNewPin} autoComplete="new-password" />
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                size="md"
+                disabled={twoBusy || pin.length < 4 || newPin.length < 4}
+                onClick={changePin}
+              >
+                {twoBusy ? '…' : 'Change PIN'}
+              </Button>
+              <Button
+                variant="outline"
+                size="md"
+                disabled={twoBusy || pin.length < 4}
+                onClick={toggleTwoStep}
+              >
+                {twoBusy ? '…' : 'Turn off'}
+              </Button>
+            </div>
           </div>
-          <Button
-            variant={twoStepEnabled ? 'outline' : 'primary'}
-            size="md"
-            disabled={twoBusy || pin.length < 4}
-            onClick={toggleTwoStep}
-            className="shrink-0"
-          >
-            {twoBusy ? '…' : twoStepEnabled ? 'Turn off' : 'Enable'}
-          </Button>
-        </div>
+        ) : (
+          <div className="mt-3 flex items-end gap-2">
+            <div className="flex-1">
+              <PinInput placeholder="New 4–8 digit PIN" value={pin} onChange={setPin} autoComplete="new-password" />
+            </div>
+            <Button
+              variant="primary"
+              size="md"
+              disabled={twoBusy || pin.length < 4}
+              onClick={toggleTwoStep}
+              className="shrink-0"
+            >
+              {twoBusy ? '…' : 'Enable'}
+            </Button>
+          </div>
+        )}
       </Section>
 
       <Section title="Active sessions" description="Devices signed in to your account. Revoking one signs it out immediately.">

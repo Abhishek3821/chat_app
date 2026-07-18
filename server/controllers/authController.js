@@ -585,10 +585,33 @@ export const enableTwoStep = asyncHandler(async (req, res) => {
   const pin = String(req.body.pin || '');
   if (!/^\d{4,8}$/.test(pin)) throw new ApiError(400, 'Your PIN must be 4 to 8 digits.');
   const user = await User.findById(req.user._id).select('+twoStepPin');
+  // Never silently overwrite an existing PIN — changing it requires proving
+  // knowledge of the current one (see changeTwoStepPin).
+  if (user.twoStepEnabled) throw new ApiError(400, 'Two-step is already on. Use "change PIN" instead.');
   user.twoStepPin = await bcrypt.hash(pin, 10);
   user.twoStepEnabled = true;
   await user.save();
   securityEvent('twostep.enable', req, { userId: String(user._id) });
+  res.json({ success: true, twoStepEnabled: true });
+});
+
+// POST /api/auth/two-step/change  { currentPin, newPin } — rotate the PIN.
+// The current PIN must match before the new one is accepted (rate-limited).
+export const changeTwoStepPin = asyncHandler(async (req, res) => {
+  const currentPin = String(req.body.currentPin || '');
+  const newPin = String(req.body.newPin || '');
+  if (!/^\d{4,8}$/.test(newPin)) throw new ApiError(400, 'Your new PIN must be 4 to 8 digits.');
+  const user = await User.findById(req.user._id).select('+twoStepPin');
+  if (!user.twoStepEnabled) throw new ApiError(400, 'Two-step verification is not enabled.');
+  const ok = user.twoStepPin && (await bcrypt.compare(currentPin, user.twoStepPin));
+  if (!ok) {
+    securityEvent('twostep.change.failure', req, { userId: String(user._id) });
+    throw new ApiError(400, 'Your current PIN is incorrect.');
+  }
+  if (currentPin === newPin) throw new ApiError(400, 'The new PIN must be different from the current one.');
+  user.twoStepPin = await bcrypt.hash(newPin, 10);
+  await user.save();
+  securityEvent('twostep.change', req, { userId: String(user._id) });
   res.json({ success: true, twoStepEnabled: true });
 });
 

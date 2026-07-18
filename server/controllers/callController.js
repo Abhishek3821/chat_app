@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser, isUserOnline } from '../socket/index.js';
 import { transitionCall } from '../utils/callService.js';
+import { notifyUser } from '../utils/notify.js';
 
 const USER_FIELDS = 'name username avatar isOnline';
 
@@ -46,6 +47,18 @@ export const startDirectCall = asyncHandler(async (req, res) => {
     ...(receiverOnline ? {} : { endedAt: new Date() }),
   });
 
+  // Device notification either way: with no live socket the push is the ONLY
+  // way a closed app hears the phone ring; online it still wakes a locked screen.
+  notifyUser(receiverId, {
+    from: req.user._id,
+    type: receiverOnline ? 'incoming_call' : 'missed_call',
+    title: receiverOnline ? `Incoming ${type} call` : `Missed ${type} call`,
+    body: receiverOnline ? `${req.user.name} is calling you…` : `You missed a ${type} call from ${req.user.name}.`,
+    tag: `call:${call._id}`,
+    url: '/calls',
+    data: { callId: String(call._id), callType: type },
+  });
+
   res.status(201).json({ success: true, call, receiverOnline });
 });
 
@@ -60,6 +73,18 @@ export const endCall = asyncHandler(async (req, res) => {
 export const missCall = asyncHandler(async (req, res) => {
   const call = await transitionCall(req.body.callId, req.user._id, 'missed');
   if (!call) throw new ApiError(404, 'Call not found.');
+  // Tell the callee they missed it (caller cancelled / ring timed out).
+  if (call.receiver && String(call.receiver) !== String(req.user._id)) {
+    notifyUser(call.receiver, {
+      from: req.user._id,
+      type: 'missed_call',
+      title: `Missed ${call.type} call`,
+      body: `You missed a ${call.type} call from ${req.user.name}.`,
+      tag: `call:${call._id}`,
+      url: '/calls',
+      data: { callId: String(call._id) },
+    });
+  }
   res.json({ success: true, call });
 });
 
@@ -103,15 +128,24 @@ export const startCall = asyncHandler(async (req, res) => {
     participants: allowed.map((u) => ({ user: u, status: 'ringing' })),
     status: 'ringing',
   });
-  allowed.forEach((uid) =>
+  allowed.forEach((uid) => {
     emitToUser(uid, 'call:incoming', {
       callId: String(call._id),
       from: { _id: req.user._id, name: req.user.name, avatar: req.user.avatar },
       type,
       isGroup,
       chatId,
-    })
-  );
+    });
+    notifyUser(uid, {
+      from: req.user._id,
+      type: 'incoming_call',
+      title: isGroup ? `Incoming group ${type} call` : `Incoming ${type} call`,
+      body: `${req.user.name} is calling you…`,
+      tag: `call:${call._id}`,
+      url: '/calls',
+      data: { callId: String(call._id), callType: type },
+    });
+  });
   res.status(201).json({ success: true, call });
 });
 

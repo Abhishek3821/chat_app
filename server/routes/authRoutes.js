@@ -13,6 +13,7 @@ import {
   resetPassword ,
   changePassword,
   enableTwoStep,
+  changeTwoStepPin,
   disableTwoStep,
   verifyTwoStep,
   requestTwoStepReset,
@@ -49,6 +50,8 @@ router.patch('/change-password', protect, changePassword);
 
 // Two-step verification (app-lock PIN). Verify is rate-limited (brute force).
 router.post('/two-step/enable', protect, enableTwoStep);
+// Changing the PIN requires the current PIN (rate-limited: guessing surface).
+router.post('/two-step/change', protect, authLimiter, changeTwoStepPin);
 router.post('/two-step/disable', protect, disableTwoStep);
 router.post('/two-step/verify', protect, authLimiter, verifyTwoStep);
 // Forgot PIN → reset it with an email OTP (both rate-limited).
