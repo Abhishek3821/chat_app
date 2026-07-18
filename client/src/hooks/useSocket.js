@@ -130,9 +130,15 @@ export function useSocket() {
     });
     socket.on('chat-disappearing', ({ chatId, seconds }) => useChat.getState().applyDisappearing(chatId, seconds));
 
+    // Group metadata changes (rename, avatar, members, roles) sync live.
+    socket.on('group-updated', ({ chat }) => { if (chat) useChat.getState().applyChatUpdate(chat); });
+
     // Live location: apply streamed coordinate updates + end-of-share.
     socket.on('live-location', ({ chatId, messageId, lat, lng }) => useChat.getState().applyLiveLocation(chatId, messageId, lat, lng));
-    socket.on('live-location-stopped', ({ chatId, message }) => { if (message) useChat.getState().applyEditedMessage(chatId, message); });
+    socket.on('live-location-stopped', ({ chatId, messageId }) => useChat.getState().applyLiveLocationStopped(chatId, messageId));
+
+    // Someone pinned/unpinned a message in a chat I'm in.
+    socket.on('message-pinned', ({ chatId, messageId, pinned }) => useChat.getState().applyPinned(chatId, messageId, !!pinned));
 
     // ── Contact + status notifications (bell + toast) ─────────────
     socket.on('contact-request', ({ from }) => {
@@ -148,6 +154,10 @@ export function useSocket() {
     socket.on('status-reply', ({ from, text }) => {
       useNotifications.getState().pushLocal({ type: 'status_reply', title: 'Status reply', body: `${from || 'Someone'}: ${text || ''}` });
       toast(`${from || 'Someone'} replied to your status`);
+    });
+    socket.on('meeting-invited', ({ title }) => {
+      useNotifications.getState().pushLocal({ type: 'meeting_reminder', title: 'Meeting invitation', body: title ? `You're invited: ${title}` : "You've been invited to a meeting" });
+      toast(`📅 Meeting invitation${title ? `: ${title}` : ''}`);
     });
 
     // Delivery / read receipts → update tick state for my messages.

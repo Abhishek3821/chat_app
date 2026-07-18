@@ -218,6 +218,35 @@ export const useChat = create((set, get) => ({
 
   addChat: (chat) => set((s) => (s.chats.some((c) => c._id === chat._id) ? {} : { chats: [chat, ...s.chats] })),
 
+  /** Apply a chat update that arrived over the socket (group rename/avatar/
+   *  members/roles…). Merges into the existing entry; unknown chats are added. */
+  applyChatUpdate: (chat) =>
+    set((s) => {
+      if (!chat?._id) return {};
+      const exists = s.chats.some((c) => c._id === chat._id);
+      return { chats: exists ? s.chats.map((c) => (c._id === chat._id ? { ...c, ...chat } : c)) : [chat, ...s.chats] };
+    }),
+
+  /** A live-location share ended — flip its "live" badge off for everyone. */
+  applyLiveLocationStopped: (chatId, messageId) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+          m._id === messageId ? { ...m, liveLocation: { ...(m.liveLocation || {}), active: false } } : m
+        ),
+      },
+    })),
+
+  /** Apply a pin/unpin that another participant made. */
+  applyPinned: (chatId, messageId, pinned) =>
+    set((s) => ({
+      messagesByChat: {
+        ...s.messagesByChat,
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === messageId ? { ...m, pinned } : m)),
+      },
+    })),
+
   /** Create a group chat with the given members (real API or demo). Returns the chat. */
   createGroup: async ({ name, description = '', members = [] }) => {
     if (DEMO_MODE) {
