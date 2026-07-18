@@ -8,7 +8,13 @@ import dns from 'dns';
  */
 export async function connectDB() {
   const uri = process.env.MONGO_URI;
+  const isProd = process.env.NODE_ENV === 'production';
   if (!uri) {
+    if (isProd) {
+      // A chat API without a DB is broken, not degraded — fail the deploy.
+      console.error('❌ MONGO_URI is required in production. Refusing to start.');
+      process.exit(1);
+    }
     console.warn('⚠️  MONGO_URI not set — running without a database connection.');
     return null;
   }
@@ -37,6 +43,11 @@ export async function connectDB() {
     return conn;
   } catch (err) {
     console.error(`❌ MongoDB connection error: ${err.message}`);
+    if (isProd) {
+      // Exit non-zero so the platform (Render) marks the deploy failed and
+      // keeps the previous healthy instance serving, instead of running broken.
+      process.exit(1);
+    }
     console.error('   The server will keep running, but DB-backed routes will fail.');
     return null;
   }

@@ -8,10 +8,14 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken, generateOTP } from '../utils/token.js';
 import { sendTokenResponse, setAuthCookies, clearAuthCookies, rotateSession, isSessionValid, hashToken } from '../utils/session.js';
 import { sendEmail, otpEmailTemplate, isEmailConfigured } from '../utils/sendEmail.js';
+import { sendSms, isSmsConfigured, normalizePhone, maskPhone, maskEmail } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
+// Second factor on login (OTP to the phone, or email fallback). On by default;
+// set ENABLE_LOGIN_OTP=false to sign users in with just the password.
+const LOGIN_OTP_ON = process.env.ENABLE_LOGIN_OTP !== 'false';
 
 /** Coerce untrusted input to a normalized email string ('' if not a string). */
 const cleanEmail = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
@@ -131,6 +135,12 @@ export const signup = asyncHandler(async (req, res) => {
   const exists = await User.findOne({ email: email.toLowerCase() });
   if (exists) throw new ApiError(409, 'An account with that email already exists.');
 
+  // Phone number is REQUIRED and must be unique — one number = one account.
+  const phone = normalizePhone(req.body.phone);
+  if (!phone) throw new ApiError(400, 'Please provide a valid phone number (7–15 digits, e.g. +919876543210).');
+  const phoneTaken = await User.findOne({ phone });
+  if (phoneTaken) throw new ApiError(409, 'That phone number is already linked to another account.');
+
   // Multi-tenant: an optional invite code makes the user JOIN that workspace;
   // otherwise the account type decides — 'personal' joins the shared Personal
   // space; 'workspace' (default) creates their own company workspace. Validate
@@ -152,6 +162,7 @@ export const signup = asyncHandler(async (req, res) => {
   const baseDoc = {
     name: name.trim().slice(0, 60),
     email,
+    phone,
     password, // hashed by the User pre-save hook (bcrypt, cost 12)
     role: 'user', // ALWAYS user — admins are created only via seed/manual promotion
     isVerified: !EMAIL_VERIFY_ON,
@@ -279,17 +290,63 @@ export const resendOtp = asyncHandler(async (req, res) => {
   });
 });
 
-// POST /api/auth/login
-export const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
-    throw new ApiError(400, 'Email and password are required.');
-  }
+/**
+ * Resolve a login identifier — email, username, or phone number — to a query.
+ * The same free-text box accepts all three (WhatsApp-style).
+ */
+function identifierQuery(identifier) {
+  const id = String(identifier || '').trim();
+  if (!id) return null;
+  const or = [];
+  if (id.includes('@')) or.push({ email: id.toLowerCase() });
+  const phone = normalizePhone(id);
+  if (phone) or.push({ phone });
+  if (/^[a-z0-9_.]{3,30}$/i.test(id)) or.push({ username: id.toLowerCase() });
+  return or.length ? { $or: or } : null;
+}
 
-  const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+/** Generate, store and deliver a login OTP (SMS first, email fallback). */
+async function issueLoginOtp(req, user) {
+  const otp = generateOTP();
+  user.loginOtp = otp;
+  user.loginOtpExpires = new Date(Date.now() + 10 * 60 * 1000);
+  user.loginOtpAttempts = 0;
+  await user.save({ validateBeforeSave: false });
+
+  let channel = 'email';
+  let sent = false;
+  if (user.phone && isSmsConfigured()) {
+    const r = await sendSms({ to: user.phone, body: `${otp} is your ChatConnect login code. It expires in 10 minutes.` });
+    if (r.sent) { channel = 'sms'; sent = true; }
+  }
+  if (!sent) {
+    channel = 'email';
+    try {
+      const r = await sendEmail({
+        to: user.email,
+        subject: 'Your ChatConnect login code',
+        html: otpEmailTemplate(user.name, otp),
+        text: `Your ChatConnect login code is ${otp}. It expires in 10 minutes.`,
+      });
+      sent = !!r?.sent;
+    } catch (err) {
+      console.error('❌ Login OTP email failed:', err.message);
+    }
+  }
+  securityEvent('login.otp.sent', req, { userId: String(user._id), channel });
+  return { otp, channel, sent };
+}
+
+/** Shared credential check for login + OTP resend. Throws on any failure. */
+async function checkCredentials(req, identifier, password) {
+  const query = identifierQuery(identifier);
+  if (!query || typeof password !== 'string' || !password) {
+    throw new ApiError(400, 'Enter your email, username or phone number, and your password.');
+  }
+  const user = await User.findOne(query).select('+password');
   if (!user || !(await user.matchPassword(password))) {
-    securityEvent('login.failure', req, { email: email.toLowerCase() });
-    throw new ApiError(401, 'Invalid email or password.');
+    securityEvent('login.failure', req, { identifier: String(identifier).slice(0, 60) });
+    throw new ApiError(401, 'Invalid credentials. Check your details and try again.');
   }
   if (EMAIL_VERIFY_ON && !user.isVerified) {
     throw new ApiError(403, 'Please verify your email before logging in.');
@@ -297,12 +354,91 @@ export const login = asyncHandler(async (req, res) => {
   if (user.accountStatus !== 'active') {
     throw new ApiError(403, `Your account is ${user.accountStatus}.`);
   }
+  return user;
+}
 
+// POST /api/auth/login  { identifier | email, password }
+// Step 1 of sign-in: verify the password, then send an OTP to the account's
+// phone (or email as fallback). The session is only issued by verify-login-otp.
+export const login = asyncHandler(async (req, res) => {
+  const identifier = req.body.identifier ?? req.body.email; // legacy clients send `email`
+  const user = await checkCredentials(req, identifier, req.body.password);
+
+  if (!LOGIN_OTP_ON) {
+    // OTP disabled → classic single-step login.
+    user.isOnline = true;
+    user.lastSeen = new Date();
+    await user.save({ validateBeforeSave: false });
+    securityEvent('login.success', req, { userId: String(user._id) });
+    return sendTokenResponse(req, res, user);
+  }
+
+  const { otp, channel, sent } = await issueLoginOtp(req, user);
+  const emailConfigured = isEmailConfigured();
+  res.json({
+    success: true,
+    requiresOtp: true,
+    channel,
+    sentTo: channel === 'sms' ? maskPhone(user.phone) : maskEmail(user.email),
+    message:
+      channel === 'sms'
+        ? `We sent a login code to ${maskPhone(user.phone)}.`
+        : sent
+          ? `We sent a login code to ${maskEmail(user.email)}.`
+          : 'We could not deliver the code — use “Resend code”.',
+    // Dev convenience only: surface the OTP when no delivery channel is set up.
+    ...(!sent && !emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
+  });
+});
+
+// POST /api/auth/login/verify-otp  { identifier, otp }
+// Step 2 of sign-in: check the OTP and mint the session.
+export const verifyLoginOtp = asyncHandler(async (req, res) => {
+  const query = identifierQuery(req.body.identifier ?? req.body.email);
+  if (!query) throw new ApiError(400, 'Missing account identifier.');
+  const user = await User.findOne(query).select('+loginOtp +loginOtpExpires +loginOtpAttempts');
+  if (!user || !user.loginOtp) throw new ApiError(400, 'No pending login. Please sign in again.');
+
+  // Same brute-force cap as the other OTPs: 5 wrong guesses kills the code.
+  if ((user.loginOtpAttempts || 0) >= 5) {
+    user.loginOtp = undefined;
+    user.loginOtpExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+    securityEvent('login.otp.locked', req, { userId: String(user._id) });
+    throw new ApiError(429, 'Too many incorrect attempts. Please sign in again.');
+  }
+  if (String(user.loginOtp) !== String(req.body.otp || '')) {
+    user.loginOtpAttempts = (user.loginOtpAttempts || 0) + 1;
+    await user.save({ validateBeforeSave: false });
+    securityEvent('login.otp.failure', req, { userId: String(user._id) });
+    throw new ApiError(400, 'Invalid login code.');
+  }
+  if (user.loginOtpExpires < Date.now()) throw new ApiError(400, 'That code has expired. Please sign in again.');
+
+  user.loginOtp = undefined;
+  user.loginOtpExpires = undefined;
+  user.loginOtpAttempts = 0;
   user.isOnline = true;
   user.lastSeen = new Date();
   await user.save({ validateBeforeSave: false });
-  securityEvent('login.success', req, { userId: String(user._id) });
+  securityEvent('login.success', req, { userId: String(user._id), otp: true });
   await sendTokenResponse(req, res, user);
+});
+
+// POST /api/auth/login/resend-otp  { identifier, password }
+// Requires the password again so an attacker can't spam codes at someone's
+// phone knowing only their username.
+export const resendLoginOtp = asyncHandler(async (req, res) => {
+  const user = await checkCredentials(req, req.body.identifier ?? req.body.email, req.body.password);
+  const { otp, channel, sent } = await issueLoginOtp(req, user);
+  const emailConfigured = isEmailConfigured();
+  res.json({
+    success: true,
+    channel,
+    sentTo: channel === 'sms' ? maskPhone(user.phone) : maskEmail(user.email),
+    message: 'A new code has been sent.',
+    ...(!sent && !emailConfigured && process.env.NODE_ENV !== 'production' ? { devOtp: otp } : {}),
+  });
 });
 
 // POST /api/auth/logout — revoke THIS session (not just clear the cookie).

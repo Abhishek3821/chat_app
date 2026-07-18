@@ -116,6 +116,7 @@ async function startServer() {
       MONGO_URI: TEST_URI,
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
+      ENABLE_LOGIN_OTP: 'false', // this suite exercises classic single-step login
       CLIENT_URL: 'http://localhost:5290',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -184,8 +185,8 @@ async function main() {
   await startServer();
   console.log('Server is up. Running tests…\n');
 
-  const A = { name: 'User A', email: 'a.e2e@chatconnect.app', password: 'PasswordA1!' };
-  const B = { name: 'User B', email: 'b.e2e@chatconnect.app', password: 'PasswordB1!' };
+  const A = { name: 'User A', email: 'a.e2e@chatconnect.app', password: 'PasswordA1!', phone: '+15550000001' };
+  const B = { name: 'User B', email: 'b.e2e@chatconnect.app', password: 'PasswordB1!', phone: '+15550000002' };
 
   // ── 1. Signup & role security ──────────────────────────────────
   console.log('— Auth & role security');
@@ -212,7 +213,7 @@ async function main() {
   }
   {
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'Shorty', email: 'short.e2e@chatconnect.app', password: 'short', confirmPassword: 'short' },
+      body: { name: 'Shorty', email: 'short.e2e@chatconnect.app', password: 'short', confirmPassword: 'short', phone: '+15550000003' },
     });
     check('short password rejected (400)', r.status === 400, `status ${r.status}`);
   }
@@ -224,7 +225,7 @@ async function main() {
     const png =
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'Ava Photo', email: 'c.e2e@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', avatar: png },
+      body: { name: 'Ava Photo', email: 'c.e2e@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', avatar: png, phone: '+15550000004' },
     });
     check('signup with optional profile photo stores it', r.status === 201 && r.data?.user?.avatar?.startsWith('data:image/'), `avatar=${String(r.data?.user?.avatar).slice(0, 24)}…`);
   }

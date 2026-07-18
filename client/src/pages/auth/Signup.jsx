@@ -17,6 +17,7 @@ import {
   Camera,
   X,
   Building2,
+  Phone,
 } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
@@ -27,6 +28,9 @@ import { cn } from '@/lib/utils';
 import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.jsx';
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Optional "+", then 7–15 digits (spaces/dashes are stripped before checking).
+const phoneRe = /^\+?\d{7,15}$/;
+const cleanPhone = (v) => v.replace(/[\s\-().]/g, '');
 
 function strengthOf(pw) {
   let score = 0;
@@ -75,7 +79,7 @@ export default function Signup() {
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', workspaceName: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '', workspaceName: '' });
   const [accountType, setAccountType] = useState('personal'); // 'personal' | 'workspace'
   const [avatar, setAvatar] = useState(null); // data-URL preview, optional
   const fileRef = useRef(null);
@@ -87,6 +91,7 @@ export default function Signup() {
     const e = {};
     if (!form.name.trim()) e.name = 'Please enter your name.';
     if (!emailRe.test(form.email)) e.email = 'Enter a valid email address.';
+    if (!phoneRe.test(cleanPhone(form.phone))) e.phone = 'Enter a valid phone number with country code, e.g. +91 98765 43210.';
     if (form.password.length < 8) e.password = 'At least 8 characters.';
     if (form.confirmPassword !== form.password) e.confirmPassword = 'Passwords do not match.';
     return e;
@@ -110,7 +115,7 @@ export default function Signup() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (busy) return;
-    setTouched({ name: true, email: true, password: true, confirmPassword: true });
+    setTouched({ name: true, email: true, phone: true, password: true, confirmPassword: true });
     if (!isValid) {
       toast.error('Please fix the highlighted fields.');
       return;
@@ -120,6 +125,7 @@ export default function Signup() {
       const data = await signup({
         name: form.name.trim(),
         email: form.email.trim(),
+        phone: cleanPhone(form.phone),
         password: form.password,
         confirmPassword: form.confirmPassword,
         ...(inviteCode ? { inviteCode } : { accountType }),
@@ -290,6 +296,21 @@ export default function Signup() {
                 onChange={set('email')}
                 onBlur={blur('email')}
                 className={cn(fieldError('email') && 'border-red-500/70 focus-visible:ring-red-500/40')}
+              />
+            </Field>
+          </motion.div>
+
+          <motion.div variants={rise}>
+            <Field label="Phone number" hint={fieldError('phone') || 'Used for login codes — one account per number.'}>
+              <Input
+                icon={Phone}
+                type="tel"
+                autoComplete="tel"
+                placeholder="+91 98765 43210"
+                value={form.phone}
+                onChange={set('phone')}
+                onBlur={blur('phone')}
+                className={cn(fieldError('phone') && 'border-red-500/70 focus-visible:ring-red-500/40')}
               />
             </Field>
           </motion.div>

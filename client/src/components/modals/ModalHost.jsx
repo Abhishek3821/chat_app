@@ -351,7 +351,7 @@ function imageToAvatarDataURL(file, max = 256) {
 
 function EditProfileModal({ open, onClose }) {
   const { user, updateProfile } = useAuth();
-  const [form, setForm] = useState({ name: '', username: '', bio: '', avatar: '' });
+  const [form, setForm] = useState({ name: '', username: '', phone: '', bio: '', avatar: '' });
   const [saving, setSaving] = useState(false);
   const fileRef = useRef(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -359,7 +359,7 @@ function EditProfileModal({ open, onClose }) {
   // ModalHost stays mounted for the whole session, so re-sync the form from the
   // live user each time the modal opens (otherwise it shows stale/abandoned data).
   useEffect(() => {
-    if (open) setForm({ name: user?.name || '', username: user?.username || '', bio: user?.bio || '', avatar: user?.avatar || '' });
+    if (open) setForm({ name: user?.name || '', username: user?.username || '', phone: user?.phone || '', bio: user?.bio || '', avatar: user?.avatar || '' });
   }, [open, user]);
 
   const pickPhoto = async (e) => {
@@ -379,7 +379,7 @@ function EditProfileModal({ open, onClose }) {
     if (!form.name.trim()) return toast.error('Name is required');
     setSaving(true);
     try {
-      await updateProfile({ name: form.name.trim(), username: form.username.trim(), bio: form.bio, avatar: form.avatar });
+      await updateProfile({ name: form.name.trim(), username: form.username.trim(), phone: form.phone.trim(), bio: form.bio, avatar: form.avatar });
       toast.success('Profile updated');
       onClose();
     } catch (err) {
@@ -402,6 +402,9 @@ function EditProfileModal({ open, onClose }) {
         </div>
         <Field label="Name"><Input value={form.name} onChange={set('name')} /></Field>
         <Field label="Username"><Input value={form.username} onChange={set('username')} /></Field>
+        <Field label="Phone number" hint="Used for login codes and so contacts can find you — one account per number.">
+          <Input type="tel" placeholder="+91 98765 43210" value={form.phone} onChange={set('phone')} />
+        </Field>
         <Field label="About"><Textarea rows={2} value={form.bio} onChange={set('bio')} /></Field>
       </div>
     </Modal>
@@ -477,6 +480,7 @@ function ProfileModal({ open, onClose, user }) {
         </div>
         <p className="text-sm text-content">{user.bio}</p>
         {user.email && <p className="text-xs text-content-muted">{user.email}</p>}
+        {user.phone && <p className="text-xs text-content-muted">{user.phone}</p>}
         <div className="mt-2 flex gap-2">
           <Button variant="subtle" size="sm" onClick={message}><MessageSquare size={16} /> Message</Button>
           <Button variant="glass" size="icon-sm" onClick={() => { startCall({ type: 'audio', peer: user, direction: 'outgoing' }); onClose(); }}><Phone size={16} /></Button>

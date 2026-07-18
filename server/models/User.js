@@ -40,7 +40,10 @@ const userSchema = new mongoose.Schema(
     },
     avatar: { type: String, default: '' },
     bio: { type: String, default: 'Available on ChatConnect', maxlength: 160 },
-    phone: { type: String, default: '' },
+    // Normalized phone (optional "+" then 7–15 digits). UNIQUE across accounts —
+    // enforced by the partial index below. Empty is allowed (e.g. Google signups)
+    // so missing phones never collide with each other.
+    phone: { type: String, default: '', trim: true },
 
     role: { type: String, enum: ['user', 'admin'], default: 'user' }, // platform-level (admin = super-admin)
     accountStatus: { type: String, enum: ['active', 'suspended', 'banned'], default: 'active' },
@@ -53,6 +56,11 @@ const userSchema = new mongoose.Schema(
     otp: { type: String, select: false },
     otpExpires: { type: Date, select: false },
     otpAttempts: { type: Number, default: 0, select: false },
+    // Login OTP (second factor after the password, sent to the phone via SMS —
+    // or to the email when SMS isn't configured / the account has no phone).
+    loginOtp: { type: String, select: false },
+    loginOtpExpires: { type: Date, select: false },
+    loginOtpAttempts: { type: Number, default: 0, select: false },
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpires: { type: Date, select: false },
 
@@ -99,6 +107,12 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.index({ name: 'text', username: 'text', email: 'text' });
+// One phone number = one account. Partial: only non-empty phones are indexed,
+// so accounts without a phone (Google signups, legacy users) never collide.
+userSchema.index(
+  { phone: 1 },
+  { unique: true, partialFilterExpression: { phone: { $type: 'string', $gt: '' } } }
+);
 
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) return next();
@@ -122,6 +136,9 @@ userSchema.methods.toSafeJSON = function toSafeJSON() {
   delete obj.twoStepResetOtp;
   delete obj.twoStepResetExpires;
   delete obj.twoStepResetAttempts;
+  delete obj.loginOtp;
+  delete obj.loginOtpExpires;
+  delete obj.loginOtpAttempts;
   return obj;
 };
 

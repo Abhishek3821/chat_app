@@ -13,8 +13,9 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { sessionCookieOptions } from '../utils/token.js';
 import { emitToUser } from '../socket/index.js';
 import { applyPresencePrivacy } from '../utils/privacy.js';
+import { normalizePhone } from '../utils/sendSms.js';
 
-const PUBLIC_FIELDS = 'name username email avatar bio isOnline lastSeen accountStatus createdAt';
+const PUBLIC_FIELDS = 'name username email phone avatar bio isOnline lastSeen accountStatus createdAt';
 // PUBLIC_FIELDS plus the fields needed to evaluate presence privacy (stripped
 // again by applyPresencePrivacy before the object is returned to the client).
 const PUBLIC_WITH_PRIVACY = `${PUBLIC_FIELDS} privacy contacts`;
@@ -25,13 +26,20 @@ export const searchUsers = asyncHandler(async (req, res) => {
   if (!q) return res.json({ success: true, users: [] });
 
   // GLOBAL reachability (WhatsApp-style): anyone can be found by their EXACT
-  // email or username, across every workspace — you find someone you already
-  // know by their identifier, then send a contact request. Within your OWN team
-  // workspace, partial name/username/email search also works (a company
-  // directory). There is deliberately NO partial cross-workspace search, so we
-  // never expose a browsable global directory of every user.
+  // email, username or phone number, across every workspace — you find someone
+  // you already know by their identifier, then send a contact request. Within
+  // your OWN team workspace, partial name/username/email search also works (a
+  // company directory). There is deliberately NO partial cross-workspace
+  // search, so we never expose a browsable global directory of every user.
   const term = q.toLowerCase();
   const orClauses = [{ email: term }, { username: term }];
+  const phoneTerm = normalizePhone(q);
+  if (phoneTerm) {
+    // Match with or without the leading "+" / country formatting differences.
+    orClauses.push({ phone: phoneTerm });
+    if (phoneTerm.startsWith('+')) orClauses.push({ phone: phoneTerm.slice(1) });
+    else orClauses.push({ phone: `+${phoneTerm}` });
+  }
   const ws = await Workspace.findById(req.user.workspace).select('type');
   if (ws && ws.type !== 'personal') {
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -79,6 +87,15 @@ export const updateProfile = asyncHandler(async (req, res) => {
   if (updates.username) {
     const clash = await User.findOne({ username: updates.username.toLowerCase(), _id: { $ne: req.user._id } });
     if (clash) throw new ApiError(409, 'That username is taken.');
+  }
+
+  // Phone: normalize + enforce one-number-one-account (same rule as signup).
+  if (updates.phone !== undefined && updates.phone !== '') {
+    const phone = normalizePhone(updates.phone);
+    if (!phone) throw new ApiError(400, 'Please provide a valid phone number (7–15 digits).');
+    const clash = await User.findOne({ phone, _id: { $ne: req.user._id } });
+    if (clash) throw new ApiError(409, 'That phone number is already linked to another account.');
+    updates.phone = phone;
   }
 
   const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true, runValidators: true });

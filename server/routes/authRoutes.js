@@ -4,6 +4,8 @@ import {
   verifyOtp,
   resendOtp,
   login,
+  verifyLoginOtp,
+  resendLoginOtp,
   googleAuth,
   logout,
   getMe,
@@ -29,6 +31,9 @@ router.post('/signup', authLimiter, signup);
 router.post('/verify-otp', authLimiter, verifyOtp);
 router.post('/resend-otp', authLimiter, resendOtp);
 router.post('/login', authLimiter, login);
+// Login second factor: OTP sent to the phone (email fallback).
+router.post('/login/verify-otp', authLimiter, verifyLoginOtp);
+router.post('/login/resend-otp', authLimiter, resendLoginOtp);
 router.post('/google', authLimiter, googleAuth); // sign in / up with a Google ID token
 router.post('/logout', protect, logout);
 router.post('/refresh', authLimiter, refresh); // authenticated by the refresh cookie

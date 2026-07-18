@@ -107,7 +107,7 @@ export default function ContactsPage() {
         >
           <div>
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl"><span className="gradient-text">Contacts</span></h1>
-            <p className="mt-1 text-sm text-content-muted">{contacts.length} connections · search anyone by email or username to connect</p>
+            <p className="mt-1 text-sm text-content-muted">{contacts.length} connections · search anyone by email, username or phone to connect</p>
           </div>
         </motion.header>
 
@@ -116,7 +116,7 @@ export default function ContactsPage() {
             icon={searching ? Loader2 : Search}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find people by name, @username or email…"
+            placeholder="Find people by name, @username, email or phone number…"
           />
         </motion.div>
 
@@ -133,7 +133,8 @@ export default function ContactsPage() {
                     <Avatar src={u.avatar} name={u.name} size="md" online={u.isOnline} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-semibold text-content">{u.name}</p>
-                      <p className="truncate text-xs text-content-muted">@{u.username} · {u.email}</p>
+                      {/* email/phone are contact-gated by the API — only shown for existing contacts */}
+                      <p className="truncate text-xs text-content-muted">@{u.username}{u.email ? ` · ${u.email}` : ''}{u.phone ? ` · ${u.phone}` : ''}</p>
                     </div>
                     {isContact ? (
                       <Button size="sm" variant="subtle" onClick={() => message(u)}><MessageCircle size={15} /> Message</Button>
@@ -209,7 +210,7 @@ export default function ContactsPage() {
                   <EmptyState
                     icon={UserPlus}
                     title="No contacts yet"
-                    description="Search for people by email or username above and send them a request. Once accepted, you can chat and call."
+                    description="Search for people by email, username or phone number above and send them a request. Once accepted, you can chat and call."
                   />
                 </div>
               ) : (

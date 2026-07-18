@@ -6,8 +6,14 @@ services:
     name: chatconnect-api
     runtime: node
     rootDir: server
+    # NOTE: "free" instances SLEEP after ~15 min idle (≈50 s cold start) and drop
+    # every held Socket.IO connection — fine for demos, unfit for real users.
+    # Move to an always-on paid plan (starter+) before launch.
     plan: free
-    buildCommand: npm install
+    # Keep 1 instance until REDIS_URL is set: presence, rate limits and socket
+    # fan-out are in-memory without Redis and would silently break across a fleet.
+    numInstances: 1
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
@@ -16,12 +22,28 @@ services:
         value: production
       - key: JWT_SECRET
         generateValue: true # Render generates a strong secret
-      - key: JWT_EXPIRES_IN
-        value: 30d
+      # Token lifetimes actually read by the code (utils/token.js / utils/session.js):
+      - key: JWT_ACCESS_EXPIRES
+        value: 1h
+      - key: REFRESH_TOKEN_DAYS
+        value: "30"
       - key: MONGO_URI
         sync: false # set in dashboard (MongoDB Atlas SRV string incl. /chatconnect)
       - key: CLIENT_URL
         sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
+      # ── Media storage ──────────────────────────────────────────
+      # REQUIRED for production: Render's disk is EPHEMERAL — locally stored
+      # avatars/attachments/status media are wiped on every deploy or restart.
+      # Set CLOUDINARY_URL in the dashboard (cloudinary://key:secret@cloud).
+      # (Falls back to local disk if CLOUDINARY_URL is left unset.)
+      - key: STORAGE_DRIVER
+        value: cloudinary
+      - key: CLOUDINARY_URL
+        sync: false
+      # Optional: Redis for multi-instance socket fan-out, shared rate limits
+      # and the BullMQ job queue. Required before raising numInstances above 1.
+      # - key: REDIS_URL
+      #   sync: false
       # Email verification is ON: signup issues an OTP that must be verified
       # before the account can log in. Requires the SMTP vars below to be set in
       # the dashboard (the pipeline is built and verified). PIN reset ("forgot
@@ -43,13 +65,22 @@ services:
       # The SAME value must be built into the frontend as VITE_GOOGLE_CLIENT_ID.
       - key: GOOGLE_CLIENT_ID
         sync: false
+      # Login OTP second factor (code to the phone via Twilio, email fallback).
+      - key: ENABLE_LOGIN_OTP
+        value: "true"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM
+        sync: false
       # Web Push (VAPID) — notifications when the app is closed.
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_SUBJECT
-        value: mailto:support@chatconnect.app
+        value: mailto:abhisheksingh@capyngen.com # real, monitored contact (push services may use it to reach you)
       # Optional: comma-separated additional allowed origins
       # - key: EXTRA_CORS_ORIGINS
       #   value: https://staging.yourdomain.com

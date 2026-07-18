@@ -26,18 +26,47 @@ export const useAuth = create((set, get) => ({
     }
   },
 
-  login: async ({ email, password }) => {
+  /**
+   * Step 1 of sign-in. `identifier` may be an email, username or phone number.
+   * Returns the raw response: either { requiresOtp: true, channel, sentTo, … }
+   * (finish with verifyLoginOtp) or a full session when OTP is disabled.
+   */
+  login: async ({ identifier, email, password }) => {
+    if (DEMO_MODE) {
+      localStorage.setItem('cc_demo_authed', '1');
+      set({ user: ME });
+      return { user: ME };
+    }
+    const id = identifier ?? email;
+    const { data } = await api.post('/auth/login', { identifier: id, email: id, password });
+    if (data.requiresOtp) return data; // OTP step comes next — no session yet
+    if (data.token) localStorage.setItem('cc_token', data.token);
+    sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
+    set({ user: data.user });
+    ensureMediaToken(true);
+    return data;
+  },
+
+  /** Step 2 of sign-in: verify the OTP that was sent to the phone/email. */
+  verifyLoginOtp: async ({ identifier, otp }) => {
     if (DEMO_MODE) {
       localStorage.setItem('cc_demo_authed', '1');
       set({ user: ME });
       return ME;
     }
-    const { data } = await api.post('/auth/login', { email, password });
+    const { data } = await api.post('/auth/login/verify-otp', { identifier, otp });
     if (data.token) localStorage.setItem('cc_token', data.token);
-    sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
+    sessionStorage.setItem('cc_unlocked', '1');
     set({ user: data.user });
     ensureMediaToken(true);
     return data.user;
+  },
+
+  /** Resend the login OTP (needs the password again — anti-abuse). */
+  resendLoginOtp: async ({ identifier, password }) => {
+    if (DEMO_MODE) return {};
+    const { data } = await api.post('/auth/login/resend-otp', { identifier, password });
+    return data; // may include devOtp when no SMS/email is configured
   },
 
   signup: async (payload) => {

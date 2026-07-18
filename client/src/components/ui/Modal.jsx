@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 
 const widths = {
@@ -25,7 +26,9 @@ export default function Modal({ open, onClose, title, subtitle, children, footer
     };
   }, [open, onClose]);
 
-  return (
+  // Portal to <body>: ancestors with transforms/overflow (animated cards) would
+  // otherwise trap and clip the fixed-position overlay inside themselves.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center">
@@ -69,6 +72,7 @@ export default function Modal({ open, onClose, title, subtitle, children, footer
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

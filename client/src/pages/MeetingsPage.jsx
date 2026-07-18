@@ -187,9 +187,13 @@ function MeetingCard({ meeting, me }) {
         </div>
 
         {amHost && (
-          <Button variant="ghost" size="sm" aria-label="Attendance report" onClick={openReport} className="shrink-0">
-            <ClipboardList size={16} /> Report
-          </Button>
+          <button
+            aria-label="Attendance report"
+            onClick={openReport}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-2/70 px-3 py-1.5 text-xs font-semibold text-content-muted transition-colors hover:border-brand-500/40 hover:text-brand-600 dark:hover:text-brand-300"
+          >
+            <ClipboardList size={14} /> Report
+          </button>
         )}
       </div>
 
@@ -248,7 +252,17 @@ function MeetingCard({ meeting, me }) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={copyLink} title="Copy meeting link"><Copy size={15} /></Button>
+          {roomCode && (
+            <button
+              onClick={copyLink}
+              title="Copy meeting link"
+              className="hidden items-center gap-1.5 rounded-xl border border-border bg-surface-2/70 px-2.5 py-2 font-mono text-[11px] font-semibold text-content-muted transition-colors hover:border-brand-500/40 hover:text-content sm:inline-flex"
+            >
+              {roomCode}
+              <Copy size={12} />
+            </button>
+          )}
+          <Button variant="outline" size="sm" onClick={copyLink} title="Copy meeting link" className="sm:hidden"><Copy size={15} /></Button>
           <Button onClick={join}>
             {meeting.type === 'video' ? <Video size={17} /> : <Phone size={17} />}
             Join
@@ -261,52 +275,110 @@ function MeetingCard({ meeting, me }) {
   );
 }
 
-function ReportStat({ label, value }) {
+function ReportStat({ icon: Icon, label, value, accent }) {
   return (
-    <div className="rounded-xl bg-surface-2/60 p-3 text-center">
-      <p className="truncate text-base font-bold text-content">{value}</p>
-      <p className="text-[11px] font-medium text-content-muted">{label}</p>
+    <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+      <div className="flex items-center gap-1.5 text-content-muted">
+        <Icon size={13} className={accent} />
+        <p className="text-[11px] font-semibold uppercase tracking-wide">{label}</p>
+      </div>
+      <p className="mt-1 truncate text-lg font-bold text-content">{value}</p>
     </div>
   );
 }
 
 function MeetingReportModal({ open, onClose, report, loading }) {
+  const isLive = report?.status === 'ongoing';
+  // Longest presence anchors the attendance bars (falls back to meeting duration).
+  const maxSec = Math.max(
+    report?.durationSeconds || 0,
+    ...(report?.attendees || []).map((a) => a.durationSeconds || 0),
+    1
+  );
+
   return (
     <Modal open={open} onClose={onClose} title="Meeting report" subtitle={report?.title} size="lg">
       {loading || !report ? (
-        <p className="py-10 text-center text-sm text-content-muted">Loading attendance…</p>
+        <div className="flex flex-col items-center gap-3 py-12">
+          <span className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+          <p className="text-sm text-content-muted">Loading attendance…</p>
+        </div>
       ) : (
-        <div className="space-y-4 pb-2">
+        <div className="space-y-5 pb-3">
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-            <ReportStat label="Date" value={report.startedAt ? format(new Date(report.startedAt), 'd MMM') : '—'} />
-            <ReportStat label="Started" value={report.startedAt ? format(new Date(report.startedAt), 'h:mm a') : 'Not yet'} />
-            <ReportStat label="Duration" value={report.durationSeconds ? fmtDuration(report.durationSeconds) : report.status === 'ongoing' ? 'Live' : '—'} />
-            <ReportStat label="Attended" value={report.attendeeCount} />
+            <ReportStat
+              icon={CalendarDays}
+              accent="text-brand-500"
+              label="Date"
+              value={report.startedAt ? format(new Date(report.startedAt), 'd MMM') : '—'}
+            />
+            <ReportStat
+              icon={Clock}
+              accent="text-brand-500"
+              label="Started"
+              value={report.startedAt ? format(new Date(report.startedAt), 'h:mm a') : 'Not yet'}
+            />
+            <ReportStat
+              icon={Video}
+              accent={isLive ? 'text-emerald-500' : 'text-brand-500'}
+              label="Duration"
+              value={report.durationSeconds ? fmtDuration(report.durationSeconds) : isLive ? 'Live' : '—'}
+            />
+            <ReportStat icon={Users} accent="text-brand-500" label="Attended" value={report.attendeeCount} />
           </div>
-          {report.timezone && <p className="text-center text-xs text-content-muted">Times shown in your local zone · scheduled for {report.timezone}</p>}
+
+          {report.timezone && (
+            <p className="text-center text-xs text-content-muted">
+              Times shown in your local zone · scheduled for {report.timezone}
+            </p>
+          )}
 
           <div>
-            <p className="mb-2 text-sm font-medium text-content">Participants ({report.attendeeCount})</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-semibold text-content">Participants</p>
+              <span className="rounded-full bg-brand-500/10 px-2.5 py-0.5 text-xs font-semibold text-brand-600 dark:text-brand-300">
+                {report.attendeeCount}
+              </span>
+            </div>
             {report.attendees.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-border p-5 text-center text-sm text-content-muted">No one has joined this meeting yet.</p>
+              <p className="rounded-2xl border border-dashed border-border p-6 text-center text-sm text-content-muted">
+                No one has joined this meeting yet.
+              </p>
             ) : (
-              <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border">
-                {report.attendees.map((a, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3">
-                    <Avatar name={a.name} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-content">{a.name || 'Guest'}</p>
-                      <p className="truncate text-xs text-content-muted">{a.email || '—'}</p>
+              <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface-2/40">
+                {report.attendees.map((a, i) => {
+                  const stillIn = a.joinedAt && !a.leftAt;
+                  const pct = Math.min(100, Math.round(((a.durationSeconds || 0) / maxSec) * 100));
+                  return (
+                    <div key={i} className="p-3.5">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={a.name} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="flex items-center gap-2 truncate text-sm font-semibold text-content">
+                            {a.name || 'Guest'}
+                            {stillIn && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-300">
+                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                                In meeting
+                              </span>
+                            )}
+                          </p>
+                          <p className="truncate text-xs text-content-muted">{a.email || '—'}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-xs text-content-muted">
+                            {a.joinedAt ? format(new Date(a.joinedAt), 'h:mm a') : '—'}
+                            {a.leftAt ? ` – ${format(new Date(a.leftAt), 'h:mm a')}` : ''}
+                          </p>
+                          <p className="text-sm font-bold text-content">{fmtDuration(a.durationSeconds)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-content/10">
+                        <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${pct}%` }} />
+                      </div>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-xs text-content-muted">
-                        {a.joinedAt ? format(new Date(a.joinedAt), 'h:mm a') : '—'}
-                        {a.leftAt ? ` – ${format(new Date(a.leftAt), 'h:mm a')}` : ''}
-                      </p>
-                      <p className="text-xs font-semibold text-content">{fmtDuration(a.durationSeconds)}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

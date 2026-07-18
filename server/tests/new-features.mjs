@@ -92,6 +92,7 @@ async function startServer() {
       MONGO_URI: TEST_URI,
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
+      ENABLE_LOGIN_OTP: 'true', // exercise the two-step (password → OTP) login
       EMAIL_HOST: '', // force "email not configured" so dev OTPs come back in responses
       EMAIL_USER: '',
       EMAIL_PASS: '',
@@ -129,13 +130,61 @@ async function main() {
   console.log('Server is up. Running tests…\n');
 
   // ── users ──
-  const A = { name: 'Busy A', email: 'busy.a@chatconnect.app', password: 'PasswordA1!' };
-  const B = { name: 'Busy B', email: 'busy.b@chatconnect.app', password: 'PasswordB1!' };
+  const A = { name: 'Busy A', email: 'busy.a@chatconnect.app', password: 'PasswordA1!', phone: '+15551110001' };
+  const B = { name: 'Busy B', email: 'busy.b@chatconnect.app', password: 'PasswordB1!', phone: '+15551110002' };
   const sa = await http('POST', '/auth/signup', { body: { ...A, confirmPassword: A.password } });
   const sb = await http('POST', '/auth/signup', { body: { ...B, confirmPassword: B.password } });
   const tokA = sa.data?.token; const tokB = sb.data?.token;
   const idA = sa.data?.user?._id; const idB = sb.data?.user?._id;
   check('two accounts created', !!(tokA && tokB));
+  const usernameA = sa.data?.user?.username;
+
+  // ── phone rules at signup ──
+  {
+    const r = await http('POST', '/auth/signup', {
+      body: { name: 'Clone', email: 'clone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: A.phone },
+    });
+    check('duplicate phone number rejected (409)', r.status === 409, `status ${r.status}: ${r.data?.message}`);
+  }
+  {
+    const r = await http('POST', '/auth/signup', {
+      body: { name: 'NoPhone', email: 'nophone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!' },
+    });
+    check('signup without phone rejected (400)', r.status === 400, `status ${r.status}`);
+  }
+  {
+    const r = await http('POST', '/auth/signup', {
+      body: { name: 'BadPhone', email: 'badphone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: 'abc123' },
+    });
+    check('invalid phone rejected (400)', r.status === 400, `status ${r.status}`);
+  }
+
+  // ── two-step login: email/username/phone + password → OTP → session ──
+  {
+    const r = await http('POST', '/auth/login', { body: { identifier: usernameA, password: A.password } });
+    check('login by USERNAME asks for an OTP', r.status === 200 && r.data?.requiresOtp === true && !!r.data?.devOtp, JSON.stringify(r.data)?.slice(0, 140));
+    const bad = await http('POST', '/auth/login/verify-otp', { body: { identifier: usernameA, otp: '000000' } });
+    check('wrong login OTP rejected (400)', bad.status === 400, `status ${bad.status}`);
+    const ok = await http('POST', '/auth/login/verify-otp', { body: { identifier: usernameA, otp: r.data.devOtp } });
+    check('correct login OTP issues a session', ok.status === 200 && !!ok.data?.token, `status ${ok.status}`);
+  }
+  {
+    const r = await http('POST', '/auth/login', { body: { identifier: '+1 555 111 0002', password: B.password } });
+    check('login by PHONE (formatted) asks for an OTP', r.status === 200 && r.data?.requiresOtp === true && !!r.data?.devOtp, JSON.stringify(r.data)?.slice(0, 140));
+    const ok = await http('POST', '/auth/login/verify-otp', { body: { identifier: B.phone, otp: r.data.devOtp } });
+    check('phone-login OTP issues a session', ok.status === 200 && !!ok.data?.token);
+  }
+  {
+    const r = await http('POST', '/auth/login', { body: { identifier: A.email, password: 'WrongPass1!' } });
+    check('wrong password still rejected (401)', r.status === 401, `status ${r.status}`);
+  }
+
+  // ── search by phone ──
+  {
+    const r = await http('GET', `/users/search?q=${encodeURIComponent('+1 (555) 111-0002')}`, { token: tokA });
+    const hit = (r.data?.users || []).find((u) => String(u._id) === String(idB));
+    check('user found by phone number search', !!hit, JSON.stringify(r.data?.users?.map((u) => u.username))?.slice(0, 120));
+  }
 
   // mutual contacts (required for call signaling)
   const reqR = await http('POST', `/contacts/request/${idB}`, { token: tokA });

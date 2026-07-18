@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
+import mongoose from 'mongoose';
 
 import { connectDB } from './config/db.js';
 import { ensureWorkspaces } from './utils/workspaceService.js';
@@ -83,7 +84,9 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
 app.use(mongoSanitize);
-if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
+// Access logs in every environment: human-friendly in dev, Apache "combined"
+// in production (Render captures stdout — this is the request audit trail).
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // ── Uploaded files (authenticated + per-chat access control) ─────
 // NOT public static: serveUpload requires a valid token and, for chat
@@ -153,6 +156,36 @@ async function start() {
 
 start();
 
+// ── Lifecycle ───────────────────────────────────────────────────
+// Graceful shutdown: on deploys/restarts the platform sends SIGTERM. Stop
+// accepting new work, tell connected clients, close DB handles, then exit —
+// so in-flight requests aren't killed mid-write.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  // Hard deadline: never hang a deploy waiting on a stuck connection.
+  const deadline = setTimeout(() => process.exit(1), 10000);
+  deadline.unref();
+  try {
+    await new Promise((resolve) => server.close(resolve)); // stop new HTTP conns
+    io.close(); // disconnect sockets (clients auto-reconnect to the new instance)
+    await mongoose.connection.close();
+  } catch (err) {
+    console.error('Shutdown error:', err?.message || err);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled rejection:', err?.message || err);
+});
+process.on('uncaughtException', (err) => {
+  // State is undefined after an uncaught throw — log and let the platform
+  // restart a clean process rather than limping on.
+  console.error('Uncaught exception:', err);
+  shutdown('uncaughtException');
 });

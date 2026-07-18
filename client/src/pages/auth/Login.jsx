@@ -1,18 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Mail,
   Lock,
   Eye,
   EyeOff,
   ArrowRight,
+  ArrowLeft,
   Sparkles,
   ShieldCheck,
   Zap,
   Globe,
   Loader2,
+  AtSign,
+  Smartphone,
+  RotateCw,
 } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
@@ -168,28 +171,79 @@ export function MobileBrand() {
   );
 }
 
+const RESEND_SECONDS = 30;
+
 export default function Login() {
   const navigate = useNavigate();
-  const { login, loading } = useAuth();
+  const { login, verifyLoginOtp, resendLoginOtp, loading } = useAuth();
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ email: '', password: '', remember: true });
+  // Two-step sign-in: 'credentials' → password ok → 'otp' (code sent to phone/email).
+  const [step, setStep] = useState('credentials');
+  const [otpInfo, setOtpInfo] = useState(null); // { channel, sentTo, devOtp }
+  const [otp, setOtp] = useState('');
+  const [resendIn, setResendIn] = useState(RESEND_SECONDS);
 
   const set = (key) => (e) =>
     setForm((f) => ({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
+
+  // Resend countdown while on the OTP step.
+  useEffect(() => {
+    if (step !== 'otp' || resendIn <= 0) return undefined;
+    const t = setInterval(() => setResendIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [step, resendIn]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting || loading) return;
     setSubmitting(true);
     try {
-      await login({ email: form.email.trim(), password: form.password });
-      toast.success('Welcome back to ChatConnect!');
-      navigate('/');
+      const data = await login({ identifier: form.email.trim(), password: form.password });
+      if (data?.requiresOtp) {
+        setOtpInfo(data);
+        setOtp('');
+        setResendIn(RESEND_SECONDS);
+        setStep('otp');
+        toast.success(data.message || 'We sent you a login code.');
+      } else {
+        toast.success('Welcome back to ChatConnect!');
+        navigate('/');
+      }
     } catch (err) {
       toast.error(err?.message || 'Could not sign you in. Please try again.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    if (submitting || otp.length < 4) return;
+    setSubmitting(true);
+    try {
+      await verifyLoginOtp({ identifier: form.email.trim(), otp });
+      toast.success('Welcome back to ChatConnect!');
+      navigate('/');
+    } catch (err) {
+      toast.error(err?.message || 'Invalid or expired code.');
+      setOtp('');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendIn > 0 || submitting) return;
+    setResendIn(RESEND_SECONDS);
+    setOtp('');
+    try {
+      const r = await resendLoginOtp({ identifier: form.email.trim(), password: form.password });
+      if (r?.devOtp) setOtpInfo((info) => ({ ...info, devOtp: r.devOtp }));
+      toast.success('A new code is on its way.');
+    } catch (err) {
+      toast.error(err?.message || 'Could not resend the code.');
     }
   };
 
@@ -202,6 +256,73 @@ export default function Login() {
       <AuthPanel>
         <MobileBrand />
 
+        {step === 'otp' ? (
+          <>
+            <motion.div variants={rise} initial="initial" animate="animate">
+              <span className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
+                <Smartphone size={22} />
+              </span>
+              <h2 className="font-display text-2xl font-extrabold tracking-tight text-content">Enter your login code</h2>
+              <p className="mt-1.5 text-sm text-content-muted">
+                We sent a 6-digit code to{' '}
+                <span className="font-semibold text-content">{otpInfo?.sentTo || (otpInfo?.channel === 'sms' ? 'your phone' : 'your email')}</span>
+                {otpInfo?.channel === 'sms' ? ' by SMS.' : ' by email.'}
+              </p>
+            </motion.div>
+
+            <form onSubmit={handleVerifyOtp} className="mt-8 space-y-5">
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                placeholder="••••••"
+                aria-label="Login code"
+                className="ring-brand w-full rounded-2xl border border-border bg-surface-2 px-3 py-4 text-center text-2xl font-bold tracking-[0.45em] text-content outline-none focus:border-brand-500"
+              />
+              {otpInfo?.devOtp && (
+                <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-center text-xs text-amber-600 dark:text-amber-300">
+                  No SMS/email is configured on the server — your development code is{' '}
+                  <span className="text-sm font-extrabold tracking-[0.3em]">{otpInfo.devOtp}</span>
+                </p>
+              )}
+              <Button type="submit" variant="primary" size="lg" className="w-full" disabled={busy || otp.length < 6}>
+                {busy ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" /> Verifying…
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={18} /> Verify &amp; sign in
+                  </>
+                )}
+              </Button>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  type="button"
+                  onClick={() => setStep('credentials')}
+                  className="inline-flex items-center gap-1.5 font-semibold text-content-muted transition-colors hover:text-content"
+                >
+                  <ArrowLeft size={15} /> Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resendIn > 0}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 font-semibold transition-colors',
+                    resendIn > 0 ? 'cursor-not-allowed text-content-muted/70' : 'text-brand-600 hover:text-brand-500 dark:text-brand-300'
+                  )}
+                >
+                  <RotateCw size={14} className={cn(resendIn > 0 && 'opacity-50')} />
+                  {resendIn > 0 ? `Resend in 0:${String(resendIn).padStart(2, '0')}` : 'Resend code'}
+                </button>
+              </div>
+            </form>
+          </>
+        ) : (
+        <>
         <motion.div variants={rise}>
           <h2 className="font-display text-2xl font-extrabold tracking-tight text-content">Sign in</h2>
           <p className="mt-1.5 text-sm text-content-muted">
@@ -211,12 +332,12 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-5">
           <motion.div variants={rise}>
-            <Field label="Email address">
+            <Field label="Email, username or phone">
               <Input
-                icon={Mail}
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
+                icon={AtSign}
+                type="text"
+                autoComplete="username"
+                placeholder="you@example.com · @username · +91 98765 43210"
                 value={form.email}
                 onChange={set('email')}
                 required
@@ -285,6 +406,8 @@ export default function Login() {
         <motion.div variants={rise}>
           <GoogleButton text="signin_with" />
         </motion.div>
+        </>
+        )}
 
         {DEMO_MODE && (
           <motion.p
