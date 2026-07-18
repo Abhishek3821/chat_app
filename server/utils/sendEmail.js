@@ -11,11 +11,8 @@ export function isEmailConfigured() {
   return Boolean(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
 }
 
-let transporter = null;
-function getTransport() {
-  if (transporter) return transporter;
-  const port = Number(process.env.EMAIL_PORT) || 587;
-  transporter = nodemailer.createTransport({
+function makeTransport(port) {
+  return nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
     port,
     secure: port === 465, // 465 = implicit TLS; 587/2525 = STARTTLS
@@ -25,7 +22,38 @@ function getTransport() {
     greetingTimeout: 10_000,
     socketTimeout: 20_000,
   });
+}
+
+// Some networks/hosts (notably cloud providers → GoDaddy relays) silently block
+// one submission port but not the other. Try the configured port first, and on
+// a CONNECTION-level failure (not auth/policy) retry once on the alternate
+// (587 ↔ 465), then stick with whichever worked.
+let transporter = null;
+function getTransport() {
+  if (transporter) return transporter;
+  transporter = makeTransport(Number(process.env.EMAIL_PORT) || 587);
   return transporter;
+}
+
+const CONNECTION_ERRORS = new Set(['ETIMEDOUT', 'ESOCKET', 'ECONNECTION', 'ECONNREFUSED', 'ECONNRESET', 'EDNS']);
+function isConnectionError(err) {
+  return CONNECTION_ERRORS.has(err?.code) || /timed?\s*out|connection/i.test(err?.message || '');
+}
+
+async function sendWithFallback(mail) {
+  try {
+    return await getTransport().sendMail(mail);
+  } catch (err) {
+    if (!isConnectionError(err)) throw err;
+    const primary = Number(process.env.EMAIL_PORT) || 587;
+    const alternate = primary === 465 ? 587 : 465;
+    console.warn(`⚠️  SMTP port ${primary} unreachable (${err.code || err.message}) — retrying on ${alternate}…`);
+    const fallback = makeTransport(alternate);
+    const info = await fallback.sendMail(mail); // throws to caller if this fails too
+    transporter = fallback; // it worked — use this port from now on
+    console.log(`✅ SMTP fallback to port ${alternate} succeeded.`);
+    return info;
+  }
 }
 
 /** Verify SMTP connectivity/credentials. Used at boot and by /api/health. */
@@ -71,7 +99,7 @@ export async function sendEmail({ to, subject, html, text }) {
     }
     return { sent: false, logged: true };
   }
-  const info = await getTransport().sendMail({
+  const info = await sendWithFallback({
     from: fromHeader(),
     to,
     subject,

@@ -32,7 +32,9 @@ export function errorHandler(err, req, res, _next) {
 
   // Don't disclose internal error text to clients in production for 5xx — those
   // messages (DB driver, Redis host, etc.) can leak infrastructure detail.
-  const clientMessage = isProd && statusCode >= 500 ? 'Something went wrong. Please try again.' : message;
+  // Deliberate ApiErrors are exempt: their messages are written for end users.
+  const clientMessage =
+    isProd && statusCode >= 500 && !err.isOperational ? 'Something went wrong. Please try again.' : message;
 
   res.status(statusCode || 500).json({
     success: false,
