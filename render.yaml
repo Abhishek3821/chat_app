@@ -50,7 +50,12 @@ services:
       # chat-lock PIN") uses the same mailer.
       - key: ENABLE_EMAIL_VERIFICATION
         value: "true"
-      # SMTP — set these in the dashboard (e.g. smtpout.secureserver.net / Brevo / SendGrid):
+      # ⚠ Render's FREE plan blocks outbound SMTP ports (25/465/587) — SMTP can
+      # NEVER work on it. Either upgrade the plan, or set BREVO_API_KEY (HTTPS
+      # email, works on free). When set it takes priority over the SMTP vars.
+      - key: BREVO_API_KEY
+        sync: false
+      # SMTP — set these in the dashboard (paid plans only; see note above):
       - key: EMAIL_HOST
         sync: false
       - key: EMAIL_PORT

@@ -95,7 +95,7 @@ async function startServer() {
       // Force "email not configured" (both naming schemes) so dev OTPs come
       // back in API responses instead of being sent.
       EMAIL_HOST: '', EMAIL_USER: '', EMAIL_PASS: '',
-      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '',
+      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '', BREVO_API_KEY: '',
       CLIENT_URL: 'http://localhost:5290',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

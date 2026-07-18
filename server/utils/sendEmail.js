@@ -18,7 +18,13 @@ const smtpEnv = () => ({
   pass: process.env.EMAIL_PASS || process.env.SMTP_PASS,
 });
 
+// HTTPS email provider (Brevo). SMTP ports are blocked on some hosts (e.g.
+// Render's free plan blocks 25/465/587 entirely) — an HTTP API on 443 always
+// gets through. When BREVO_API_KEY is set it takes priority over SMTP.
+const brevoKey = () => process.env.BREVO_API_KEY || '';
+
 export function isEmailConfigured() {
+  if (brevoKey()) return true;
   const { host, user, pass } = smtpEnv();
   return Boolean(host && user && pass);
 }
@@ -82,8 +88,16 @@ async function sendWithFallback(mail) {
   }
 }
 
-/** Verify SMTP connectivity/credentials. Used at boot and by /api/health. */
+/** Verify email connectivity/credentials. Used at boot and by /api/health. */
 export async function verifyEmailTransport() {
+  if (brevoKey()) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/account', { headers: { 'api-key': brevoKey() } });
+      return res.ok ? { ok: true } : { ok: false, reason: `Brevo API key rejected (${res.status})` };
+    } catch (err) {
+      return { ok: false, reason: `Brevo unreachable: ${err.message}` };
+    }
+  }
   if (!isEmailConfigured()) return { ok: false, reason: 'EMAIL_HOST / EMAIL_USER / EMAIL_PASS are not all set' };
   try {
     await getTransport().verify();
@@ -106,6 +120,38 @@ function fromHeader() {
   return `"${raw || 'ChatConnect'}" <${user}>`;
 }
 
+/** Parse fromHeader() into Brevo's { name, email } shape. */
+function fromParts() {
+  const raw = fromHeader();
+  const m = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
+  if (m) return { name: m[1].trim() || 'ChatConnect', email: m[2].trim() };
+  return { name: 'ChatConnect', email: raw.trim() };
+}
+
+/** Send through Brevo's HTTPS API (works where SMTP ports are blocked). */
+async function sendViaBrevo({ to, subject, html, text }) {
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'api-key': brevoKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sender: fromParts(),
+      to: [{ email: to }],
+      subject,
+      htmlContent: html || undefined,
+      textContent: text || undefined,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    const err = new Error(`Brevo send failed (${res.status}): ${detail.slice(0, 300)}`);
+    // 401 = bad api key → let classifySendError treat it as an auth problem.
+    if (res.status === 401) err.responseCode = 535;
+    throw err;
+  }
+  const data = await res.json().catch(() => ({}));
+  return { messageId: data.messageId };
+}
+
 /**
  * Send an email. Returns { sent: true } on success, { sent: false, logged: true }
  * when SMTP isn't configured (dev fallback). Throws only on a real send failure
@@ -124,6 +170,11 @@ export async function sendEmail({ to, subject, html, text }) {
       console.log(`   Body:    ${text || html}\n`);
     }
     return { sent: false, logged: true };
+  }
+  // HTTPS provider first (immune to SMTP port blocking), SMTP otherwise.
+  if (brevoKey()) {
+    const info = await sendViaBrevo({ to, subject, html, text });
+    return { sent: true, messageId: info.messageId };
   }
   const info = await sendWithFallback({
     from: fromHeader(),
