@@ -7,6 +7,8 @@ import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import { useSocket } from '@/hooks/useSocket';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
+import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
+import api from '@/lib/api';
 import { useMeetings } from '@/store/useMeetings';
 import { useAuth } from '@/store/useAuth';
 import { useUI } from '@/store/useUI';
@@ -108,14 +110,56 @@ export default function MeetingRoom() {
   return <Room meeting={meeting} code={code} me={me} onLeave={() => navigate('/meetings')} />;
 }
 
+/**
+ * Transport selector: ask the server whether this meeting runs on the LiveKit
+ * SFU (scales past ~6 people) or the peer-to-peer mesh, then mount the matching
+ * room. Both render the identical RoomView UI.
+ */
 function Room({ meeting, code, me, onLeave }) {
   const isHost = String(meeting.host?._id || meeting.host) === String(me?._id);
+  const [rtc, setRtc] = useState(undefined); // undefined=checking · null=mesh · {url,token}=sfu
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/meetings/code/${encodeURIComponent(code)}/rtc`)
+      .then(({ data }) => { if (!cancelled) setRtc(data?.enabled ? data : null); })
+      .catch(() => { if (!cancelled) setRtc(null); }); // any failure → mesh
+    return () => { cancelled = true; };
+  }, [code]);
+
+  if (rtc === undefined) {
+    return (
+      <div className="grid h-[100dvh] place-items-center bg-navy-950 text-white">
+        <div className="flex flex-col items-center gap-3"><Loader2 className="animate-spin" size={28} /><p className="text-sm text-white/70">Preparing the room…</p></div>
+      </div>
+    );
+  }
+  const props = { meeting, code, me, isHost, onLeave };
+  return rtc ? <SfuRoom {...props} rtc={rtc} /> : <MeshRoom {...props} />;
+}
+
+function MeshRoom({ meeting, code, me, isHost, onLeave }) {
   const room = useMeetingRoom(meeting._id, {
     video: meeting.type !== 'audio',
     muteOnEntry: meeting.settings?.muteOnEntry,
     autoRecord: meeting.settings?.autoRecord,
     isHost,
   });
+  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} />;
+}
+
+function SfuRoom({ meeting, code, me, isHost, rtc, onLeave }) {
+  const room = useLiveKitRoom(meeting._id, {
+    video: meeting.type !== 'audio',
+    muteOnEntry: meeting.settings?.muteOnEntry,
+    autoRecord: meeting.settings?.autoRecord,
+    isHost,
+    rtc,
+  });
+  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} />;
+}
+
+function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   const {
     localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,

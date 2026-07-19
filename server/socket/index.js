@@ -475,16 +475,18 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     });
 
     // Emoji reaction burst (👍 ❤️ 😂 🎉 👏 …) shown floating over the sender's tile.
+    // userId is included so the SFU (LiveKit) path — whose tiles are keyed by user,
+    // not socket — can line the reaction up with the right tile too.
     socket.on('meeting:reaction', ({ meetingId, emoji } = {}) => {
       const e = String(emoji || '').slice(0, 8);
       if (!inRoom(meetingId) || !e) return;
-      socket.to(meetingRoom(meetingId)).emit('meeting:reaction', { socketId: socket.id, name: socket.data.name, emoji: e });
+      socket.to(meetingRoom(meetingId)).emit('meeting:reaction', { socketId: socket.id, userId, name: socket.data.name, emoji: e });
     });
 
     // Raise / lower hand.
     socket.on('meeting:hand', ({ meetingId, up } = {}) => {
       if (!inRoom(meetingId)) return;
-      socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, name: socket.data.name, up: !!up });
+      socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, userId, name: socket.data.name, up: !!up });
     });
 
     // ── Host moderation (host socket only) ──
@@ -494,20 +496,25 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
       socket.to(meetingRoom(meetingId)).emit('meeting:force-mute', { by: socket.data.name, all: true });
     });
-    socket.on('meeting:force-mute', ({ meetingId, to } = {}) => {
-      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !to) return;
-      ioRef.to(to).emit('meeting:force-mute', { by: socket.data.name });
+    // `to` is a socketId (mesh) OR `toUser` is a userId (SFU path, tiles keyed by
+    // user). Either way the target client just mutes itself.
+    socket.on('meeting:force-mute', ({ meetingId, to, toUser } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
+      if (toUser) ioRef.to(`user:${toUser}`).emit('meeting:force-mute', { by: socket.data.name });
+      else if (to) ioRef.to(to).emit('meeting:force-mute', { by: socket.data.name });
     });
     // Remove a participant: tell them they were removed (their client leaves) and
     // make them leave the socket room so no further media/signal reaches them.
-    socket.on('meeting:remove', async ({ meetingId, to } = {}) => {
-      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !to || to === socket.id) return;
-      ioRef.to(to).emit('meeting:removed', { by: socket.data.name });
+    socket.on('meeting:remove', async ({ meetingId, to, toUser } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
       try {
-        const target = (await ioRef.in(meetingRoom(meetingId)).fetchSockets()).find((s) => s.id === to);
-        if (target) {
+        const roomSockets = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
+        // Target by socketId (mesh) or by userId (SFU) — a user may hold several.
+        const targets = roomSockets.filter((s) => (toUser ? String(s.data.userId) === String(toUser) : s.id === to) && s.id !== socket.id);
+        for (const target of targets) {
+          ioRef.to(target.id).emit('meeting:removed', { by: socket.data.name });
           target.leave(meetingRoom(meetingId));
-          socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: to });
+          socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: target.id });
         }
       } catch {
         /* best-effort */

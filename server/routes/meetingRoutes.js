@@ -8,6 +8,7 @@ import {
   getMeetingByCode,
   joinMeetingByCode,
   getMeetingReport,
+  getMeetingRtc,
 } from '../controllers/meetingController.js';
 import { protect } from '../middleware/auth.js';
 
@@ -18,6 +19,7 @@ router.get('/', getMeetings);
 router.post('/', createMeeting);
 // Shareable-link (Google-Meet-style) join flow — kept above /:id routes.
 router.get('/code/:code', getMeetingByCode);
+router.get('/code/:code/rtc', getMeetingRtc); // media transport config (LiveKit SFU or mesh)
 router.post('/code/:code/join', joinMeetingByCode);
 router.get('/:id/report', getMeetingReport); // host-only attendance record
 router.patch('/:id', updateMeeting);

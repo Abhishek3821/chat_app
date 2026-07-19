@@ -24,6 +24,9 @@ export default defineConfig({
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory-vendor')) return 'charts';
           if (id.includes('framer-motion')) return 'motion';
+          // LiveKit is only used inside the (lazy) meeting room — keep it out of
+          // the eager vendor bundle so it loads only when someone joins a meeting.
+          if (id.includes('livekit-client') || id.includes('@livekit')) return 'livekit';
           return 'vendor';
         },
       },

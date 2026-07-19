@@ -125,6 +125,7 @@
 - **Meeting room** (`pages/MeetingRoom.jsx`): full-mesh WebRTC over `mtg:<id>` socket rooms keyed by socketId (separate from `call:*` signaling). Waiting lobby when "join anytime" is off and the host is absent; video grid, screen-share spotlight (`meeting:presenting`), mute/camera/present controls; **local recording** composites all tiles + mixed audio into a downloadable `.webm` (host auto-record supported); copy meeting ID/link. Joining sets `inMeeting` so incoming calls answer busy.
 - **In-meeting collaboration:** live **chat panel** (`meeting:chat`, in-call only), floating **emoji reactions** (`meeting:reaction`), **raise/lower hand** with a tile badge (`meeting:hand`), and **host moderation** — "Mute all" plus per-participant ask-to-mute and remove (`meeting:mute-all` / `meeting:force-mute` / `meeting:remove`, authorized against the stored host flag).
 - **Calendar invites:** meeting invite emails carry a standards `.ics` attachment (`utils/ics.js`, VEVENT with UTC times + RRULE for recurring), so Gmail/Outlook/Apple Calendar show one-tap "Add to calendar".
+- **Pluggable media transport (SFU):** `GET /meetings/code/:code/rtc` reports whether the room runs on the **LiveKit SFU** (when `LIVEKIT_URL/API_KEY/API_SECRET` are set) or the peer-to-peer mesh. `MeetingRoom.jsx` mounts `useLiveKitRoom` (LiveKit) or `useMeetingRoom` (mesh) behind an identical `RoomView`. The SFU lets each participant send one upstream to the server → rooms scale far past the mesh's ~6-peer ceiling; chat/reactions/hand-raise/host-moderation/attendance still ride the `mtg:<id>` socket room (keyed by user on the SFU path). Unset → mesh, exactly as before.
 - **Attendance tracking:** `meeting:join` / `meeting:leave` / disconnect stamp per-attendee join/leave times and durations on the `Meeting` doc; the meeting flips to `ongoing` on first join and `completed` when the room empties. **Host attendance report** shows start time, duration, per-attendee presence bars, and live "in meeting" badges.
 - **Meetings page:** upcoming list, 7-day calendar strip with day filter, grouped by day.
 
@@ -219,6 +220,7 @@ Available to **team workspaces** (viewable by all members, editable by owner/adm
 | `STORAGE_DRIVER` + `CLOUDINARY_*` | Cloud media storage (needed for horizontal scale). |
 | `VAPID_*` | Web Push. |
 | `EMAIL_*` / `SMTP_*` / `BREVO_API_KEY` | Email (Brevo HTTPS API takes priority — for hosts that block SMTP ports). |
+| `LIVEKIT_URL` + `LIVEKIT_API_KEY` + `LIVEKIT_API_SECRET` | Route meeting media through the LiveKit SFU (scales rooms past the mesh's ~6-peer limit). Unset → in-browser full mesh. |
 | `TWILIO_*` | Optional SMS login OTP. |
 | `ENABLE_EMAIL_VERIFICATION`, `JWT_SECRET` (prod boot fails if weak), `JWT_ACCESS_EXPIRES`, `REFRESH_TOKEN_DAYS`, `SESSION_IDLE_DAYS`, `CLIENT_URL` / `EXTRA_CORS_ORIGINS` | Auth/session tuning and CORS. |
 
