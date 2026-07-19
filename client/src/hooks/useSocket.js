@@ -7,6 +7,7 @@ import { useChat } from '../store/useChat';
 import { useUI } from '../store/useUI';
 import { useNotifications } from '../store/useNotifications';
 import { useContacts } from '../store/useContacts';
+import { useStatus } from '../store/useStatus';
 
 /** Short preview of a message for notifications. */
 function preview(m) {
@@ -83,7 +84,18 @@ export function useSocket() {
     // If the handshake fails because the access token expired, refresh once and
     // reconnect with the fresh token. The flag prevents a refresh loop.
     let refreshedForAuth = false;
-    socket.on('connect', () => { refreshedForAuth = false; });
+    let firstConnect = true;
+    socket.on('connect', () => {
+      refreshedForAuth = false;
+      if (firstConnect) { firstConnect = false; return; }
+      // RECONNECT after a drop: the server-side rooms are gone and every event
+      // emitted while we were offline was missed. Re-join the open chat's room
+      // (typing/receipts flow again) and re-sync chats + the open conversation
+      // so nothing is silently lost.
+      const { activeChatId } = useChat.getState();
+      if (activeChatId) socket.emit('join-chat', activeChatId);
+      useChat.getState().resync();
+    });
     socket.on('connect_error', async () => {
       if (refreshedForAuth) return;
       refreshedForAuth = true;
@@ -151,6 +163,13 @@ export function useSocket() {
       toast.success(`${by || 'Someone'} accepted your contact request`);
       useContacts.getState().load(); // the new contact appears instantly
     });
+    // A contact posted/removed a status → refresh the Status feed live.
+    // Debounced: a multi-image status post fires one refetch, not five.
+    let statusRefetchTimer = null;
+    socket.on('status-updated', () => {
+      clearTimeout(statusRefetchTimer);
+      statusRefetchTimer = setTimeout(() => useStatus.getState().load().catch(() => {}), 500);
+    });
     socket.on('status-reply', ({ from, text }) => {
       useNotifications.getState().pushLocal({ type: 'status_reply', title: 'Status reply', body: `${from || 'Someone'}: ${text || ''}` });
       toast(`${from || 'Someone'} replied to your status`);
@@ -207,6 +226,7 @@ export function useSocket() {
 
     return () => {
       clearTimeout(chatsRefetchTimer);
+      clearTimeout(statusRefetchTimer);
       socket.disconnect();
       socketRef.current = null;
       window.__ccSocket = null;

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import MessageBubble from './MessageBubble';
 import TypingIndicator from './TypingIndicator';
@@ -17,16 +17,23 @@ function DateSeparator({ date }) {
   );
 }
 
-export default function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, searchQuery, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
+function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingUser, searchQuery, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
   const bottomRef = useRef(null);
   const meId = currentUser?._id || 'me';
 
   const q = (searchQuery || '').trim().toLowerCase();
-  const visible = q ? messages.filter((m) => (m.content || '').toLowerCase().includes(q)) : messages;
+  const visible = useMemo(
+    () => (q ? messages.filter((m) => (m.content || '').toLowerCase().includes(q)) : messages),
+    [messages, q]
+  );
 
+  // Scroll to the bottom only when something is APPENDED (new last message) or
+  // the typing indicator appears — not when an old message is edited/reacted-to,
+  // which used to yank the viewport down.
+  const lastId = messages.length ? messages[messages.length - 1]._id : null;
   useEffect(() => {
     if (!q) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingUser, q]);
+  }, [lastId, typingUser, q]);
 
   if (loading) return <MessageSkeleton />;
 
@@ -69,3 +76,7 @@ export default function MessageList({ messages, loading, isGroup, currentUser, p
     </div>
   );
 }
+
+// Memoized: with stable callbacks from ChatArea, the whole list tree skips
+// re-rendering unless this chat's messages / typing / search actually change.
+export default memo(MessageList);

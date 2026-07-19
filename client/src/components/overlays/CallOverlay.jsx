@@ -41,6 +41,21 @@ export default function CallOverlay() {
   return <CallSession key={call.callId || call.peer?._id || 'call'} call={call} />;
 }
 
+/**
+ * Self-contained 1-second ticker. Keeping the per-second state INSIDE this tiny
+ * label means only these few characters re-render each second — not the whole
+ * call stage with every video tile (which competed with the media pipeline).
+ */
+function CallTimer({ running = true }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!running) return undefined;
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+  return <>{formatDuration(seconds)}</>;
+}
+
 /** A <video> that owns its element and (re)attaches the stream on remount. */
 function StreamVideo({ stream, mirror, className }) {
   const ref = useRef(null);
@@ -92,7 +107,6 @@ function CallSession({ call }) {
   const setActiveChat = useChat((s) => s.setActiveChat);
   const navigate = useNavigate();
 
-  const [seconds, setSeconds] = useState(0);
   const [isFs, setIsFs] = useState(false);
   const [sinkId, setSinkId] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -124,13 +138,6 @@ function CallSession({ call }) {
       ? 'grid-cols-2 sm:grid-cols-3'
       : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
 
-  // Duration timer once connected.
-  useEffect(() => {
-    if (!connected) return undefined;
-    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(t);
-  }, [connected]);
-
   // Track real fullscreen state (Esc, browser chrome, etc.).
   useEffect(() => {
     const h = () => setIsFs(Boolean(document.fullscreenElement));
@@ -158,9 +165,7 @@ function CallSession({ call }) {
     ? 'Call failed'
     : status === 'reconnecting'
     ? 'Reconnecting…'
-    : connected
-    ? formatDuration(seconds)
-    : 'Calling…';
+    : 'Calling…'; // when connected the label renders <CallTimer /> instead
 
   const toggleFullscreen = async () => {
     try {
@@ -234,7 +239,7 @@ function CallSession({ call }) {
             </div>
             <div className="text-left">
               <p className="max-w-[120px] truncate text-sm font-semibold text-white">{peer.name || 'Call'}</p>
-              <p className="text-xs text-emerald-400">{connected ? formatDuration(seconds) : statusText}</p>
+              <p className="text-xs text-emerald-400">{connected ? <CallTimer /> : statusText}</p>
             </div>
           </button>
           <div className="flex items-center gap-1.5">
@@ -345,7 +350,7 @@ function CallSession({ call }) {
                 </div>
                 <div className="mt-6 text-center text-white">
                   <h2 className="text-2xl font-bold">{peer.name || 'Unknown'}</h2>
-                  <motion.p key={statusText} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1 text-white/70">{statusText}</motion.p>
+                  <motion.p key={connected ? 'live' : statusText} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1 text-white/70">{connected ? <CallTimer /> : statusText}</motion.p>
                 </div>
               </div>
             )
@@ -384,7 +389,7 @@ function CallSession({ call }) {
                 <Avatar src={remotes[0].user?.avatar || peer.avatar} name={remotes[0].user?.name || peer.name} size="2xl" className="scale-[1.6]" />
                 <div className="mt-6 text-center text-white">
                   <h2 className="text-2xl font-bold">{remotes[0].user?.name || peer.name || 'Unknown'}</h2>
-                  <p className="mt-1 text-white/70">{formatDuration(seconds)}</p>
+                  <p className="mt-1 text-white/70"><CallTimer /></p>
                 </div>
               </div>
             ) : (

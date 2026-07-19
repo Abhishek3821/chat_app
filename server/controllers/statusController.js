@@ -15,6 +15,25 @@ const USER_FIELDS = 'name username avatar';
  * (Feed visibility is always at most "contacts" — we never expose a status to a
  * non-contact even for type 'everyone', matching the app's consent model.)
  */
+/**
+ * Realtime fan-out: tell every contact allowed by this status's audience that
+ * the owner's status list changed, so their Status feed updates live instead of
+ * on next refresh. Payload is just a hint (no content) — clients refetch the
+ * feed, which re-applies all privacy rules server-side.
+ */
+async function notifyStatusAudience(status, ownerId) {
+  try {
+    const owner = await User.findById(ownerId).select('contacts');
+    const p = status?.privacy || {};
+    let targets = (owner?.contacts || []).map((c) => String(c));
+    if (p.type === 'selected') targets = targets.filter((id) => (p.allow || []).some((a) => String(a) === id));
+    else if (p.type === 'except') targets = targets.filter((id) => !(p.except || []).some((e) => String(e) === id));
+    for (const t of targets) emitToUser(t, 'status-updated', { userId: String(ownerId) });
+  } catch {
+    /* fan-out is best-effort */
+  }
+}
+
 function canView(status, ownerContacts, viewerId) {
   if (String(status.user?._id || status.user) === String(viewerId)) return true;
   const isContact = (ownerContacts || []).some((c) => String(c) === String(viewerId));
@@ -45,6 +64,7 @@ export const createStatus = asyncHandler(async (req, res) => {
     background,
     privacy: privacy || undefined,
   });
+  notifyStatusAudience(status, req.user._id); // live update for contacts (no await — response first)
   res.status(201).json({ success: true, status });
 });
 
@@ -120,5 +140,6 @@ export const deleteStatus = asyncHandler(async (req, res) => {
   if (!status) throw new ApiError(404, 'Status not found.');
   if (String(status.user) !== String(req.user._id)) throw new ApiError(403, 'Not your status.');
   await status.deleteOne();
+  notifyStatusAudience(status, req.user._id); // contacts drop it from their feed live
   res.json({ success: true });
 });

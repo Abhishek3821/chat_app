@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ChatHeader from './ChatHeader';
 import MessageList from './MessageList';
 import MessageComposer from './MessageComposer';
@@ -11,25 +11,55 @@ import { emitSocket } from '../../hooks/useSocket';
 import { DEMO_MODE } from '../../lib/api';
 
 const DEMO_REPLIES = ['Absolutely! 🙌', 'Sounds perfect.', 'Haha love that 😄', 'On it right now.', "Let's do it 🚀", 'Great idea!', '👍👍'];
+const EMPTY_MESSAGES = [];
+const EMPTY_TYPING = [];
+// Stable placeholder so a group "typing…" tick doesn't mint a new object every
+// render (it feeds MessageList's scroll effect as a dependency).
+const GROUP_TYPER = { name: 'Someone', avatar: '' };
 
 export default function ChatArea({ chat }) {
   const currentUser = useAuth((s) => s.user);
-  const { messagesByChat, loadingMessages, sendMessage, appendMessage, reactToMessage, setTyping, typing, deleteMessage, editMessage, toggleStarMessage, togglePinMessage } = useChat();
+  // Narrow, per-chat subscriptions: the WHOLE conversation view must not
+  // re-render on unrelated store traffic (presence blips, other chats'
+  // messages, sidebar updates). Zustand actions are stable references.
+  const messages = useChat((s) => s.messagesByChat[chat._id]) || EMPTY_MESSAGES;
+  const typingIds = useChat((s) => s.typing[chat._id]) || EMPTY_TYPING;
+  const loadingMessages = useChat((s) => s.loadingMessages);
+  const sendMessage = useChat((s) => s.sendMessage);
+  const appendMessage = useChat((s) => s.appendMessage);
+  const reactToMessage = useChat((s) => s.reactToMessage);
+  const setTyping = useChat((s) => s.setTyping);
+  const deleteMessage = useChat((s) => s.deleteMessage);
+  const editMessage = useChat((s) => s.editMessage);
+  const toggleStarMessage = useChat((s) => s.toggleStarMessage);
+  const togglePinMessage = useChat((s) => s.togglePinMessage);
   const openModal = useUI((s) => s.openModal);
   const [replyTo, setReplyTo] = useState(null);
   const [search, setSearch] = useState('');
 
-  const messages = messagesByChat[chat._id] || [];
+  const chatId = chat._id;
   const d = getChatDisplay(chat, currentUser);
-  const peerIds = chatPeerIds(chat, currentUser);
+  const peerIds = useMemo(() => chatPeerIds(chat, currentUser), [chat, currentUser]);
   // Group members you can @mention (populated user objects, excluding yourself).
-  const mentionables = d.isGroup
-    ? (chat.participants || [])
-        .map((p) => p.user)
-        .filter((u) => u && typeof u === 'object' && u.username && String(u._id) !== String(currentUser?._id))
-    : [];
-  const typingIds = typing[chat._id] || [];
-  const typingUser = typingIds.length && !d.isGroup ? d.peer : typingIds.length ? { name: 'Someone', avatar: '' } : null;
+  const mentionables = useMemo(
+    () =>
+      d.isGroup
+        ? (chat.participants || [])
+            .map((p) => p.user)
+            .filter((u) => u && typeof u === 'object' && u.username && String(u._id) !== String(currentUser?._id))
+        : [],
+    [d.isGroup, chat.participants, currentUser?._id]
+  );
+  const typingUser = typingIds.length ? (d.isGroup ? GROUP_TYPER : d.peer) : null;
+
+  // Stable callbacks so the memoized MessageList/MessageBubble tree only
+  // re-renders when the messages themselves change.
+  const onReact = useCallback((id, emoji) => reactToMessage(chatId, id, emoji), [reactToMessage, chatId]);
+  const onStar = useCallback((m) => toggleStarMessage(chatId, m._id), [toggleStarMessage, chatId]);
+  const onPin = useCallback((m) => togglePinMessage(chatId, m._id), [togglePinMessage, chatId]);
+  const onDelete = useCallback((m, scope) => deleteMessage(chatId, m._id, scope), [deleteMessage, chatId]);
+  const onEdit = useCallback((m, content) => editMessage(chatId, m._id, content), [editMessage, chatId]);
+  const onForward = useCallback((m) => openModal('forwardMessage', { message: m }), [openModal]);
 
   useEffect(() => {
     setSearch(''); // reset in-chat search when switching conversations
@@ -76,13 +106,13 @@ export default function ChatArea({ chat }) {
           peerIds={peerIds}
           typingUser={typingUser}
           searchQuery={search}
-          onReact={(id, emoji) => reactToMessage(chat._id, id, emoji)}
+          onReact={onReact}
           onReply={setReplyTo}
-          onStar={(m) => toggleStarMessage(chat._id, m._id)}
-          onPin={(m) => togglePinMessage(chat._id, m._id)}
-          onDelete={(m, scope) => deleteMessage(chat._id, m._id, scope)}
-          onEdit={(m, content) => editMessage(chat._id, m._id, content)}
-          onForward={(m) => openModal('forwardMessage', { message: m })}
+          onStar={onStar}
+          onPin={onPin}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onForward={onForward}
         />
         <MessageComposer chatId={chat._id} replyTo={replyTo} onClearReply={() => setReplyTo(null)} onSend={handleSend} mentionables={mentionables} />
       </div>

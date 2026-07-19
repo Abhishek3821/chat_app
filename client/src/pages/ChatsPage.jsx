@@ -9,7 +9,10 @@ import { useUI } from '../store/useUI';
 import { cn } from '../lib/utils';
 
 export default function ChatsPage() {
-  const { chats, activeChatId } = useChat();
+  // Narrow subscriptions — re-render only when the chat list or selection
+  // changes, not on typing/presence/message traffic.
+  const chats = useChat((s) => s.chats);
+  const activeChatId = useChat((s) => s.activeChatId);
   const chatListOpen = useUI((s) => s.chatListOpen);
   const openModal = useUI((s) => s.openModal);
   const activeChat = chats.find((c) => c._id === activeChatId);

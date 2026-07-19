@@ -29,42 +29,18 @@ import { emitSocket } from './useSocket';
  * NOTE: getUserMedia/getDisplayMedia only work on secure origins — https:// or
  * http://localhost. Over a plain-http LAN IP the browser blocks it.
  */
-const ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-];
-// TURN relay(s) — required for MEDIA to flow between users behind symmetric NAT
-// / strict firewalls (mobile networks, most home routers across the internet).
-// Without one, calls ring and "connect" but no video/audio ever arrives.
-// VITE_TURN_URL may be a single URL or a comma-separated list (turn: and turns:).
-if (import.meta.env.VITE_TURN_URL) {
-  ICE_SERVERS.push({
-    urls: import.meta.env.VITE_TURN_URL.split(',').map((u) => u.trim()).filter(Boolean),
-    username: import.meta.env.VITE_TURN_USERNAME || '',
-    credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
-  });
-} else {
-  // Default: Open Relay (metered.ca) — a free public TURN service. Replace with
-  // your own TURN (set VITE_TURN_URL/-USERNAME/-CREDENTIAL) for production scale.
-  ICE_SERVERS.push({
-    urls: [
-      'turn:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:443',
-      'turns:openrelay.metered.ca:443?transport=tcp',
-    ],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  });
-}
+import { ICE_SERVERS } from '../lib/iceServers';
 
 // Browser DSP applied to the outgoing mic track. Toggled live via
 // track.applyConstraints() so "Noise cancellation" is a real control, not a stub.
 const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 
-const MAX_ICE_RESTARTS = 3; // per leg, before we give up and drop it
+const MAX_ICE_RESTARTS = 5; // per leg, before we give up and drop it
+const FAILED_DROP_GRACE_MS = 15000; // how long a failed leg may try to recover
 
 const RING_TIMEOUT_MS = 35000; // caller gives up ringing a leg
 const INCOMING_TIMEOUT_MS = 45000; // callee popup safety net
-const CONNECT_TIMEOUT_MS = 25000; // accepted but media never connected
+const CONNECT_TIMEOUT_MS = 30000; // accepted but media never connected
 
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
 
@@ -341,7 +317,7 @@ export function useWebRTC(call) {
             if (isPrimaryLeg()) setStatus('reconnecting');
             if (pc.__ccInitiator) attemptIceRestart(key);
             else restartRef.current.set(key, attempts + 1);
-            timersRef.current.push(setTimeout(dropLeg, 7000)); // safety net
+            timersRef.current.push(setTimeout(dropLeg, FAILED_DROP_GRACE_MS)); // safety net
             return;
           }
           dropLeg();
@@ -445,7 +421,18 @@ export function useWebRTC(call) {
 
         // No answer in time → cancel (server logs it as missed for both sides).
         addTimer(() => {
-          if (statusRef.current === 'connected' || peersRef.current.get(peerId)?.connectionState === 'connected') return;
+          const st = statusRef.current;
+          if (st === 'connected' || peersRef.current.get(peerId)?.connectionState === 'connected') return;
+          if (st === 'connecting') {
+            // They ANSWERED — media is still negotiating. Never cancel an
+            // accepted call; give it the full connect budget instead.
+            addTimer(() => {
+              if (statusRef.current !== 'connecting') return;
+              toast.error('Couldn’t connect the call — the network is blocking the media path.');
+              teardown('error', { linger: 2200 });
+            }, CONNECT_TIMEOUT_MS);
+            return;
+          }
           emitSocket('call:cancel', { to: peerId, callId: callIdRef.current });
           toast(`${call.peer?.name || 'User'} didn't answer.`, { icon: '📵' });
           teardown('noanswer', { linger: 1600 });
@@ -480,14 +467,18 @@ export function useWebRTC(call) {
         announceReady();
         setStatus('connecting');
         addTimer(() => {
-          if (statusRef.current === 'connecting' && peersRef.current.size === 0) teardown('ended');
+          if (statusRef.current !== 'connecting' || peersRef.current.size > 0) return;
+          toast.error('Couldn’t connect the call — the network is blocking the media path.');
+          teardown('error', { linger: 2200 });
         }, CONNECT_TIMEOUT_MS);
       } else if (hasSocketPeer) {
         emitSig('call:accept', { to: peerId });
         setStatus('connecting');
         // Caller never sent the offer (crashed / cancelled at the same moment)?
         addTimer(() => {
-          if (statusRef.current === 'connecting') teardown('ended');
+          if (statusRef.current !== 'connecting') return;
+          toast.error('Couldn’t connect the call — the network is blocking the media path.');
+          teardown('error', { linger: 2200 });
         }, CONNECT_TIMEOUT_MS);
       } else {
         setStatus('demo');

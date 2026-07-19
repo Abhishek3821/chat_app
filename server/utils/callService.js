@@ -70,3 +70,21 @@ export async function transitionCall(callId, userId, action, { duration } = {}) 
   await call.save();
   return call;
 }
+
+/**
+ * Close out zombie call records: rings that nobody ever answered or cancelled
+ * (both browsers died before reporting), and "live" calls whose last update is
+ * ancient. Keeps call history truthful even when no client survived to report
+ * the ending. Called on an interval from server.js.
+ */
+export async function sweepStaleCalls({ ringingAfterMs = 90e3, liveAfterMs = 12 * 3600e3 } = {}) {
+  const now = Date.now();
+  await Call.updateMany(
+    { status: 'ringing', createdAt: { $lt: new Date(now - ringingAfterMs) } },
+    { $set: { status: 'missed', endedAt: new Date() } }
+  );
+  await Call.updateMany(
+    { status: { $in: ['accepted', 'ongoing'] }, updatedAt: { $lt: new Date(now - liveAfterMs) } },
+    { $set: { status: 'completed', endedAt: new Date() } }
+  );
+}

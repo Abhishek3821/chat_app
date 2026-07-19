@@ -10,21 +10,8 @@ import toast from 'react-hot-toast';
  *   - Existing peers learn of the newcomer via meeting:peer-joined and simply
  *     answer the offer that arrives — so no two peers ever offer each other (no glare).
  */
-const ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
-if (import.meta.env.VITE_TURN_URL) {
-  ICE_SERVERS.push({
-    urls: import.meta.env.VITE_TURN_URL.split(',').map((u) => u.trim()).filter(Boolean),
-    username: import.meta.env.VITE_TURN_USERNAME || '',
-    credential: import.meta.env.VITE_TURN_CREDENTIAL || '',
-  });
-} else {
-  // Default free public TURN (Open Relay) — media relay for strict-NAT peers.
-  ICE_SERVERS.push({
-    urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  });
-}
+import { ICE_SERVERS } from '../lib/iceServers';
+
 const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
 
@@ -84,7 +71,24 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       if (st === 'connected') setStatus('connected');
-      else if (st === 'failed' || st === 'closed') closePeer(socketId);
+      else if (st === 'failed') {
+        // Don't drop the tile on a transient ICE blip: the leg's original
+        // offerer retries with an ICE restart (the answerer just answers the
+        // restart offer). Only close if the leg still hasn't recovered.
+        if (pc._initiator) {
+          (async () => {
+            try {
+              const offer = await pc.createOffer({ iceRestart: true });
+              await pc.setLocalDescription(offer);
+              emitSignal(socketId, { kind: 'offer', sdp: offer });
+            } catch { /* noop */ }
+          })();
+        }
+        setTimeout(() => {
+          const cur = peersRef.current.get(socketId);
+          if (cur === pc && !['connected', 'connecting'].includes(pc.connectionState)) closePeer(socketId);
+        }, 10000);
+      } else if (st === 'closed') closePeer(socketId);
     };
     peersRef.current.set(socketId, pc);
     return pc;
@@ -109,6 +113,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     const offerTo = async (socketId) => {
       try {
         const pc = createPeer(socketId);
+        pc._initiator = true; // this side owns ICE-restart retries for the leg
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         emitSignal(socketId, { kind: 'offer', sdp: offer });
@@ -170,6 +175,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:presenting', onPresenting);
 
       let waitTimer = null;
+      let joinedOnce = false;
       const join = () => socket.emit('meeting:join', { meetingId }, (res) => {
         if (cancelled) return;
         if (!res?.ok) {
@@ -181,15 +187,34 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
           }
           setStatus('error'); setMediaError(res?.error || 'Could not join the meeting.'); return;
         }
+        const isRejoin = joinedOnce;
+        joinedOnce = true;
         setMediaError(null);
         setStatus(res.peers.length ? 'connecting' : 'connected'); // alone = connected (waiting room)
         // I'm the newcomer → I offer to everyone already here.
         res.peers.forEach((p) => { usersRef.current.set(p.socketId, { userId: p.userId, name: p.name, avatar: p.avatar }); offerTo(p.socketId); });
+        // Still presenting from before a reconnect? Re-announce to the new mesh.
+        if (isRejoin && screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: true });
         // Host-controlled auto-record: begin a local recording on join.
-        if (autoRecord) setTimeout(() => startRecordingRef.current?.(), 800);
+        if (!isRejoin && autoRecord) setTimeout(() => startRecordingRef.current?.(), 800);
       });
-      cancelRef.current = () => { if (waitTimer) clearTimeout(waitTimer); };
-      if (socket.connected) join(); else socket.once('connect', join);
+      const onConnect = () => {
+        if (cancelled || closedRef.current) return;
+        if (!joinedOnce) return join();
+        // RECONNECT: our old socket id is dead — the server already told every
+        // peer we left, and the room membership is gone. Tear down the stale
+        // mesh and re-join as a newcomer (we re-offer to everyone).
+        peersRef.current.forEach((pc) => { try { pc.close(); } catch { /* noop */ } });
+        peersRef.current.clear();
+        candBufRef.current.clear();
+        setRemotes([]);
+        setPresenterSid((prev) => (prev === 'me' ? prev : null));
+        setStatus('connecting');
+        join();
+      };
+      socket.on('connect', onConnect);
+      cancelRef.current = () => { if (waitTimer) clearTimeout(waitTimer); socket.off('connect', onConnect); };
+      if (socket.connected) join();
     })();
 
     return () => {

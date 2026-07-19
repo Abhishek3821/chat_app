@@ -248,6 +248,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     const onAll = (names, handler) => names.forEach((n) => socket.on(n, handler));
     // History updates are best-effort here — a DB hiccup must never kill signaling.
     const logCall = (callId, action, opts) => transitionCall(callId, userId, action, opts).catch(() => null);
+    // Live call legs this socket is signaling with (peerId -> callId). Lets the
+    // disconnect handler end the call for the OTHER side when this browser dies
+    // abruptly (crash/network loss) instead of leaving them hanging and the Call
+    // record stuck in ringing/accepted forever.
+    const callPeers = new Map();
+    const trackPeer = (to, callId) => to && callPeers.set(String(to), callId);
+    const untrackPeer = (to) => to && callPeers.delete(String(to));
 
     // Explicit registration ack (presence itself is keyed off the JWT handshake).
     socket.on('register-user', (cb) => {
@@ -263,6 +270,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         await logCall(callId, 'missed');
         return;
       }
+      trackPeer(to, callId);
       relay(to, ['call:incoming', 'incoming-call'], {
         from: userId,
         callId,
@@ -278,6 +286,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     onAll(['call:accept', 'accept-call'], async ({ to, callId, chatId } = {}) => {
       if (to && !(await canSignal(userId, to, chatId))) return;
       await logCall(callId, 'accept');
+      trackPeer(to, callId);
       relay(to, ['call:accepted', 'accept-call'], { from: userId, callId, chatId });
       // Close the ringing popup on the callee's OTHER tabs/devices.
       socket.to(`user:${userId}`).emit('call:handled', { callId });
@@ -285,6 +294,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     onAll(['call:reject', 'reject-call'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'reject');
+      untrackPeer(to);
       if (to && (await canSignal(userId, to, chatId))) {
         relay(to, ['call:rejected', 'reject-call'], { from: userId, callId });
       }
@@ -310,12 +320,14 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     onAll(['call:offer', 'webrtc-offer'], async ({ to, offer, callId, chatId } = {}) => {
       if (to && (await canSignal(userId, to, chatId))) {
+        trackPeer(to, callId); // covers group-mesh legs that never sent call:invite
         relay(to, ['call:offer', 'webrtc-offer'], { from: userId, offer, callId, chatId });
       }
     });
 
     onAll(['call:answer', 'webrtc-answer'], async ({ to, answer, callId, chatId } = {}) => {
       if (to && (await canSignal(userId, to, chatId))) {
+        trackPeer(to, callId);
         relay(to, ['call:answer', 'webrtc-answer'], { from: userId, answer, callId, chatId });
       }
     });
@@ -329,6 +341,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     // Caller gave up before an answer (timeout or manual cancel) → missed call.
     onAll(['call:cancel', 'call-missed'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'missed');
+      untrackPeer(to);
       if (to && (await canSignal(userId, to, chatId))) {
         relay(to, ['call:cancelled', 'call-missed'], { from: userId, callId });
       }
@@ -336,6 +349,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     onAll(['call:end', 'end-call'], async ({ to, callId, duration, chatId } = {}) => {
       await logCall(callId, 'end', { duration });
+      untrackPeer(to);
       if (to && (await canSignal(userId, to, chatId))) {
         relay(to, ['call:ended', 'call-ended'], { from: userId, callId });
       }
@@ -450,6 +464,18 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // ── Disconnect / presence ─────────────────────────────────────
     socket.on('disconnect', async () => {
+      // End any live call legs this socket was signaling: notify each peer (so
+      // their UI doesn't hang on a dead connection) and close the Call record.
+      // transitionCall maps end-while-ringing to 'missed', so a caller dying
+      // before an answer is recorded correctly too.
+      for (const [peerId, callId] of callPeers) {
+        const call = await transitionCall(callId, userId, 'end').catch(() => null);
+        const names = call && call.status === 'missed'
+          ? ['call:cancelled', 'call-missed'] // never answered → close the ringing popup
+          : ['call:ended', 'call-ended'];
+        relay(peerId, names, { from: userId, callId, reason: 'peer-disconnected' });
+      }
+      callPeers.clear();
       // Tell every meeting room this socket was in that the peer is gone, and
       // finalize its attendance record.
       if (socket.data.meetings) {

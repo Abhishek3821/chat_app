@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -15,7 +15,9 @@ import PinResetForm from '../PinResetForm';
 
 const FILTERS = ['All', 'Unread', 'Groups', 'Archived', 'Locked'];
 
-function ChatRow({ chat, active, onClick, currentUser }) {
+// Memoized with a stable onOpen callback: one incoming message re-renders only
+// the affected row (its chat object changes), not every row in the list.
+const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser }) {
   const d = getChatDisplay(chat, currentUser);
   const peerOnline = useChat((s) => (d.peer?._id ? Boolean(s.online[d.peer._id]) : false));
   const isOnline = peerOnline || d.isOnline;
@@ -28,7 +30,7 @@ function ChatRow({ chat, active, onClick, currentUser }) {
       layout
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={onClick}
+      onClick={() => onOpen(chat._id)}
       className={cn(
         'group relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors',
         active ? 'bg-brand-gradient shadow-glow' : 'hover:bg-content/5'
@@ -55,10 +57,15 @@ function ChatRow({ chat, active, onClick, currentUser }) {
       </div>
     </motion.button>
   );
-}
+});
 
 export default function ChatSidebar() {
-  const { chats, activeChatId, setActiveChat, loadingChats } = useChat();
+  // Narrow subscriptions: the sidebar must not re-render on typing ticks,
+  // presence blips or message-body changes in open conversations.
+  const chats = useChat((s) => s.chats);
+  const activeChatId = useChat((s) => s.activeChatId);
+  const setActiveChat = useChat((s) => s.setActiveChat);
+  const loadingChats = useChat((s) => s.loadingChats);
   const setChatListOpen = useUI((s) => s.setChatListOpen);
   const openModal = useUI((s) => s.openModal);
   const currentUser = useAuth((s) => s.user);
@@ -82,10 +89,10 @@ export default function ChatSidebar() {
   const pinned = filtered.filter((c) => c.pinned);
   const recent = filtered.filter((c) => !c.pinned);
 
-  const openChat = (id) => {
+  const openChat = useCallback((id) => {
     setActiveChat(id);
     setChatListOpen(false);
-  };
+  }, [setActiveChat, setChatListOpen]);
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-border bg-surface/50 backdrop-blur-xl md:w-[340px] lg:w-[380px]">
@@ -144,13 +151,13 @@ export default function ChatSidebar() {
               </div>
             )}
             {pinned.map((c) => (
-              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onClick={() => openChat(c._id)} currentUser={currentUser} />
+              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} />
             ))}
             {pinned.length > 0 && recent.length > 0 && (
               <div className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-content-muted">Recent</div>
             )}
             {recent.map((c) => (
-              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onClick={() => openChat(c._id)} currentUser={currentUser} />
+              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} />
             ))}
             {filtered.length === 0 && (
               <p className="px-4 py-10 text-center text-sm text-content-muted">No chats found.</p>

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { memo, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Check, CheckCheck, Reply, Smile, MoreHorizontal, Star, Copy, Trash2, Pin, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X, Eye, EyeOff, ShoppingBag, ExternalLink, Radio } from 'lucide-react';
@@ -19,7 +19,7 @@ function Ticks({ status }) {
   return <Check size={14} className="text-white/70" />; // single — sent
 }
 
-export default function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
+function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
   const [showActions, setShowActions] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -288,7 +288,7 @@ function MessageMedia({ message, isMine }) {
   }
 
   if (message.type === 'video') {
-    return atts.map((a, i) => <video key={i} src={mediaUrl(a.url)} controls className="mb-1 max-h-72 w-full rounded-xl" />);
+    return atts.map((a, i) => <video key={i} src={mediaUrl(a.url)} controls preload="metadata" className="mb-1 max-h-72 w-full rounded-xl" />);
   }
 
   if (message.type === 'image') {
@@ -355,3 +355,7 @@ function VoiceBubble({ mine, url, duration }) {
     </div>
   );
 }
+
+// Memoized: bubbles re-render only when their own message (or callbacks) change,
+// not on every store tick while a long conversation is open.
+export default memo(MessageBubble);

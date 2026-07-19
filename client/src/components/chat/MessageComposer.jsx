@@ -40,6 +40,8 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const [mention, setMention] = useState(null); // { query, start } while typing an @mention
 
   const typingTimeout = useRef(null);
+  const lastTypingEmit = useRef(0);
+  const draftTimer = useRef(null);
   const photoInputRef = useRef(null);
   const docInputRef = useRef(null);
   const recorderRef = useRef(null);
@@ -51,6 +53,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const videoRef = useRef(null);
   const textareaRef = useRef(null);
   const liveWatchRef = useRef(null);
+  const liveShareMsgRef = useRef(null); // live-location messageId, for unmount cleanup
 
   // ── Draft persistence (per chat, survives navigation & reload) ──
   useEffect(() => {
@@ -59,8 +62,15 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   }, [chatId]);
 
   const saveDraft = (val) => {
+    clearTimeout(draftTimer.current); // a pending debounced write must not resurrect stale text
     if (val) localStorage.setItem(`cc_draft_${chatId}`, val);
     else localStorage.removeItem(`cc_draft_${chatId}`);
+  };
+  // Keystroke path: defer the synchronous localStorage write so typing never
+  // stutters on storage I/O. Immediate saveDraft stays for send/insertMention.
+  const saveDraftDebounced = (val) => {
+    clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => saveDraft(val), 400);
   };
 
   // ── @mention autocomplete ──────────────────────────────────────
@@ -89,6 +99,13 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     clearInterval(recTimerRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     if (liveWatchRef.current != null) navigator.geolocation?.clearWatch(liveWatchRef.current);
+    // Switching chats mid live-share: stop the SERVER share too, otherwise
+    // peers keep seeing a "live" location that no longer updates.
+    if (liveShareMsgRef.current) {
+      stopLiveLocation(liveShareMsgRef.current);
+      liveShareMsgRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Business users: make sure the catalog is loaded for the share picker.
@@ -97,11 +114,20 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const handleChange = (e) => {
     const val = e.target.value;
     setText(val);
-    saveDraft(val);
+    saveDraftDebounced(val);
     detectMention(val, e.target.selectionStart);
-    emitSocket('typing-start', { chatId });
+    // Throttle typing-start to one emit per second — the peer's indicator only
+    // needs renewing, not one socket packet per character typed.
+    const now = Date.now();
+    if (now - lastTypingEmit.current > 1000) {
+      lastTypingEmit.current = now;
+      emitSocket('typing-start', { chatId });
+    }
     clearTimeout(typingTimeout.current);
-    typingTimeout.current = setTimeout(() => emitSocket('typing-stop', { chatId }), 1500);
+    typingTimeout.current = setTimeout(() => {
+      lastTypingEmit.current = 0;
+      emitSocket('typing-stop', { chatId });
+    }, 1500);
   };
 
   const send = () => {
@@ -185,6 +211,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
             { enableHighAccuracy: true, maximumAge: 10000 }
           );
           liveWatchRef.current = watchId;
+          liveShareMsgRef.current = message._id;
           setLiveShare({ messageId: message._id, watchId });
           toast.success('Sharing live location for 1 hour.');
         } catch (err) {
@@ -198,6 +225,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     if (!liveShare) return;
     navigator.geolocation?.clearWatch(liveShare.watchId);
     liveWatchRef.current = null;
+    liveShareMsgRef.current = null;
     await stopLiveLocation(liveShare.messageId);
     setLiveShare(null);
     toast('Stopped sharing live location.');
@@ -444,7 +472,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
       <AnimatePresence>
         {showEmoji && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 mb-2 z-30">
-            <EmojiPicker theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT} width={320} height={380} onEmojiClick={(e) => setText((t) => t + e.emoji)} lazyLoadEmojis previewConfig={{ showPreview: false }} />
+            <EmojiPicker theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT} width={320} height={380} onEmojiClick={(e) => setText((t) => { const next = t + e.emoji; saveDraftDebounced(next); return next; })} lazyLoadEmojis previewConfig={{ showPreview: false }} />
           </motion.div>
         )}
       </AnimatePresence>

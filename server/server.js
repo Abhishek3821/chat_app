@@ -22,6 +22,7 @@ import { initSocket } from './socket/index.js';
 import { getAdapterPair, redisEnabled } from './utils/redis.js';
 import { initQueue } from './utils/queue.js';
 import { registerFanoutJobs } from './utils/jobs.js';
+import { sweepStaleCalls } from './utils/callService.js';
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5290';
@@ -147,6 +148,10 @@ async function start() {
     if (r.ok) console.log('✅ SMTP verified — OTP / verification emails will send.');
     else console.warn(`⚠️  SMTP NOT ready: ${r.reason}\n   → OTP emails will not be delivered until EMAIL_HOST/USER/PASS are set correctly.`);
   }
+
+  // Zombie-call sweeper: closes ringing/live Call records whose clients died
+  // without reporting an ending (crash, network loss on both sides).
+  setInterval(() => sweepStaleCalls().catch(() => {}), 60_000).unref();
 
   server.listen(PORT, () => {
     console.log(`\n🚀 ChatConnect API listening on http://localhost:${PORT}`);

@@ -19,7 +19,9 @@ export const useStatus = create((set, get) => ({
       set({ feed: posted ? [posted, ...STATUS_FEED.filter((e) => !e.isMe)] : STATUS_FEED });
       return;
     }
-    set({ loading: true });
+    // Skeleton only on the first load — live refreshes (socket status-updated)
+    // must not blank the visible feed.
+    if (get().feed.length === 0) set({ loading: true });
     try {
       const { data } = await api.get('/status');
       const feed = (data.feed || []).map((e) => ({

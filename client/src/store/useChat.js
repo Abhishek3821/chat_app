@@ -3,6 +3,15 @@ import api, { DEMO_MODE } from '../lib/api';
 import { CHATS, MESSAGES } from '../lib/demoData';
 import { useAuth } from './useAuth';
 
+// Safety net for "typing…" that never stops (peer disconnected mid-keystroke,
+// their typing-stop was lost). Each typing flag auto-expires unless renewed.
+const typingTimers = {}; // `${chatId}:${userId}` -> timeout id
+const TYPING_TTL_MS = 7000;
+
+// Monotonic counter so two optimistic sends in the same millisecond can never
+// collide on the same temp id (a collision made appendMessage drop the second).
+let tmpSeq = 0;
+
 export const useChat = create((set, get) => ({
   chats: [],
   activeChatId: null,
@@ -35,6 +44,25 @@ export const useChat = create((set, get) => ({
       set({ chats: data.chats });
     } finally {
       set({ loadingChats: false });
+    }
+  },
+
+  /**
+   * Re-sync after a socket reconnect: refresh the chat list and re-fetch the
+   * open conversation, so anything that happened while the socket was down
+   * (messages, edits, deletes, receipts) is filled in instead of lost.
+   */
+  resync: async () => {
+    if (DEMO_MODE) return;
+    const { activeChatId } = get();
+    try {
+      await get().loadChats();
+      if (activeChatId) {
+        const { data } = await api.get(`/messages/${activeChatId}`);
+        set((s) => ({ messagesByChat: { ...s.messagesByChat, [activeChatId]: data.messages } }));
+      }
+    } catch {
+      /* transient — the next reconnect retries */
     }
   },
 
@@ -82,7 +110,7 @@ export const useChat = create((set, get) => ({
   sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce }) => {
     const me = useAuth.getState().user;
     const optimistic = {
-      _id: `tmp-${Date.now()}`,
+      _id: `tmp-${Date.now()}-${tmpSeq++}`,
       sender: me,
       content,
       type,
@@ -140,17 +168,31 @@ export const useChat = create((set, get) => ({
     })),
 
   // Mark every message in a chat as read by a user (adds them to readBy).
+  // Mirrors the server's updateMany: only messages the reader did NOT send.
+  // Also flips the sidebar's lastMessage tick to read when someone else read.
   markReadBy: (chatId, userId) =>
-    set((s) => ({
-      messagesByChat: {
-        ...s.messagesByChat,
-        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
-          (m.readBy || []).some((r) => String(r.user?._id ?? r.user) === String(userId))
-            ? m
-            : { ...m, readBy: [...(m.readBy || []), { user: userId, at: new Date().toISOString() }] }
-        ),
-      },
-    })),
+    set((s) => {
+      const meId = String(useAuth.getState().user?._id || '');
+      const readerIsMe = String(userId) === meId;
+      return {
+        messagesByChat: {
+          ...s.messagesByChat,
+          [chatId]: (s.messagesByChat[chatId] || []).map((m) => {
+            if (String(m.sender?._id ?? m.sender) === String(userId)) return m;
+            return (m.readBy || []).some((r) => String(r.user?._id ?? r.user) === String(userId))
+              ? m
+              : { ...m, readBy: [...(m.readBy || []), { user: userId, at: new Date().toISOString() }] };
+          }),
+        },
+        chats: readerIsMe
+          ? s.chats
+          : s.chats.map((c) =>
+              c._id === chatId && c.lastMessage && String(c.lastMessage.sender?._id ?? c.lastMessage.sender) === meId
+                ? { ...c, lastMessage: { ...c.lastMessage, status: 'read' } }
+                : c
+            ),
+      };
+    }),
 
   reactToMessage: async (chatId, messageId, emoji) => {
     const meId = useAuth.getState().user?._id || 'me';
@@ -193,12 +235,24 @@ export const useChat = create((set, get) => ({
       },
     })),
 
-  setTyping: (chatId, userId, isTyping) =>
+  setTyping: (chatId, userId, isTyping) => {
+    // Renew (or clear) the auto-expiry so a lost typing-stop can't leave a
+    // permanent "typing…" indicator.
+    const key = `${chatId}:${userId}`;
+    clearTimeout(typingTimers[key]);
+    if (isTyping) {
+      typingTimers[key] = setTimeout(() => get().setTyping(chatId, userId, false), TYPING_TTL_MS);
+    } else {
+      delete typingTimers[key];
+    }
     set((s) => {
       const current = s.typing[chatId] || [];
-      const next = isTyping ? [...new Set([...current, userId])] : current.filter((u) => u !== userId);
+      if (isTyping && current.includes(userId)) return {}; // renewals shouldn't re-render
+      const next = isTyping ? [...current, userId] : current.filter((u) => u !== userId);
+      if (!isTyping && next.length === current.length) return {};
       return { typing: { ...s.typing, [chatId]: next } };
-    }),
+    });
+  },
 
   // Pin / archive / mute a chat — optimistic local toggle + persist to the
   // account (server stores it per-user, so it survives reload and follows login).
