@@ -1,0 +1,16 @@
+{
+  "name": "ChatConnect — Talk, meet & connect",
+  "short_name": "ChatConnect",
+  "description": "A modern, premium real-time messaging, calling and meetings platform.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "categories": ["social", "communication", "productivity"],
+  "icons": [
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

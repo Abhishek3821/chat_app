@@ -144,6 +144,17 @@ export const useAuth = create((set, get) => ({
     return data.user;
   },
 
+  /** Set manual presence: available | away | busy | dnd. DND mutes push. */
+  setPresence: async (state) => {
+    set((s) => ({ user: { ...s.user, presenceState: state } })); // optimistic
+    if (DEMO_MODE) return;
+    try {
+      await api.patch('/users/me/presence', { state });
+    } catch {
+      /* keep optimistic; the next /auth/me reconciles */
+    }
+  },
+
   /** Persist per-user preferences (theme, accent, notifications…) to the account,
    *  so each user's look follows THEIR login — never shared across users/devices. */
   updateSettings: async (updates) => {

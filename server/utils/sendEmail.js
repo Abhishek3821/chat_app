@@ -129,7 +129,11 @@ function fromParts() {
 }
 
 /** Send through Brevo's HTTPS API (works where SMTP ports are blocked). */
-async function sendViaBrevo({ to, subject, html, text }) {
+async function sendViaBrevo({ to, subject, html, text, attachments }) {
+  // Brevo attachments: { name, content: base64 }. Map from our nodemailer shape.
+  const attachment = (attachments || [])
+    .map((a) => ({ name: a.filename, content: Buffer.from(a.content).toString('base64') }))
+    .filter((a) => a.name && a.content);
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: { 'api-key': brevoKey(), 'Content-Type': 'application/json' },
@@ -139,6 +143,7 @@ async function sendViaBrevo({ to, subject, html, text }) {
       subject,
       htmlContent: html || undefined,
       textContent: text || undefined,
+      ...(attachment.length ? { attachment } : {}),
     }),
   });
   if (!res.ok) {
@@ -157,7 +162,7 @@ async function sendViaBrevo({ to, subject, html, text }) {
  * when SMTP isn't configured (dev fallback). Throws only on a real send failure
  * so callers can decide how to surface it.
  */
-export async function sendEmail({ to, subject, html, text }) {
+export async function sendEmail({ to, subject, html, text, attachments }) {
   if (!isEmailConfigured()) {
     console.log('\n📧 [Email not configured — logging instead]');
     console.log(`   To:      ${to}`);
@@ -173,7 +178,7 @@ export async function sendEmail({ to, subject, html, text }) {
   }
   // HTTPS provider first (immune to SMTP port blocking), SMTP otherwise.
   if (brevoKey()) {
-    const info = await sendViaBrevo({ to, subject, html, text });
+    const info = await sendViaBrevo({ to, subject, html, text, attachments });
     return { sent: true, messageId: info.messageId };
   }
   const info = await sendWithFallback({
@@ -182,6 +187,7 @@ export async function sendEmail({ to, subject, html, text }) {
     subject,
     text,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   });
   return { sent: true, messageId: info.messageId };
 }

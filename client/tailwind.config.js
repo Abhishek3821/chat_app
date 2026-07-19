@@ -82,6 +82,11 @@ export default {
           '20%, 60%': { transform: 'translateX(-6px)' },
           '40%, 80%': { transform: 'translateX(6px)' },
         },
+        'float-up': {
+          '0%': { transform: 'translateY(0) scale(0.6)', opacity: '0' },
+          '15%': { transform: 'translateY(-10px) scale(1.1)', opacity: '1' },
+          '100%': { transform: 'translateY(-90px) scale(1)', opacity: '0' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
@@ -89,6 +94,7 @@ export default {
         shimmer: 'shimmer 1.6s infinite',
         float: 'float 6s ease-in-out infinite',
         shake: 'shake 0.4s ease-in-out',
+        'float-up': 'float-up 4s ease-out forwards',
       },
     },
   },

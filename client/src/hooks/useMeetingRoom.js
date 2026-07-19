@@ -26,6 +26,12 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const [sharingScreen, setSharingScreen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [mediaError, setMediaError] = useState(null);
+  // In-meeting interaction state
+  const [chatMessages, setChatMessages] = useState([]); // [{ id, socketId, name, avatar, text, at, mine }]
+  const [reactions, setReactions] = useState([]); // transient floating [{ id, socketId, emoji }]
+  const [raisedHands, setRaisedHands] = useState({}); // socketId ('me' for self) -> true
+  const handRaised = !!raisedHands.me;
+  const reactSeq = useRef(0);
 
   const peersRef = useRef(new Map()); // socketId -> RTCPeerConnection
   const localRef = useRef(null);
@@ -148,10 +154,38 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       // Already presenting? Re-announce so the newcomer spotlights our screen too.
       if (screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: true });
     };
-    const onPeerLeft = ({ socketId }) => closePeer(socketId);
+    const onPeerLeft = ({ socketId }) => {
+      closePeer(socketId);
+      setRaisedHands((prev) => { if (!prev[socketId]) return prev; const n = { ...prev }; delete n[socketId]; return n; });
+    };
     // Someone started/stopped sharing their screen → spotlight / release it.
     const onPresenting = ({ socketId, on }) => {
       setPresenterSid((prev) => (on ? socketId : prev === socketId ? null : prev));
+    };
+
+    // ── In-meeting interactions ──
+    const onChat = ({ socketId, name, avatar, text, at }) => {
+      setChatMessages((prev) => [...prev, { id: `${socketId}-${at}`, socketId, name, avatar, text, at, mine: false }]);
+    };
+    const onReaction = ({ socketId, emoji }) => {
+      const id = `r-${Date.now()}-${reactSeq.current++}`;
+      setReactions((prev) => [...prev, { id, socketId, emoji }]);
+      setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 4000);
+    };
+    const onHand = ({ socketId, up }) => {
+      setRaisedHands((prev) => { const n = { ...prev }; if (up) n[socketId] = true; else delete n[socketId]; return n; });
+    };
+    // Host asked me to mute (all or just me) — comply by disabling my mic.
+    const onForceMute = ({ by }) => {
+      const s = localRef.current;
+      if (s) s.getAudioTracks().forEach((t) => { t.enabled = false; });
+      setMuted(true);
+      toast(`${by || 'The host'} muted you`, { icon: '🔇' });
+    };
+    // Host removed me from the meeting.
+    const onRemoved = ({ by }) => {
+      toast.error(`${by || 'The host'} removed you from the meeting`);
+      setStatus('left');
     };
 
     (async () => {
@@ -173,6 +207,11 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:peer-joined', onPeerJoined);
       socket.on('meeting:peer-left', onPeerLeft);
       socket.on('meeting:presenting', onPresenting);
+      socket.on('meeting:chat', onChat);
+      socket.on('meeting:reaction', onReaction);
+      socket.on('meeting:hand', onHand);
+      socket.on('meeting:force-mute', onForceMute);
+      socket.on('meeting:removed', onRemoved);
 
       let waitTimer = null;
       let joinedOnce = false;
@@ -227,6 +266,11 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:peer-joined', onPeerJoined);
       socket.off('meeting:peer-left', onPeerLeft);
       socket.off('meeting:presenting', onPresenting);
+      socket.off('meeting:chat', onChat);
+      socket.off('meeting:reaction', onReaction);
+      socket.off('meeting:hand', onHand);
+      socket.off('meeting:force-mute', onForceMute);
+      socket.off('meeting:removed', onRemoved);
       if (screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: false });
       socket.emit('meeting:leave', { meetingId });
       peersRef.current.forEach((pc) => { try { pc.close(); } catch { /* noop */ } });
@@ -354,5 +398,50 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     setStatus('left');
   }, []);
 
-  return { localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError, toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave };
+  // ── In-meeting interaction actions ──
+  const sendChat = useCallback((text) => {
+    const body = String(text || '').trim().slice(0, 2000);
+    if (!body) return;
+    getSocket()?.emit('meeting:chat', { meetingId, text: body });
+    // Optimistic local echo (the server broadcasts only to OTHERS).
+    setChatMessages((prev) => [...prev, { id: `me-${Date.now()}`, socketId: 'me', name: 'You', text: body, at: Date.now(), mine: true }]);
+  }, [meetingId]);
+
+  const sendReaction = useCallback((emoji) => {
+    getSocket()?.emit('meeting:reaction', { meetingId, emoji });
+    const id = `r-${Date.now()}-${reactSeq.current++}`;
+    setReactions((prev) => [...prev, { id, socketId: 'me', emoji }]);
+    setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 4000);
+  }, [meetingId]);
+
+  const toggleHand = useCallback(() => {
+    setRaisedHands((prev) => {
+      const up = !prev.me;
+      getSocket()?.emit('meeting:hand', { meetingId, up });
+      const n = { ...prev };
+      if (up) n.me = true; else delete n.me;
+      return n;
+    });
+  }, [meetingId]);
+
+  // Host-only moderation.
+  const muteEveryone = useCallback(() => {
+    getSocket()?.emit('meeting:mute-all', { meetingId });
+    toast.success('Asked everyone to mute');
+  }, [meetingId]);
+  const muteParticipant = useCallback((socketId) => {
+    getSocket()?.emit('meeting:force-mute', { meetingId, to: socketId });
+    toast.success('Asked them to mute');
+  }, [meetingId]);
+  const removeParticipant = useCallback((socketId) => {
+    getSocket()?.emit('meeting:remove', { meetingId, to: socketId });
+    closePeer(socketId);
+  }, [meetingId, closePeer]);
+
+  return {
+    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
+    toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
+    chatMessages, reactions, raisedHands, handRaised,
+    sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
+  };
 }

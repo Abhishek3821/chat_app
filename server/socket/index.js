@@ -6,7 +6,7 @@ import Message from '../models/Message.js';
 import Meeting from '../models/Meeting.js';
 import Session from '../models/Session.js';
 import { isSessionValid } from '../utils/session.js';
-import { transitionCall } from '../utils/callService.js';
+import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callService.js';
 
 // Socket payloads DON'T pass through the Express mongoSanitize middleware, so any
 // id used in a Mongo query MUST be validated here — otherwise a client could send
@@ -248,6 +248,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     const onAll = (names, handler) => names.forEach((n) => socket.on(n, handler));
     // History updates are best-effort here — a DB hiccup must never kill signaling.
     const logCall = (callId, action, opts) => transitionCall(callId, userId, action, opts).catch(() => null);
+
+    // Post-invite signaling gate: mutual contacts / same-group members may
+    // always signal — otherwise both parties must belong to the SAME live call
+    // (ad-hoc conference legs between members who aren't personal contacts;
+    // membership only ever grows via a contact-gated call:invite below).
+    const canCallSignal = async (to, chatId, callId) =>
+      (await canSignal(userId, to, chatId)) || (await inSameCall(callId, userId, to).catch(() => false));
     // Live call legs this socket is signaling with (peerId -> callId). Lets the
     // disconnect handler end the call for the OTHER side when this browser dies
     // abruptly (crash/network loss) instead of leaving them hanging and the Call
@@ -271,6 +278,9 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         return;
       }
       trackPeer(to, callId);
+      // Persist the invitee on the Call record — this is what authorizes their
+      // signaling legs to EVERY conference member later (not just to the adder).
+      await registerCallInvitee(callId, userId, to).catch(() => null);
       relay(to, ['call:incoming', 'incoming-call'], {
         from: userId,
         callId,
@@ -281,10 +291,24 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       });
     });
 
+    // Conference introduction: a member who ADDED someone tells the existing
+    // members about the newcomer (and vice versa) so every pair mesh-connects.
+    // Both sides must already belong to this call record — nobody can be pulled
+    // into a call they weren't invited to via a contact-gated call:invite.
+    onAll(['call:introduce'], async ({ to, callId, peer } = {}) => {
+      if (!to || !callId || !peer?._id) return;
+      if (!(await inSameCall(callId, userId, to).catch(() => false))) return;
+      relay(to, ['call:introduced'], {
+        from: userId,
+        callId,
+        peer: { _id: String(peer._id), name: peer.name, avatar: peer.avatar },
+      });
+    });
+
     // For group calls `call:accept` doubles as the mesh "I'm here" hello, so it's
     // gated by canSignal (group membership) like the media signals.
     onAll(['call:accept', 'accept-call'], async ({ to, callId, chatId } = {}) => {
-      if (to && !(await canSignal(userId, to, chatId))) return;
+      if (to && !(await canCallSignal(to, chatId, callId))) return;
       await logCall(callId, 'accept');
       trackPeer(to, callId);
       relay(to, ['call:accepted', 'accept-call'], { from: userId, callId, chatId });
@@ -295,7 +319,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     onAll(['call:reject', 'reject-call'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'reject');
       untrackPeer(to);
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:rejected', 'reject-call'], { from: userId, callId });
       }
       socket.to(`user:${userId}`).emit('call:handled', { callId });
@@ -305,7 +329,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     // busy (shown as "busy on another call") and log it as missed for history.
     onAll(['call:busy'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'missed');
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:busy'], { from: userId, callId });
       }
     });
@@ -313,27 +337,27 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     // Screen-share presence: lets the other side render a presented screen with
     // the right fit (contain, spotlight) instead of cropping it like a camera.
     onAll(['call:screen'], async ({ to, callId, chatId, on } = {}) => {
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:screen'], { from: userId, callId, on: !!on });
       }
     });
 
     onAll(['call:offer', 'webrtc-offer'], async ({ to, offer, callId, chatId } = {}) => {
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         trackPeer(to, callId); // covers group-mesh legs that never sent call:invite
         relay(to, ['call:offer', 'webrtc-offer'], { from: userId, offer, callId, chatId });
       }
     });
 
     onAll(['call:answer', 'webrtc-answer'], async ({ to, answer, callId, chatId } = {}) => {
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         trackPeer(to, callId);
         relay(to, ['call:answer', 'webrtc-answer'], { from: userId, answer, callId, chatId });
       }
     });
 
     onAll(['call:ice-candidate', 'webrtc-ice-candidate'], async ({ to, candidate, callId, chatId } = {}) => {
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:ice-candidate', 'webrtc-ice-candidate'], { from: userId, candidate, callId, chatId });
       }
     });
@@ -342,7 +366,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     onAll(['call:cancel', 'call-missed'], async ({ to, callId, chatId } = {}) => {
       await logCall(callId, 'missed');
       untrackPeer(to);
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:cancelled', 'call-missed'], { from: userId, callId });
       }
     });
@@ -350,7 +374,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     onAll(['call:end', 'end-call'], async ({ to, callId, duration, chatId } = {}) => {
       await logCall(callId, 'end', { duration });
       untrackPeer(to);
-      if (to && (await canSignal(userId, to, chatId))) {
+      if (to && (await canCallSignal(to, chatId, callId))) {
         relay(to, ['call:ended', 'call-ended'], { from: userId, callId });
       }
     });
@@ -399,6 +423,10 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.join(meetingRoom(meetingId));
       if (!socket.data.meetings) socket.data.meetings = new Set();
       socket.data.meetings.add(String(meetingId));
+      // Remember whether THIS socket is the meeting host, so host-only in-meeting
+      // controls (mute-all, force-mute, remove) can be authorized without a DB hit.
+      if (!socket.data.meetingHost) socket.data.meetingHost = {};
+      socket.data.meetingHost[String(meetingId)] = isHost;
       if (!socket.data.meetingJoinAt) socket.data.meetingJoinAt = {};
       socket.data.meetingJoinAt[String(meetingId)] = Date.now();
       // Attendance record (best-effort): stamp the meeting's start on the first
@@ -432,6 +460,60 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.to(meetingRoom(meetingId)).emit('meeting:presenting', { socketId: socket.id, on: !!on });
     });
 
+    // In-room presence of the sender (used by all the interaction relays below).
+    const inRoom = (meetingId) => Boolean(meetingId && socket.rooms.has(meetingRoom(meetingId)));
+    const isRoomHost = (meetingId) => Boolean(socket.data.meetingHost?.[String(meetingId)]);
+
+    // In-meeting text chat — broadcast to the whole room (incl. the sender's other
+    // tabs is unnecessary; use socket.to so the sender renders its own optimistically).
+    socket.on('meeting:chat', ({ meetingId, text } = {}) => {
+      const body = String(text || '').trim().slice(0, 2000);
+      if (!inRoom(meetingId) || !body) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:chat', {
+        socketId: socket.id, userId, name: socket.data.name, avatar: socket.data.avatar, text: body, at: Date.now(),
+      });
+    });
+
+    // Emoji reaction burst (👍 ❤️ 😂 🎉 👏 …) shown floating over the sender's tile.
+    socket.on('meeting:reaction', ({ meetingId, emoji } = {}) => {
+      const e = String(emoji || '').slice(0, 8);
+      if (!inRoom(meetingId) || !e) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:reaction', { socketId: socket.id, name: socket.data.name, emoji: e });
+    });
+
+    // Raise / lower hand.
+    socket.on('meeting:hand', ({ meetingId, up } = {}) => {
+      if (!inRoom(meetingId)) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, name: socket.data.name, up: !!up });
+    });
+
+    // ── Host moderation (host socket only) ──
+    // Ask everyone (or one person) to mute; the client disables its own mic. This
+    // is a request the browser CANNOT force — but it always mutes a compliant client.
+    socket.on('meeting:mute-all', ({ meetingId } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:force-mute', { by: socket.data.name, all: true });
+    });
+    socket.on('meeting:force-mute', ({ meetingId, to } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !to) return;
+      ioRef.to(to).emit('meeting:force-mute', { by: socket.data.name });
+    });
+    // Remove a participant: tell them they were removed (their client leaves) and
+    // make them leave the socket room so no further media/signal reaches them.
+    socket.on('meeting:remove', async ({ meetingId, to } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !to || to === socket.id) return;
+      ioRef.to(to).emit('meeting:removed', { by: socket.data.name });
+      try {
+        const target = (await ioRef.in(meetingRoom(meetingId)).fetchSockets()).find((s) => s.id === to);
+        if (target) {
+          target.leave(meetingRoom(meetingId));
+          socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: to });
+        }
+      } catch {
+        /* best-effort */
+      }
+    });
+
     // Finalize this socket's attendance for a meeting: add the session's duration,
     // stamp leftAt/endedAt, and mark the meeting completed once the room empties.
     async function finalizeAttendance(meetingId) {
@@ -457,6 +539,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       if (!meetingId || !isId(meetingId)) return;
       socket.leave(meetingRoom(meetingId));
       socket.data.meetings?.delete(String(meetingId));
+      if (socket.data.meetingHost) delete socket.data.meetingHost[String(meetingId)];
       socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: socket.id });
       finalizeAttendance(meetingId);
     };

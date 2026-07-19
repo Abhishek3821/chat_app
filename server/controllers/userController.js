@@ -119,6 +119,17 @@ export const updatePrivacy = asyncHandler(async (req, res) => {
   res.json({ success: true, privacy: user.privacy });
 });
 
+const PRESENCE_STATES = ['available', 'away', 'busy', 'dnd'];
+// PATCH /api/users/me/presence  { state }
+export const updatePresence = asyncHandler(async (req, res) => {
+  const state = String(req.body.state || '');
+  if (!PRESENCE_STATES.includes(state)) throw new ApiError(400, 'Invalid presence state.');
+  await User.updateOne({ _id: req.user._id }, { $set: { presenceState: state } });
+  // Let contacts' clients update the dot live.
+  emitToUser(String(req.user._id), 'presence-state', { userId: String(req.user._id), state });
+  res.json({ success: true, presenceState: state });
+});
+
 // PATCH /api/users/me/settings
 export const updateSettings = asyncHandler(async (req, res) => {
   if (req.body.theme !== undefined && !THEME_VALUES.includes(req.body.theme)) {

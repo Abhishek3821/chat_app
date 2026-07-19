@@ -4,6 +4,7 @@ import {
   getUserById,
   updateProfile,
   updatePrivacy,
+  updatePresence,
   updateSettings,
   getContacts,
   addContact,
@@ -22,6 +23,7 @@ router.use(protect);
 router.get('/search', searchUsers);
 router.patch('/me', updateProfile);
 router.patch('/me/privacy', updatePrivacy);
+router.patch('/me/presence', updatePresence);
 router.patch('/me/settings', updateSettings);
 router.get('/me/export', exportData);
 router.delete('/me', deleteAccount);

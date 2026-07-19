@@ -246,7 +246,16 @@ function PrivacyPanel() {
 }
 
 /* ── Notifications ────────────────────────────────────────────── */
+const PRESENCE_OPTIONS = [
+  { value: 'available', label: 'Available', dot: 'bg-emerald-500', desc: 'Notifications on' },
+  { value: 'away', label: 'Away', dot: 'bg-amber-500', desc: 'Still notified' },
+  { value: 'busy', label: 'Busy', dot: 'bg-red-500', desc: 'Still notified' },
+  { value: 'dnd', label: 'Do not disturb', dot: 'bg-red-600', desc: 'Push & desktop muted' },
+];
+
 function NotificationsPanel() {
+  const presenceState = useAuth((s) => s.user?.presenceState || 'available');
+  const setPresence = useAuth((s) => s.setPresence);
   const [prefs, setPrefs] = useState({
     messages: true,
     groups: true,
@@ -290,6 +299,30 @@ function NotificationsPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+      <Section title="Availability" description="Set your status. Do-not-disturb silences push & desktop alerts (the bell still logs them).">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {PRESENCE_OPTIONS.map((opt) => {
+            const active = presenceState === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => { setPresence(opt.value); toast.success(`Status: ${opt.label}`); }}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-2xl border p-3 text-left transition-colors',
+                  active ? 'border-brand-500 bg-brand-500/10' : 'border-border hover:bg-content/5'
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className={cn('h-2.5 w-2.5 rounded-full', opt.dot)} />
+                  <span className="text-sm font-semibold text-content">{opt.label}</span>
+                </span>
+                <span className="text-[11px] text-content-muted">{opt.desc}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Section>
+
       <Section title="Push notifications" description="Get notified when the app is closed. Enabled per device.">
         <div className="flex items-start justify-between gap-4 py-1">
           <div className="flex items-center gap-3">

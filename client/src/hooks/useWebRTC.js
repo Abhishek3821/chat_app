@@ -19,9 +19,10 @@ import { emitSocket } from './useSocket';
  *
  * GROUP: every remote party is a separate peer connection keyed by user id, so
  * the exact same, proven negotiation runs once per leg. `addParticipants()`
- * rings extra contacts into the SAME call; when they accept, a new leg is
- * negotiated and their tile appears. Everyone added is connected to the person
- * who added them (the host), so all parties can see/hear the host.
+ * rings extra contacts into the SAME call; when they accept, the adder offers
+ * to them AND introduces them to every other participant (`call:introduce`),
+ * so all pairs mesh-connect — a true conference where everyone sees and hears
+ * everyone, exactly like a group-chat call.
  *
  * Media (audio+video) is peer-to-peer. With no socket/peer (e.g. demo mode) it
  * still captures your real camera/mic (and screen) so you can preview the UX.
@@ -68,6 +69,7 @@ export function useWebRTC(call) {
   const candBufRef = useRef(new Map()); // remoteId -> [RTCIceCandidate] buffered until remoteDescription
   const restartRef = useRef(new Map()); // remoteId -> ICE-restart attempt count
   const participantsRef = useRef(new Map()); // remoteId -> { _id, name, avatar }
+  const invitedRef = useRef(new Set()); // remoteIds I rang myself (primary callee + people I added)
   const timersRef = useRef([]); // primary-call timers
   const legTimersRef = useRef(new Map()); // remoteId -> ring timeout for an added leg
   const closedRef = useRef(false);
@@ -352,7 +354,10 @@ export function useWebRTC(call) {
   //    created only after the callee accepts. ─────────────────────────────────
   useEffect(() => {
     if (!call || call.direction !== 'outgoing') return undefined;
-    if (call.peer?._id) participantsRef.current.set(String(call.peer._id), call.peer);
+    if (call.peer?._id) {
+      participantsRef.current.set(String(call.peer._id), call.peer);
+      invitedRef.current.add(String(call.peer._id));
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -529,6 +534,7 @@ export function useWebRTC(call) {
         const id = u?._id ? String(u._id) : null;
         if (!id || id === String(me?._id) || peersRef.current.has(id) || legTimersRef.current.has(id)) return;
         participantsRef.current.set(id, u);
+        invitedRef.current.add(id);
         emitSig('call:invite', {
           to: id,
           type: call.type,
@@ -600,33 +606,55 @@ export function useWebRTC(call) {
     const isPrimary = (id) => String(id) === String(peerId);
     const nameFor = (id) => participantsRef.current.get(String(id))?.name || call?.peer?.name || 'User';
 
+    // The deterministic mesh handshake for a pair where NEITHER side rang the
+    // other (group members, or conference members introduced to each other):
+    // the LOWER user-id is the offerer (avoids glare). If I'm not the offerer,
+    // re-greet them once so THEY offer to me — this also fixes ordering (my
+    // earlier hello may have arrived before they were ready).
+    const meshConnect = async (remote) => {
+      if (!myId) return;
+      if (myId < remote) {
+        try {
+          if (statusRef.current !== 'connected') setStatus('connecting');
+          const pc = createPeer(remote, localStreamRef.current, true);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          emitSig('call:offer', { to: remote, offer });
+        } catch {
+          closePeer(remote);
+        }
+      } else if (!helloBackRef.current.has(remote)) {
+        helloBackRef.current.add(remote);
+        emitSig('call:accept', { to: remote });
+      }
+    };
+
+    // Conference fan-out: someone I RANG just accepted → introduce them to every
+    // other participant I know (and vice versa), so all pairs mesh-connect and
+    // everyone sees everyone — not just me. (Group-chat calls already carry the
+    // full roster, so they don't need introductions.)
+    const introduceAround = (newId) => {
+      if (isGroupCall) return;
+      const newcomer = participantsRef.current.get(newId) || { _id: newId };
+      participantsRef.current.forEach((user, id) => {
+        if (id === newId || id === myId) return;
+        emitSig('call:introduce', { to: id, peer: { _id: newId, name: newcomer.name, avatar: newcomer.avatar } });
+        emitSig('call:introduce', { to: newId, peer: { _id: id, name: user.name, avatar: user.avatar } });
+      });
+    };
+
     // A party is ready (accepted / said hello) → establish the leg to them.
     const onAccepted = async ({ from, callId: cid }) => {
       if (!mine(cid) || !localStreamRef.current) return;
       const remote = String(from || peerId);
       if (!remote || peersRef.current.has(remote)) return;
 
-      // GROUP mesh: for each pair the LOWER user-id is the offerer (avoids glare).
-      // If I'm not the offerer, re-greet them once so THEY offer to me — this also
-      // fixes ordering (my earlier hello may have arrived before they were ready).
-      if (isGroupCall) {
-        if (!myId) return;
-        if (myId < remote) {
-          try {
-            if (statusRef.current !== 'connected') setStatus('connecting');
-            const pc = createPeer(remote, localStreamRef.current, true);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            emitSig('call:offer', { to: remote, offer });
-          } catch {
-            closePeer(remote);
-          }
-        } else if (!helloBackRef.current.has(remote)) {
-          helloBackRef.current.add(remote);
-          emitSig('call:accept', { to: remote });
-        }
-        return;
-      }
+      if (isGroupCall) return meshConnect(remote);
+
+      // 1:1 / ad-hoc conference: if I rang this person (primary callee or someone
+      // I added), I make the offer. A hello from anyone else is a mesh greeting
+      // from an INTRODUCED member — use the deterministic pairwise handshake.
+      if (!invitedRef.current.has(remote)) return meshConnect(remote);
 
       try {
         if (statusRef.current !== 'connected') setStatus('connecting');
@@ -634,10 +662,23 @@ export function useWebRTC(call) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         emitSig('call:offer', { to: remote, offer });
+        introduceAround(remote);
       } catch {
         closePeer(remote);
         if (isPrimary(remote) && !connectedAtRef.current) teardown('error');
       }
+    };
+
+    // Someone in the conference vouched for a new member (or told the new member
+    // about us) → greet them; the deterministic pair rule decides who offers.
+    const onIntroduced = ({ callId: cid, peer }) => {
+      if (!mine(cid) || !peer?._id || !localStreamRef.current) return;
+      const id = String(peer._id);
+      if (!myId || id === myId || peersRef.current.has(id)) return;
+      if (!participantsRef.current.has(id)) {
+        participantsRef.current.set(id, { _id: id, name: peer.name, avatar: peer.avatar });
+      }
+      emitSig('call:accept', { to: id });
     };
 
     // An offer arrived (we're the callee for this leg) → answer it.
@@ -761,6 +802,7 @@ export function useWebRTC(call) {
     };
 
     s.on('call:accepted', onAccepted);
+    s.on('call:introduced', onIntroduced);
     s.on('call:offer', onOffer);
     s.on('call:answer', onAnswer);
     s.on('call:ice-candidate', onCandidate);
@@ -773,6 +815,7 @@ export function useWebRTC(call) {
     s.on('call:screen', onScreen);
     return () => {
       s.off('call:accepted', onAccepted);
+      s.off('call:introduced', onIntroduced);
       s.off('call:offer', onOffer);
       s.off('call:answer', onAnswer);
       s.off('call:ice-candidate', onCandidate);

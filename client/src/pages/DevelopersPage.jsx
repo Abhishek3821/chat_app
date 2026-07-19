@@ -14,11 +14,14 @@ import {
   BookOpen,
   Code2,
 } from 'lucide-react';
+import { Webhook } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { useApiKeys } from '@/store/useApiKeys';
-import { DEMO_MODE } from '@/lib/api';
+import api, { DEMO_MODE } from '@/lib/api';
 import { formatRelative, cn } from '@/lib/utils';
+
+const ORIGIN = (import.meta.env.VITE_API_URL || 'https://chat-app-zqj9.onrender.com').replace(/\/api\/?$/, '').replace(/\/+$/, '');
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'https://chat-app-zqj9.onrender.com').replace(/\/+$/, '') + '/api/v1';
 
@@ -63,6 +66,94 @@ function copy(text) {
   navigator.clipboard?.writeText(text).then(
     () => toast.success('Copied'),
     () => toast.error('Copy failed')
+  );
+}
+
+/** Incoming webhooks — post into a group chat from an external service. */
+function WebhooksCard() {
+  const [hooks, setHooks] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [chatId, setChatId] = useState('');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [fresh, setFresh] = useState(null); // { url } shown once, full URL
+
+  const load = async () => {
+    try {
+      const [{ data: w }, { data: c }] = await Promise.all([api.get('/webhooks'), api.get('/chats')]);
+      setHooks(w.webhooks || []);
+      setGroups((c.chats || []).filter((x) => x.isGroup));
+    } catch { /* ignore */ }
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
+    if (!chatId) return toast.error('Pick a group to post into');
+    setBusy(true);
+    try {
+      const { data } = await api.post('/webhooks', { chatId, label: label.trim() || 'Webhook' });
+      setFresh({ url: `${ORIGIN}${data.webhook.url}` });
+      setLabel('');
+      await load();
+      toast.success('Webhook created');
+    } catch (err) {
+      toast.error(err?.message || 'Could not create webhook');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (id) => {
+    try { await api.delete(`/webhooks/${id}`); setHooks((h) => h.filter((x) => x.id !== id)); toast('Webhook revoked'); }
+    catch { toast.error('Could not revoke'); }
+  };
+
+  return (
+    <Card>
+      <h2 className="flex items-center gap-2 text-lg font-bold text-content"><Webhook size={18} /> Incoming webhooks</h2>
+      <p className="mt-0.5 text-sm text-content-muted">Give an external service a secret URL to post messages into one of your groups (CI alerts, forms, monitoring). No login needed — the URL is the key.</p>
+
+      {fresh && (
+        <div className="mt-4 rounded-2xl border border-brand-500/40 bg-brand-500/5 p-4">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this URL now — treat it like a password.</p>
+          <div className="mt-2 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{fresh.url}</code>
+            <Button size="sm" variant="subtle" onClick={() => copy(fresh.url)}><Copy size={14} /> Copy</Button>
+          </div>
+          <pre className="scrollbar-thin mt-2 overflow-x-auto rounded-xl bg-navy-950 p-3 text-[11px] leading-relaxed text-cyan-100">{`curl -X POST ${fresh.url} \\\n  -H "Content-Type: application/json" \\\n  -d '{"text":"Deploy finished ✅"}'`}</pre>
+          <button onClick={() => setFresh(null)} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Done</button>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <Field label="Group">
+          <select value={chatId} onChange={(e) => setChatId(e.target.value)} className="ring-brand h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-content">
+            <option value="">Choose a group…</option>
+            {groups.map((g) => <option key={g._id} value={g._id}>{g.name || 'Group'}</option>)}
+          </select>
+        </Field>
+        <Field label="Label"><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. CI bot" /></Field>
+        <Button onClick={create} disabled={busy || !chatId}><Plus size={16} /> {busy ? 'Creating…' : 'Create'}</Button>
+      </div>
+
+      {groups.length === 0 && <p className="mt-3 text-xs text-content-muted">Create or join a group first — webhooks post into group chats.</p>}
+
+      {hooks.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {hooks.map((h) => (
+            <div key={h.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500"><Webhook size={18} /></span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-content">{h.label} <span className="text-content-muted">→ {h.chatName}</span></p>
+                <p className="truncate text-xs text-content-muted"><code>{ORIGIN}{h.url}</code></p>
+                <p className="text-[11px] text-content-muted">{h.lastUsedAt ? `Last used ${formatRelative(h.lastUsedAt)}` : 'Never used'}</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => copy(`${ORIGIN}${h.url}`)} className="shrink-0"><Copy size={14} /></Button>
+              <Button size="sm" variant="ghost" onClick={() => remove(h.id)} className="shrink-0 text-red-500 hover:bg-red-500/10"><Trash2 size={15} /></Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -199,6 +290,9 @@ export default function DevelopersPage() {
             )}
           </Card>
         )}
+
+        {/* Incoming webhooks */}
+        {!DEMO_MODE && <WebhooksCard />}
 
         {/* Quickstart */}
         <Card>

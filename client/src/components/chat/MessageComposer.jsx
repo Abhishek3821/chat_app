@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2, BarChart3, Eye, Radio, ShoppingBag } from 'lucide-react';
+import GifPicker from './GifPicker';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useBusiness } from '../../store/useBusiness';
@@ -29,6 +30,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
+  const [showGif, setShowGif] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -477,6 +479,21 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         )}
       </AnimatePresence>
 
+      {/* GIF picker (Tenor) */}
+      <AnimatePresence>
+        {showGif && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setShowGif(false)} />
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 z-30 mb-2">
+              <GifPicker
+                onClose={() => setShowGif(false)}
+                onPick={(gif) => { onSend({ content: '', type: 'image', attachments: [gif] }); setShowGif(false); }}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Attachment menu */}
       <AnimatePresence>
         {showAttach && (
@@ -543,8 +560,11 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
           </button>
 
           <div className="flex flex-1 items-end gap-1 rounded-2xl border border-border bg-surface-2 px-2 py-1">
-            <button onClick={() => { setShowEmoji((v) => !v); setShowAttach(false); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-content-muted hover:text-brand-500">
+            <button onClick={() => { setShowEmoji((v) => !v); setShowGif(false); setShowAttach(false); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-content-muted hover:text-brand-500">
               <Smile size={21} />
+            </button>
+            <button onClick={() => { setShowGif((v) => !v); setShowEmoji(false); setShowAttach(false); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[11px] font-bold text-content-muted hover:text-brand-500" title="Send a GIF">
+              GIF
             </button>
             <textarea
               ref={textareaRef}

@@ -72,6 +72,39 @@ export async function transitionCall(callId, userId, action, { duration } = {}) 
 }
 
 /**
+ * Record that `byUserId` (who must already be involved in the call) rang
+ * `invitedUserId` into it — the "add person" flow of an ad-hoc conference.
+ * Being on the participants list is what later authorizes the invitee's
+ * signaling legs to EVERY other member (see inSameCall), not just the adder.
+ */
+export async function registerCallInvitee(callId, byUserId, invitedUserId) {
+  if (!mongoose.isValidObjectId(callId) || !mongoose.isValidObjectId(String(invitedUserId))) return null;
+  const call = await Call.findById(callId);
+  // No status guard: a member may add people even after another member hung up
+  // (which marks the record 'completed' while the conference is still live).
+  if (!call || !isInvolved(call, byUserId)) return null;
+  if (!isInvolved(call, invitedUserId)) {
+    call.participants.push({ user: invitedUserId, status: 'ringing' });
+    await call.save();
+  }
+  return call;
+}
+
+/**
+ * True when BOTH users belong to the same call record. Lets conference members
+ * who aren't mutual contacts signal each other (their membership was vouched
+ * for by whoever invited them — see registerCallInvitee). Deliberately ignores
+ * the call status: one member hanging up marks the record 'completed' while the
+ * conference legitimately continues for everyone else, and their ICE restarts /
+ * screen toggles / hang-ups must keep relaying.
+ */
+export async function inSameCall(callId, aId, bId) {
+  if (!mongoose.isValidObjectId(callId)) return false;
+  const call = await Call.findById(callId).select('initiator caller receiver participants');
+  return !!call && isInvolved(call, aId) && isInvolved(call, bId);
+}
+
+/**
  * Close out zombie call records: rings that nobody ever answered or cancelled
  * (both browsers died before reporting), and "live" calls whose last update is
  * ancient. Keeps call history truthful even when no client survived to report

@@ -73,6 +73,9 @@ const userSchema = new mongoose.Schema(
 
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
+    // Manual presence (Teams-style): available / away / busy / dnd. 'dnd'
+    // suppresses push + desktop notifications (in-app bell still records them).
+    presenceState: { type: String, enum: ['available', 'away', 'busy', 'dnd'], default: 'available' },
 
     contacts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

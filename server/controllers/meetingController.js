@@ -5,6 +5,7 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { buildMeetingICS } from '../utils/ics.js';
 
 const USER_FIELDS = 'name username avatar email';
 
@@ -56,7 +57,25 @@ function sendMeetingInvites({ meeting, hostName, emails }) {
       </div>
     </div>`;
   const text = `${hostName || 'Someone'} invited you to "${meeting.title}" on ${when} (${tz}). Join: ${meeting.link} (meeting ID ${meeting.roomCode})`;
-  unique.forEach((to) => sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text }).catch(() => {}));
+  // Attach a calendar invite (.ics) so recipients can one-tap "Add to calendar"
+  // in Gmail / Outlook / Apple Calendar.
+  let attachments;
+  try {
+    const ics = buildMeetingICS({
+      _id: String(meeting._id),
+      title: meeting.title,
+      startAt: meeting.startAt,
+      durationMinutes: meeting.durationMinutes,
+      link: meeting.link,
+      roomCode: meeting.roomCode,
+      recurrence: meeting.recurrence,
+      hostName,
+    });
+    attachments = [{ filename: 'invite.ics', content: ics, contentType: 'text/calendar; method=REQUEST' }];
+  } catch {
+    attachments = undefined;
+  }
+  unique.forEach((to) => sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text, attachments }).catch(() => {}));
 }
 
 /** Create a meeting with a unique room code (retries on the rare collision). */

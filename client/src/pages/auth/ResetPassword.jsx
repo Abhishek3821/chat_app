@@ -76,7 +76,7 @@ export default function ResetPassword() {
             <span className="text-cyan-300">safely</span> done.
           </>
         }
-        sub="Choose a strong new password. We keep your account protected with end-to-end security."
+        sub="Choose a strong new password. We keep your account protected with encrypted connections and rotating sessions."
       />
 
       <AuthPanel>

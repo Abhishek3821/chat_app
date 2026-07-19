@@ -34,7 +34,7 @@ export default function ChatsPage() {
               <EmptyState
                 icon={MessagesSquare}
                 title="Your conversations live here"
-                description="Select a chat to start messaging, or spark a brand-new conversation. Everything is end-to-end delightful."
+                description="Select a chat to start messaging, or spark a brand-new conversation. Everything, beautifully in sync."
                 action={
                   <Button onClick={() => openModal('newChat')}>
                     <Sparkles size={16} /> Start a new chat

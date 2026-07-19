@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, Bell, Sun, Moon, Plus, Check } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Plus, Check, Download } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
@@ -11,6 +11,7 @@ import { useAuth } from '../../store/useAuth';
 import { useChat } from '../../store/useChat';
 import { useNotifications } from '../../store/useNotifications';
 import { formatRelative, cn } from '../../lib/utils';
+import { canInstall, promptInstall, onInstallChange } from '../../lib/pwa';
 
 const titles = {
   '/': 'Messages',
@@ -33,11 +34,14 @@ export default function TopBar() {
   const markAllRead = useNotifications((s) => s.markAllRead);
   const markRead = useNotifications((s) => s.markRead);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [installable, setInstallable] = useState(canInstall());
   const unread = notifs.filter((n) => !n.isRead).length;
 
   useEffect(() => {
     loadNotifs();
   }, [loadNotifs]);
+
+  useEffect(() => onInstallChange(setInstallable), []);
 
   // Clicking a notification takes you to the thing it's about.
   const openNotification = (n) => {
@@ -86,6 +90,11 @@ export default function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
+        {installable && (
+          <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={promptInstall} title="Install ChatConnect as an app">
+            <Download size={16} /> Install app
+          </Button>
+        )}
         <Button variant="primary" size="sm" className="hidden sm:inline-flex" onClick={() => openModal('newChat')}>
           <Plus size={16} /> New
         </Button>

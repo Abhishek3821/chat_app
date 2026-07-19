@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import PushSubscription from '../models/PushSubscription.js';
+import User from '../models/User.js';
 
 /**
  * Web Push (VAPID) delivery. Lets messages reach a user whose tab/app is closed
@@ -59,6 +60,14 @@ export function vapidPublicKey() {
  */
 export async function sendPushToUser(userId, payload) {
   if (!configured || !userId) return 0;
+  // Do-Not-Disturb: the in-app bell still records the notification, but we don't
+  // ping the user's devices while they're in DND.
+  try {
+    const u = await User.findById(userId).select('presenceState').lean();
+    if (u?.presenceState === 'dnd') return 0;
+  } catch {
+    /* if the lookup fails, fall through and deliver */
+  }
   const subs = await PushSubscription.find({ user: userId }).lean();
   if (!subs.length) return 0;
 

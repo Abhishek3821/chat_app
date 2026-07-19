@@ -50,7 +50,7 @@ export function AuthShowcase({
   ),
   sub = 'ChatConnect brings your people, calls, and moments together in one beautifully fast space.',
   features = [
-    { icon: ShieldCheck, title: 'End-to-end encrypted', desc: 'Your words stay yours — always.' },
+    { icon: ShieldCheck, title: 'Encrypted in transit', desc: 'Secured with TLS on every connection.' },
     { icon: Zap, title: 'Lightning quick', desc: 'Realtime delivery with zero lag.' },
     { icon: Globe, title: 'Everywhere you are', desc: 'Sync seamlessly across devices.' },
   ],
