@@ -166,7 +166,7 @@ function CreateGroupModal({ open, onClose }) {
 }
 
 const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none', timezone: BROWSER_TZ });
-const EMPTY_SETTINGS = { joinAnytime: true, muteOnEntry: false, autoRecord: false };
+const EMPTY_SETTINGS = { joinAnytime: true, muteOnEntry: false, autoRecord: false, askToJoin: true };
 
 function ScheduleMeetingModal({ open, onClose }) {
   const [form, setForm] = useState(EMPTY_SCHEDULE);
@@ -264,6 +264,7 @@ function ScheduleMeetingModal({ open, onClose }) {
         {/* Host controls — enforced for participants who join. */}
         <div className="rounded-2xl border border-border bg-surface-2/40 px-3.5 py-1">
           <ToggleLine label="Let participants join anytime" hint="Off = they wait until you (the host) join." checked={settings.joinAnytime} onChange={setToggle('joinAnytime')} />
+          <ToggleLine label="Ask to join" hint="People you didn't invite must knock and be admitted by you." checked={settings.askToJoin} onChange={setToggle('askToJoin')} />
           <ToggleLine label="Mute participants on entry" hint="Everyone but you joins muted." checked={settings.muteOnEntry} onChange={setToggle('muteOnEntry')} />
           <ToggleLine label="Auto-record on join" hint="Each participant's device records locally." checked={settings.autoRecord} onChange={setToggle('autoRecord')} />
         </div>

@@ -5,6 +5,10 @@ const rsvpSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     response: { type: String, enum: ['going', 'maybe', 'not_going', 'pending'], default: 'pending' },
+    // True when this row came from a shareable-link join rather than a real
+    // invite. Link-joiners still get the meeting in their list, but they do NOT
+    // count as "invited" for the ask-to-join admission gate.
+    viaLink: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -45,10 +49,14 @@ const meetingSchema = new mongoose.Schema(
     //  • joinAnytime  — if false, guests can only join once the host is present.
     //  • muteOnEntry  — guests join with their mic muted.
     //  • autoRecord   — guests' clients auto-start a local recording on join.
+    //  • askToJoin    — Google-Meet-style admission: people who weren't invited
+    //                   (not the host, not on the participants list) must knock
+    //                   and be admitted by the host before they can enter.
     settings: {
       joinAnytime: { type: Boolean, default: true },
       muteOnEntry: { type: Boolean, default: false },
       autoRecord: { type: Boolean, default: false },
+      askToJoin: { type: Boolean, default: true },
     },
     recurrence: { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
     reminderMinutes: { type: Number, default: 10 },

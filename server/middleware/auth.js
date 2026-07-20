@@ -26,7 +26,18 @@ export const protect = asyncHandler(async (req, res, next) => {
   // placed in URLs) must never work as a full API session.
   if (decoded.scope) throw new ApiError(401, 'Not authenticated. Please log in.');
 
-  const user = await User.findById(decoded.id);
+  // Tracked-session validation: the access token must map to a live session, so
+  // logout / "log out other devices" / admin revocation take effect immediately
+  // (not only when the access token happens to expire).
+  if (!decoded.sid) throw new ApiError(401, 'Session expired or invalid. Please log in again.');
+
+  // Both lookups derive only from the decoded token, not from each other — this
+  // runs on EVERY protected request, so parallelizing halves auth latency here.
+  const [user, session] = await Promise.all([
+    User.findById(decoded.id),
+    Session.findById(decoded.sid).select('user revokedAt expiresAt lastActiveAt'),
+  ]);
+
   if (!user) throw new ApiError(401, 'User no longer exists.');
   if (user.accountStatus === 'banned') throw new ApiError(403, 'This account has been banned.');
   if (user.accountStatus === 'suspended') throw new ApiError(403, 'This account is suspended.');
@@ -35,12 +46,6 @@ export const protect = asyncHandler(async (req, res, next) => {
   if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
     throw new ApiError(401, 'Session has been revoked. Please log in again.');
   }
-
-  // Tracked-session validation: the access token must map to a live session, so
-  // logout / "log out other devices" / admin revocation take effect immediately
-  // (not only when the access token happens to expire).
-  if (!decoded.sid) throw new ApiError(401, 'Session expired or invalid. Please log in again.');
-  const session = await Session.findById(decoded.sid).select('user revokedAt expiresAt lastActiveAt');
   if (!isSessionValid(session) || String(session.user) !== String(user._id)) {
     throw new ApiError(401, 'Session expired or revoked. Please log in again.');
   }

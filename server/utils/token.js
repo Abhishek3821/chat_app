@@ -33,6 +33,19 @@ export function signMediaToken(userId) {
   });
 }
 
+/**
+ * Short-lived meeting-admission pass. Issued when the HOST admits a knocking
+ * guest; the guest presents it on their next `meeting:join` so admission works
+ * statelessly (and across instances). Scoped — it can't be used as a session.
+ */
+export function signMeetingPass(userId, meetingId) {
+  return jwt.sign(
+    { id: String(userId), meetingId: String(meetingId), scope: 'meet-admit' },
+    process.env.JWT_SECRET,
+    { algorithm: 'HS256', expiresIn: '15m' }
+  );
+}
+
 export function verifyToken(token) {
   // Pin the algorithm so a token can't be validated under an unexpected alg.
   return jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });

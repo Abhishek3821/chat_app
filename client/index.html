@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
     <meta name="description" content="ChatConnect — a modern, premium real-time messaging platform." />
     <!-- PWA: installable + offline app shell -->
@@ -14,10 +14,31 @@
     <meta name="apple-mobile-web-app-title" content="ChatConnect" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      Non-render-blocking font load (preload + print-media swap trick): the
+      fetch starts immediately (preload, high priority) but doesn't block first
+      paint the way a plain `rel="stylesheet"` would — the stylesheet applies
+      once loaded by swapping its media from "print" to "all". `display=swap`
+      (in the URL) means text renders in the fallback font immediately either
+      way, so nothing is ever invisible while this loads.
+    -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    />
     <link
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <title>ChatConnect — Talk, meet & connect</title>
   </head>
   <body>

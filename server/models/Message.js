@@ -108,6 +108,9 @@ messageSchema.index({ 'attachments.url': 1 });
 // Disappearing messages: MongoDB removes the document once expiresAt passes.
 // (expireAfterSeconds:0 = expire exactly at the stored time.)
 messageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// getStarred: `Message.find({ starredBy: req.user._id })` — without this, a
+// large message collection means a full collection scan on every load.
+messageSchema.index({ starredBy: 1 });
 
 const Message = mongoose.model('Message', messageSchema);
 export default Message;

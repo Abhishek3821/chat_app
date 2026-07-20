@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import toast from 'react-hot-toast';
 import api, { DEMO_MODE } from '../lib/api';
 import { CHATS, MESSAGES } from '../lib/demoData';
 import { useAuth } from './useAuth';
@@ -371,6 +372,7 @@ export const useChat = create((set, get) => ({
 
   /** Edit a message's text — optimistic local update + API. */
   editMessage: async (chatId, messageId, content) => {
+    const original = (get().messagesByChat[chatId] || []).find((m) => m._id === messageId);
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,
@@ -382,8 +384,19 @@ export const useChat = create((set, get) => ({
     if (!DEMO_MODE) {
       try {
         await api.patch(`/messages/${messageId}`, { content });
-      } catch {
-        /* noop */
+      } catch (err) {
+        // Server refused (e.g. past the 5-minute edit window) — undo the optimistic edit.
+        if (original) {
+          set((s) => ({
+            messagesByChat: {
+              ...s.messagesByChat,
+              [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
+                m._id === messageId ? { ...m, content: original.content, isEdited: Boolean(original.isEdited) } : m
+              ),
+            },
+          }));
+        }
+        toast.error(err.response?.data?.message || 'Could not edit message.');
       }
     }
   },

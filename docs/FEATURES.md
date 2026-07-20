@@ -56,7 +56,7 @@
 | Type | How it works |
 |---|---|
 | **Text** | Rich formatting, emoji picker, auto-growing composer, Enter-to-send, per-chat drafts persisted in localStorage. |
-| **Images / video** | Multi-select upload or live **camera capture** (`getUserMedia` overlay → JPEG); 2-column grid for multiple images. |
+| **Images / video** | Multi-select upload or live **camera capture** (`getUserMedia` overlay → JPEG, with a captured-photo preview and Retake / Send confirm step); 2-column grid for multiple images. |
 | **Voice notes** | Hold-to-record via `MediaRecorder` with live timer; rendered as a playable waveform bubble with elapsed time. |
 | **Documents** | pdf/doc/xls/ppt/txt/zip as a download card with file size. |
 | **Location** | One-shot map link. |
@@ -68,7 +68,7 @@
 
 ### Message actions
 - **Reply** (quoted preview), **forward** (multi-chat picker), **reactions** (quick-emoji bar, one per person, WhatsApp-style toggle), **star** (per-user starred list at `GET /messages/starred`), **pin**, **copy**.
-- **Edit** own text messages (shows "edited"); **delete for me** or **delete for everyone** (tombstone).
+- **Edit** own text messages within **5 minutes of sending** (shows "edited"; enforced server-side, option hidden in the UI after the window); **delete for me** or **delete for everyone** (tombstone).
 - **@mentions** with autocomplete in group chats.
 - **In-chat search** (live filter) plus server-side search (`GET /messages/:chatId/search?q=`).
 

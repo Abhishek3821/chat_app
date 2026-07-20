@@ -29,8 +29,10 @@ export const sendRequest = asyncHandler(async (req, res) => {
   if (reverse) {
     reverse.status = 'accepted';
     await reverse.save();
-    await User.findByIdAndUpdate(req.user._id, { $addToSet: { contacts: to } });
-    await User.findByIdAndUpdate(to, { $addToSet: { contacts: req.user._id } });
+    await Promise.all([
+      User.findByIdAndUpdate(req.user._id, { $addToSet: { contacts: to } }),
+      User.findByIdAndUpdate(to, { $addToSet: { contacts: req.user._id } }),
+    ]);
     emitToUser(to, 'contact-accepted', { by: req.user.name });
     notifyUser(to, {
       from: req.user._id,
@@ -68,8 +70,10 @@ export const sendRequest = asyncHandler(async (req, res) => {
 
 // GET /api/contacts/requests
 export const getRequests = asyncHandler(async (req, res) => {
-  const incoming = await ContactRequest.find({ to: req.user._id, status: 'pending' }).populate('from', USER_FIELDS);
-  const outgoing = await ContactRequest.find({ from: req.user._id, status: 'pending' }).populate('to', USER_FIELDS);
+  const [incoming, outgoing] = await Promise.all([
+    ContactRequest.find({ to: req.user._id, status: 'pending' }).populate('from', USER_FIELDS).lean(),
+    ContactRequest.find({ from: req.user._id, status: 'pending' }).populate('to', USER_FIELDS).lean(),
+  ]);
   res.json({ success: true, incoming, outgoing });
 });
 
@@ -83,8 +87,10 @@ export const respondRequest = asyncHandler(async (req, res) => {
   if (action === 'accept') {
     request.status = 'accepted';
     await request.save();
-    await User.findByIdAndUpdate(request.from, { $addToSet: { contacts: request.to } });
-    await User.findByIdAndUpdate(request.to, { $addToSet: { contacts: request.from } });
+    await Promise.all([
+      User.findByIdAndUpdate(request.from, { $addToSet: { contacts: request.to } }),
+      User.findByIdAndUpdate(request.to, { $addToSet: { contacts: request.from } }),
+    ]);
     emitToUser(String(request.from), 'contact-accepted', { by: req.user.name });
     notifyUser(request.from, {
       from: req.user._id,

@@ -21,6 +21,17 @@ function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingU
   const bottomRef = useRef(null);
   const meId = currentUser?._id || 'me';
 
+  // Snapshot, once, which messages were ALREADY here when this chat opened.
+  // Without this every bubble — including the entire history of a long chat —
+  // replays its mount-in spring animation the instant you open the chat, a CPU
+  // burst that competes with the socket/store work happening at the same time.
+  // Only messages that arrive AFTER open (truly new) should animate in.
+  // ChatArea keys MessageList by chat id, so this ref is naturally fresh per chat.
+  const initialIdsRef = useRef(null);
+  if (initialIdsRef.current === null) {
+    initialIdsRef.current = new Set(messages.map((m) => m._id));
+  }
+
   const q = (searchQuery || '').trim().toLowerCase();
   const visible = useMemo(
     () => (q ? messages.filter((m) => (m.content || '').toLowerCase().includes(q)) : messages),
@@ -58,6 +69,7 @@ function MessageList({ messages, loading, isGroup, currentUser, peerIds, typingU
               message={m}
               isMine={isMine}
               isGroup={isGroup}
+              isNew={!initialIdsRef.current.has(m._id)}
               showAvatar={showAvatar}
               status={isMine ? messageStatus(m, currentUser, peerIds) : undefined}
               onReact={onReact}

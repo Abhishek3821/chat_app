@@ -83,7 +83,7 @@ export default function GifPicker({ onPick, onClose }) {
             <button
               key={g.id}
               onClick={() => onPick({ url: g.full, mime: 'image/gif', name: 'tenor.gif', width: g.dims[0], height: g.dims[1] })}
-              className="overflow-hidden rounded-lg bg-surface-2 transition-transform hover:scale-[1.03]"
+              className="aspect-square overflow-hidden rounded-lg bg-surface-2 transition-transform hover:scale-[1.03]"
             >
               <img src={g.preview} alt="GIF" loading="lazy" className="h-full w-full object-cover" />
             </button>

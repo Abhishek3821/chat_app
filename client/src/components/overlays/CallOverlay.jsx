@@ -32,7 +32,7 @@ import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useContacts } from '../../store/useContacts';
 import { useWebRTC } from '../../hooks/useWebRTC';
-import { formatDuration, cn } from '../../lib/utils';
+import { formatDuration, cn, videoGridCols } from '../../lib/utils';
 
 export default function CallOverlay() {
   const call = useUI((s) => s.call);
@@ -130,13 +130,9 @@ function CallSession({ call }) {
   const presenterName = presenterId === 'self' ? 'You' : presenterRemote?.user?.name || peer.name || 'Guest';
   const spotlight = Boolean(isVideo && connected && presenterStream && !gridView);
 
-  // Column count for the group video grid (remote tiles + your own tile).
-  const gridColsClass =
-    nRemote + 1 <= 2
-      ? 'grid-cols-1 sm:grid-cols-2'
-      : nRemote + 1 <= 6
-      ? 'grid-cols-2 sm:grid-cols-3'
-      : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
+  // Column count for the group video grid (remote tiles + your own tile) —
+  // shared with the meeting room so both scale the same way across breakpoints.
+  const gridColsClass = videoGridCols(nRemote + 1);
 
   // Track real fullscreen state (Esc, browser chrome, etc.).
   useEffect(() => {
@@ -321,7 +317,7 @@ function CallSession({ call }) {
         )}
 
         {/* Stage */}
-        <div className="relative flex flex-1 items-center justify-center px-6 pb-2">
+        <div className="relative flex flex-1 items-center justify-center px-3 pb-2 sm:px-6">
           {status === 'error' ? (
             <div className="flex max-w-sm flex-col items-center gap-3 text-center text-white">
               <span className="grid h-16 w-16 place-items-center rounded-2xl bg-red-500/20 text-red-300"><AlertTriangle size={28} /></span>
@@ -357,8 +353,10 @@ function CallSession({ call }) {
           ) : spotlight ? (
             // ── Someone is presenting → spotlight the SCREEN (object-contain so
             //    nothing is cropped) with a filmstrip of the people below ──
-            <div className="flex h-full w-full max-w-6xl flex-col items-center gap-3">
-              <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-3xl border border-white/10 bg-black">
+            <div className="flex h-full w-full max-w-6xl flex-col items-center gap-2 sm:gap-3">
+              {/* min-h floor: pure flex sizing can squeeze the shared screen to
+                  near-nothing on short/mobile viewports — keep it usable. */}
+              <div className="relative min-h-[38vh] w-full flex-1 overflow-hidden rounded-2xl border border-white/10 bg-black sm:min-h-[45vh] sm:rounded-3xl">
                 <StreamVideo stream={presenterStream} className="h-full w-full object-contain" />
                 <span className="absolute bottom-2 left-2 rounded-full bg-navy-950/70 px-2.5 py-1 text-xs text-white/90 backdrop-blur">
                   {presenterName === 'You' ? 'You are presenting' : `${presenterName}’s screen`}
@@ -367,12 +365,12 @@ function CallSession({ call }) {
               <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
                 {/* People strip: every remote camera (except a remote presenter's screen feed) + you */}
                 {remotes.filter((r) => r.id !== presenterId).map((r) => (
-                  <div key={r.id} className="relative h-24 w-36 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-navy-900">
+                  <div key={r.id} className="relative h-16 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-navy-900 sm:h-20 sm:w-32 md:h-24 md:w-36">
                     <StreamVideo stream={r.stream} className="h-full w-full object-cover" />
                     <span className="absolute bottom-1 left-1 rounded-full bg-navy-950/60 px-1.5 py-0.5 text-[10px] text-white/80">{r.user?.name || 'Guest'}</span>
                   </div>
                 ))}
-                <div className="relative h-24 w-36 shrink-0 overflow-hidden rounded-xl border border-white/20 bg-navy-900">
+                <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded-xl border border-white/20 bg-navy-900 sm:h-20 sm:w-32 md:h-24 md:w-36">
                   {camOff || !localStream ? (
                     <div className="grid h-full place-items-center text-white/60"><VideoOff size={18} /></div>
                   ) : (
@@ -414,7 +412,7 @@ function CallSession({ call }) {
                 <StreamVideo stream={remotes[0].stream} className={cn('h-full w-full rounded-3xl border border-white/10', portrait ? 'object-contain bg-black' : 'object-cover')} />
                 <span className="absolute bottom-3 left-3 rounded-full bg-navy-950/60 px-2.5 py-1 text-xs text-white/85 backdrop-blur">{remotes[0].user?.name || peer.name || 'Guest'}</span>
               </div>
-              <div className="absolute bottom-4 right-4 h-40 w-28 overflow-hidden rounded-2xl border border-white/20 bg-navy-900 shadow-soft-lg sm:h-48 sm:w-36">
+              <div className="absolute bottom-4 right-4 h-32 w-24 overflow-hidden rounded-2xl border border-white/20 bg-navy-900 shadow-soft-lg sm:h-48 sm:w-36 lg:h-56 lg:w-40 xl:h-64 xl:w-48">
                 {camOff && !sharingScreen ? (
                   <div className="grid h-full place-items-center text-white/60"><VideoOff size={20} /></div>
                 ) : (
@@ -461,22 +459,22 @@ function CallSession({ call }) {
         </div>
 
         {/* Controls */}
-        <div className="flex justify-center pb-10 pt-4">
+        <div className="flex justify-center px-2 pb-8 pt-4 sm:pb-10">
           {incoming ? (
-            <div className="flex items-center gap-10">
+            <div className="flex items-center gap-6 sm:gap-10">
               <button onClick={reject} className="flex flex-col items-center gap-2">
-                <span className="grid h-16 w-16 place-items-center rounded-full bg-red-500 text-white shadow-lg transition-transform hover:scale-105"><PhoneOff size={24} /></span>
+                <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-lg transition-transform hover:scale-105 sm:h-16 sm:w-16"><PhoneOff size={24} /></span>
                 <span className="text-xs font-medium text-white/80">Decline</span>
               </button>
               <button onClick={accept} className="flex flex-col items-center gap-2">
-                <motion.span animate={{ scale: [1, 1.08, 1] }} transition={{ repeat: Infinity, duration: 1.4 }} className="grid h-16 w-16 place-items-center rounded-full bg-emerald-500 text-white shadow-lg">
+                <motion.span animate={{ scale: [1, 1.08, 1] }} transition={{ repeat: Infinity, duration: 1.4 }} className="grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-white shadow-lg sm:h-16 sm:w-16">
                   {isVideo ? <Video size={24} /> : <Phone size={24} />}
                 </motion.span>
                 <span className="text-xs font-medium text-white/80">Accept</span>
               </button>
             </div>
           ) : (
-            <div className="glass-strong flex items-center gap-2 rounded-full p-2.5 shadow-soft-lg sm:gap-3">
+            <div className="glass-strong flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full p-2.5 shadow-soft-lg sm:gap-3">
               <CtrlBtn active={!muted} onClick={toggleMute} icon={muted ? MicOff : Mic} label={muted ? 'Unmute' : 'Mute'} />
               {isVideo && <CtrlBtn active={!camOff} onClick={toggleCamera} icon={camOff ? VideoOff : Video} label={camOff ? 'Camera on' : 'Camera off'} />}
               <CtrlBtn onClick={cycleSpeaker} icon={Volume2} label="Speaker" />

@@ -47,11 +47,11 @@ export const searchUsers = asyncHandler(async (req, res) => {
   }
   const match = { _id: { $ne: req.user._id, $nin: req.user.blockedUsers }, $or: orClauses };
 
-  const users = await User.find(match).select(PUBLIC_WITH_PRIVACY).limit(20);
+  const users = await User.find(match).select(PUBLIC_WITH_PRIVACY).limit(20).lean();
   const meId = String(req.user._id);
   const sanitized = users.map((u) => {
     const viewerIsContact = (u.contacts || []).some((c) => String(c) === meId);
-    return applyPresencePrivacy(u.toObject(), viewerIsContact);
+    return applyPresencePrivacy(u, viewerIsContact);
   });
   res.json({ success: true, users: sanitized });
 });
@@ -60,10 +60,10 @@ export const searchUsers = asyncHandler(async (req, res) => {
 export const getUserById = asyncHandler(async (req, res) => {
   // Global reachability: any user is viewable by id (public fields only, with
   // presence/photo privacy applied below). Not a directory dump — you need the id.
-  const user = await User.findById(req.params.id).select(PUBLIC_WITH_PRIVACY);
+  const user = await User.findById(req.params.id).select(PUBLIC_WITH_PRIVACY).lean();
   if (!user) throw new ApiError(404, 'User not found.');
   const viewerIsContact = (user.contacts || []).some((c) => String(c) === String(req.user._id));
-  res.json({ success: true, user: applyPresencePrivacy(user.toObject(), viewerIsContact) });
+  res.json({ success: true, user: applyPresencePrivacy(user, viewerIsContact) });
 });
 
 // PATCH /api/users/me
@@ -150,10 +150,13 @@ export const updateSettings = asyncHandler(async (req, res) => {
 
 // GET /api/users/me/contacts
 export const getContacts = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id)
-    .populate('contacts', PUBLIC_FIELDS)
-    .populate('favorites', PUBLIC_FIELDS);
-  res.json({ success: true, contacts: user.contacts, favorites: user.favorites });
+  // `protect` already loaded this exact user document — populate the
+  // references directly ON IT instead of a second full `User.findById`.
+  await req.user.populate([
+    { path: 'contacts', select: PUBLIC_FIELDS },
+    { path: 'favorites', select: PUBLIC_FIELDS },
+  ]);
+  res.json({ success: true, contacts: req.user.contacts, favorites: req.user.favorites });
 });
 
 // POST /api/users/me/contacts/:id

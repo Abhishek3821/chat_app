@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
@@ -12,7 +12,7 @@ import api from '@/lib/api';
 import { useMeetings } from '@/store/useMeetings';
 import { useAuth } from '@/store/useAuth';
 import { useUI } from '@/store/useUI';
-import { cn } from '@/lib/utils';
+import { cn, videoGridCols } from '@/lib/utils';
 
 /** Attaches a MediaStream to a <video> element. */
 function VideoTile({ stream, name, avatar, muted = false, mirror = false, label, fit = 'cover', className, handRaised = false, reactions = [], hostControls = null }) {
@@ -165,6 +165,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
+    knocks = [], admitGuest,
   } = room;
   const [portrait, setPortrait] = useState(false); // tile orientation option
   const [showChat, setShowChat] = useState(false);
@@ -212,9 +213,42 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
     );
   }
 
+  // Ask-to-join: we knocked and the host hasn't answered yet.
+  if (status === 'knocking') {
+    return (
+      <div className="grid h-[100dvh] place-items-center bg-navy-950 p-6 text-center text-white">
+        <div className="flex max-w-sm flex-col items-center gap-3">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/20 text-brand-300"><DoorOpen size={26} className="animate-pulse" /></span>
+          <h1 className="text-lg font-bold">Asking to join…</h1>
+          <p className="text-sm text-white/70">{mediaError || 'You’ll enter as soon as the host lets you in.'}</p>
+          <p className="text-xs text-white/50">Meeting ID <span className="font-mono">{code}</span></p>
+          <Button variant="glass" onClick={doLeave}>Cancel</Button>
+        </div>
+      </div>
+    );
+  }
+
+  // The host denied the request (or nobody answered the knock).
+  if (status === 'denied') {
+    return (
+      <div className="grid h-[100dvh] place-items-center bg-navy-950 p-6 text-center text-white">
+        <div className="flex max-w-sm flex-col items-center gap-3">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-red-500/15 text-red-400"><UserX size={26} /></span>
+          <h1 className="text-lg font-bold">You can’t join this meeting</h1>
+          <p className="text-sm text-white/70">{mediaError || 'The host didn’t let you in.'}</p>
+          <Button variant="glass" onClick={doLeave}>Back to meetings</Button>
+        </div>
+      </div>
+    );
+  }
+
   const total = remotes.length + 1;
-  const cols = total <= 1 ? 'grid-cols-1' : total <= 4 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2 lg:grid-cols-3';
-  const tileAspect = portrait ? 'aspect-[3/4] max-h-full' : '';
+  const cols = videoGridCols(total);
+  // A tile with NO aspect-ratio class has no definite height in a CSS grid (a
+  // <video> with h-full/w-full can't resolve a percentage height against an
+  // "auto" parent) — it used to collapse to the video's raw stream resolution,
+  // making tiles inconsistent sizes across devices. Always give it one.
+  const tileAspect = portrait ? 'aspect-[3/4] max-h-full' : 'aspect-video';
 
   // Spotlight: whoever is presenting a screen (you or a remote peer) fills the
   // stage (object-contain so nothing is cropped) with everyone else in a strip.
@@ -226,23 +260,55 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
 
   return (
     <div className="flex h-[100dvh] flex-col bg-navy-950 text-white">
-      <header className="flex items-center justify-between gap-3 px-4 py-3">
+      {/* Host admission prompts — someone knocked and wants to join (Google-Meet style). */}
+      {isHost && knocks.length > 0 && (
+        <div className="absolute left-1/2 top-16 z-40 flex w-[min(92vw,380px)] -translate-x-1/2 flex-col gap-2">
+          {knocks.map((k) => (
+            <div key={k.socketId} className="flex items-center gap-3 rounded-2xl border border-white/15 bg-navy-900/95 p-3 shadow-soft-lg backdrop-blur-md">
+              <Avatar src={k.avatar} name={k.name} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{k.name || 'Someone'}</p>
+                <p className="text-xs text-white/60">wants to join this meeting</p>
+              </div>
+              <button
+                onClick={() => admitGuest?.(k, false)}
+                title="Deny"
+                className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-red-500/80 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+              <button
+                onClick={() => admitGuest?.(k, true)}
+                title="Admit"
+                className="grid h-9 w-9 place-items-center rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+              >
+                <Check size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <header className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
         <div className="min-w-0">
-          <p className="truncate font-semibold">{meeting.title}</p>
+          <p className="truncate text-sm font-semibold sm:text-base">{meeting.title}</p>
           <button onClick={copyId} title="Copy meeting ID" className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white/90">
-            <Users size={12} /> {total} in call · Meeting ID <span className="font-mono">{code}</span> <Copy size={11} />
+            <Users size={12} /> {total} in call
+            <span className="hidden sm:inline">
+              &nbsp;· Meeting ID <span className="font-mono">{code}</span>
+            </span>
+            <Copy size={11} className="hidden sm:inline" />
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {recording && <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-300"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC</span>}
           {isHost && (
-            <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> Mute all</Button>
+            <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> <span className="hidden sm:inline">Mute all</span></Button>
           )}
           <button onClick={() => setShowChat((v) => !v)} className={cn('relative grid h-9 w-9 place-items-center rounded-xl transition-colors', showChat ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20')} title="Meeting chat">
             <MessageSquare size={18} />
             {unreadChat > 0 && !showChat && <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white">{unreadChat}</span>}
           </button>
-          <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> Copy link</Button>
+          <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> <span className="hidden sm:inline">Copy link</span></Button>
         </div>
       </header>
 
@@ -265,20 +331,22 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 px-4">
+      <div className="relative flex min-h-0 flex-1">
+        <div className="min-h-0 flex-1 px-2 sm:px-4">
         {presenting && presenterStream ? (
-          <div className="flex h-full flex-col gap-3">
-            <VideoTile stream={presenterStream} name={presenterName} muted={presenterIsMe} fit="contain" label={presenterIsMe ? 'Your shared screen' : `${presenterName}’s screen`} className="min-h-0 flex-1" />
+          <div className="flex h-full flex-col gap-2 sm:gap-3">
+            {/* min-h floor: on short/mobile viewports flex sizing alone can
+                squeeze the shared screen to near-nothing — always keep it usable. */}
+            <VideoTile stream={presenterStream} name={presenterName} muted={presenterIsMe} fit="contain" label={presenterIsMe ? 'Your shared screen' : `${presenterName}’s screen`} className="min-h-[38vh] flex-1 sm:min-h-[45vh]" />
             <div className="flex justify-center gap-2 overflow-x-auto pb-2">
-              <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)`} handRaised={handRaised} reactions={myReactions} className="h-24 w-36 shrink-0" />
+              <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)`} handRaised={handRaised} reactions={myReactions} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36" />
               {remotes.filter((r) => r.socketId !== presenterSid).map((r) => (
-                <VideoTile key={r.socketId} stream={r.stream} name={r.user?.name} avatar={r.user?.avatar} label={r.user?.name || 'Guest'} handRaised={!!raisedHands[r.socketId]} reactions={reactionsForRemote(r.socketId)} className="h-24 w-36 shrink-0" />
+                <VideoTile key={r.socketId} stream={r.stream} name={r.user?.name} avatar={r.user?.avatar} label={r.user?.name || 'Guest'} handRaised={!!raisedHands[r.socketId]} reactions={reactionsForRemote(r.socketId)} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36" />
               ))}
             </div>
           </div>
         ) : (
-          <div className={cn('grid h-full gap-3 place-content-center', cols, portrait && 'place-items-center')}>
+          <div className={cn('grid h-full gap-2 place-content-center sm:gap-3', cols, portrait && 'place-items-center')}>
             <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`} handRaised={handRaised} reactions={myReactions} className={tileAspect} />
             {remotes.map((r) => (
               <VideoTile
@@ -302,9 +370,12 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
         )}
         </div>
 
-        {/* In-meeting chat drawer */}
+        {/* In-meeting chat drawer. On narrow screens this OVERLAYS the video
+            (absolute, full-bleed) instead of sharing the flex row with it —
+            a fixed-width sidebar on a phone-size viewport used to squeeze the
+            video pane down to a sliver. From sm: up it's a normal side panel. */}
         {showChat && (
-          <aside className="flex w-full max-w-xs shrink-0 flex-col border-l border-white/10 bg-navy-950/95 sm:w-80">
+          <aside className="absolute inset-0 z-30 flex flex-col bg-navy-950/98 sm:static sm:inset-auto sm:z-auto sm:w-80 sm:shrink-0 sm:border-l sm:border-white/10 sm:bg-navy-950/95 lg:w-96">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <p className="font-semibold">In-call messages</p>
               <button onClick={() => setShowChat(false)} className="rounded-lg p-1 text-white/60 hover:text-white"><X size={18} /></button>
@@ -327,7 +398,9 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
         )}
       </div>
 
-      <footer className="flex items-center justify-center gap-3 px-4 py-5">
+      {/* flex-wrap: on narrow phones 7-8 circular controls at full size don't fit
+          one row — they used to overflow off-screen instead of wrapping. */}
+      <footer className="flex flex-wrap items-center justify-center gap-2 px-3 py-4 sm:gap-3 sm:px-4 sm:py-5">
         <CtrlButton active={!muted} onClick={toggleMute} on={<Mic size={20} />} off={<MicOff size={20} />} label={muted ? 'Unmute' : 'Mute'} />
         {meeting.type !== 'audio' && (
           <CtrlButton active={!camOff} onClick={toggleCamera} on={<Video size={20} />} off={<VideoOff size={20} />} label={camOff ? 'Start video' : 'Stop video'} />
@@ -359,7 +432,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           )}
         </div>
         <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
-        <button onClick={doLeave} className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105" title="Leave">
+        <button onClick={doLeave} className="grid h-12 w-12 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 sm:h-14 sm:w-14" title="Leave">
           <PhoneOff size={22} />
         </button>
       </footer>
@@ -374,7 +447,7 @@ function CtrlButton({ active, onClick, on, off, label, highlightWhenActive = fal
       onClick={onClick}
       title={label}
       className={cn(
-        'grid h-14 w-14 place-items-center rounded-full transition-colors',
+        'grid h-12 w-12 place-items-center rounded-full transition-colors sm:h-14 sm:w-14',
         highlighted ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20'
       )}
     >

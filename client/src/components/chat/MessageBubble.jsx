@@ -19,7 +19,7 @@ function Ticks({ status }) {
   return <Check size={14} className="text-white/70" />; // single — sent
 }
 
-function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
+function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = true, onReact, onReply, onStar, onPin, onDelete, onForward, onEdit }) {
   const [showActions, setShowActions] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -38,7 +38,16 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, 
   const reactions = message.reactions || [];
   const deleted = Boolean(message.isDeleted);
   const forwarded = Boolean(message.forwardedFrom || message.forwarded);
-  const canEdit = isMine && !deleted && (message.type === 'text' || !message.type) && message.content;
+  // Server rejects edits after this window, so don't offer the option past it.
+  const EDIT_WINDOW_MS = 5 * 60 * 1000;
+  const withinEditWindow = !message.createdAt || Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
+  const canEdit = isMine && !deleted && withinEditWindow && (message.type === 'text' || !message.type) && message.content;
+  // Server rejects "delete for everyone" after this window too — same 5-minute
+  // rule as editing. Past it, the sender can still delete the message for
+  // themselves, just not retract it from everyone else's chat.
+  const DELETE_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
+  const withinDeleteWindow = !message.createdAt || Date.now() - new Date(message.createdAt).getTime() <= DELETE_EVERYONE_WINDOW_MS;
+  const canDeleteForEveryone = isMine && !deleted && withinDeleteWindow;
 
   const saveEdit = () => {
     const next = draft.trim();
@@ -68,7 +77,12 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, 
         )}
 
         <motion.div
-          initial={{ opacity: 0, y: 8, scale: 0.98 }}
+          // `initial={false}` skips the mount animation entirely (renders
+          // straight at the `animate` values) for bubbles that were already
+          // part of the chat's history when it opened — only a genuinely new
+          // arrival plays the spring-in. Avoids every bubble in a long chat
+          // animating at once, a CPU burst right when the chat is opening.
+          initial={isNew ? { opacity: 0, y: 8, scale: 0.98 } : false}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
           onMouseEnter={() => setShowActions(true)}
@@ -187,7 +201,7 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, onReact, 
                       />
                     )}
                     {canEdit && <MenuItem icon={Pencil} label="Edit" onClick={() => { setDraft(message.content || ''); setEditing(true); setShowMenu(false); }} />}
-                    {isMine && <MenuItem icon={Trash2} label="Delete for everyone" danger onClick={() => { onDelete?.(message, 'everyone'); setShowMenu(false); }} />}
+                    {canDeleteForEveryone && <MenuItem icon={Trash2} label="Delete for everyone" danger onClick={() => { onDelete?.(message, 'everyone'); setShowMenu(false); }} />}
                     <MenuItem icon={Trash2} label="Delete for me" danger onClick={() => { onDelete?.(message, 'me'); setShowMenu(false); }} />
                   </motion.div>
                 )}
@@ -294,11 +308,24 @@ function MessageMedia({ message, isMine }) {
   if (message.type === 'image') {
     if (atts.length <= 1) {
       const a = atts[0];
-      return a ? (
-        <a href={mediaUrl(a.url)} target="_blank" rel="noreferrer">
-          <img src={mediaUrl(a.url)} alt="" className="mb-1 max-h-64 rounded-xl object-cover" loading="lazy" />
+      if (!a) return null;
+      // Reserve the image's box BEFORE it decodes (CLS fix): a bare `max-h-64`
+      // with no width/height/aspect-ratio has no definite size until the image
+      // loads, so the whole message list used to jump down on every load.
+      // Real dimensions (e.g. from the GIF picker's Tenor metadata) give an
+      // exact reservation; otherwise fall back to a sensible default ratio.
+      const knownAspect = a.width && a.height ? a.width / a.height : null;
+      return (
+        <a href={mediaUrl(a.url)} target="_blank" rel="noreferrer" className="mb-1 block w-full max-w-xs overflow-hidden rounded-xl bg-content/5">
+          <img
+            src={mediaUrl(a.url)}
+            alt=""
+            className={cn('w-full object-cover', !knownAspect && 'aspect-[4/3]')}
+            style={knownAspect ? { aspectRatio: knownAspect } : undefined}
+            loading="lazy"
+          />
         </a>
-      ) : null;
+      );
     }
     return (
       <div className="mb-1 grid grid-cols-2 gap-1">

@@ -5,12 +5,18 @@ import { emitToChat, emitToUser } from '../socket/index.js';
 import { enqueue } from '../utils/queue.js';
 import { notifyUser } from '../utils/notify.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
 
 const SENDER_FIELDS = 'name username avatar';
 // Types a client may set (everything except 'system', which is server-generated).
 const USER_MESSAGE_TYPES = ['text', 'image', 'video', 'audio', 'voice', 'document', 'location'];
 const MAX_CONTENT = 10_000;
 const MAX_ATTACHMENTS = 20;
+// Editing is only allowed shortly after sending (WhatsApp-style window).
+const EDIT_WINDOW_MS = 5 * 60 * 1000;
+// "Delete for everyone" is only allowed shortly after sending — past this, the
+// sender can still delete it for themselves, just not retract it for the chat.
+const DELETE_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 
 /** Keep only well-formed attachments whose URL is our own upload or an https URL
  *  (blocks data:/javascript:/relative-path injection that a client could auto-load). */
@@ -31,6 +37,30 @@ async function assertMember(chatId, userId) {
   return chat;
 }
 
+/**
+ * Cheap membership check for handlers that only need a yes/no answer (they
+ * never touch the chat document afterward). A single `.exists()` instead of
+ * fetching + hydrating the whole chat — same 403/404 behavior as assertMember.
+ */
+async function assertIsMember(chatId, userId) {
+  if (await Chat.exists({ _id: chatId, 'participants.user': userId })) return;
+  const exists = await Chat.exists({ _id: chatId });
+  throw new ApiError(exists ? 403 : 404, exists ? 'You are not a participant of this chat.' : 'Chat not found.');
+}
+
+/**
+ * Membership-gated fetch of ONLY the requested chat fields, as a lean plain
+ * object — for handlers that need a couple of fields but not a fully
+ * hydrated document. One query on the (common) member path instead of a full
+ * fetch-then-hydrate.
+ */
+async function assertMemberFields(chatId, userId, fields) {
+  const chat = await Chat.findOne({ _id: chatId, 'participants.user': userId }).select(fields).lean();
+  if (chat) return chat;
+  const exists = await Chat.exists({ _id: chatId });
+  throw new ApiError(exists ? 403 : 404, exists ? 'You are not a participant of this chat.' : 'Chat not found.');
+}
+
 function populateMessage(query) {
   return query
     .populate('sender', SENDER_FIELDS)
@@ -38,14 +68,27 @@ function populateMessage(query) {
     .populate({ path: 'replyTo', populate: { path: 'sender', select: SENDER_FIELDS } });
 }
 
+/**
+ * Same population set applied IN PLACE to an already-loaded document — avoids
+ * the redundant `Message.findById` re-fetch that used to follow every
+ * `.create()`/`.save()` purely to populate the response.
+ */
+function populateInPlace(doc) {
+  return doc.populate([
+    { path: 'sender', select: SENDER_FIELDS },
+    { path: 'reactions.user', select: SENDER_FIELDS },
+    { path: 'replyTo', populate: { path: 'sender', select: SENDER_FIELDS } },
+  ]);
+}
+
 // GET /api/messages/:chatId?before=&limit=
 export const getMessages = asyncHandler(async (req, res) => {
-  await assertMember(req.params.chatId, req.user._id);
+  await assertIsMember(req.params.chatId, req.user._id);
   const limit = Math.min(Number(req.query.limit) || 40, 100);
   const filter = { chat: req.params.chatId, deletedFor: { $ne: req.user._id } };
   if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
 
-  const messages = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit));
+  const messages = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit).lean());
   res.json({ success: true, messages: messages.reverse() });
 });
 
@@ -95,7 +138,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
   chat.lastMessage = message._id;
   await chat.save();
 
-  message = await populateMessage(Message.findById(message._id));
+  message = await populateInPlace(message);
+  // Every participant's chat-list preview/order/unread count just changed.
+  invalidateChatListCache(chat.participants.map((p) => p.user));
 
   // Realtime fan-out. Deliver to every participant's PERSONAL room (not just the
   // chat room) so online users receive it instantly even if they don't have this
@@ -133,8 +178,11 @@ export const sendMessage = asyncHandler(async (req, res) => {
 export const editMessage = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id);
   if (!message) throw new ApiError(404, 'Message not found.');
-  await assertMember(message.chat, req.user._id);
+  await assertIsMember(message.chat, req.user._id);
   if (String(message.sender) !== String(req.user._id)) throw new ApiError(403, 'You can only edit your own messages.');
+  if (Date.now() - message.createdAt.getTime() > EDIT_WINDOW_MS) {
+    throw new ApiError(403, 'Messages can only be edited within 5 minutes of sending.');
+  }
 
   // Bound the edit like a send — otherwise an edit could balloon a message far
   // past the send-time cap (limited only by the global body size).
@@ -148,8 +196,12 @@ export const editMessage = asyncHandler(async (req, res) => {
   message.editedAt = new Date();
   await message.save();
 
-  const populated = await populateMessage(Message.findById(message._id));
+  const populated = await populateInPlace(message);
   emitToChat(String(message.chat), 'message-edited', { chatId: String(message.chat), message: populated });
+  // Connected viewers update live via the socket event above regardless; this
+  // just keeps a fresh REST reload of the editor's OWN list from showing stale
+  // preview text if this happened to be the chat's last message.
+  invalidateChatListCache(req.user._id);
   res.json({ success: true, message: populated });
 });
 
@@ -157,11 +209,14 @@ export const editMessage = asyncHandler(async (req, res) => {
 export const deleteMessage = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id);
   if (!message) throw new ApiError(404, 'Message not found.');
-  await assertMember(message.chat, req.user._id);
+  await assertIsMember(message.chat, req.user._id);
   const scope = req.query.scope || 'me';
 
   if (scope === 'everyone') {
     if (String(message.sender) !== String(req.user._id)) throw new ApiError(403, 'You can only delete your own messages for everyone.');
+    if (Date.now() - message.createdAt.getTime() > DELETE_EVERYONE_WINDOW_MS) {
+      throw new ApiError(403, 'You can only delete for everyone within 5 minutes of sending. Delete for yourself instead.');
+    }
     message.isDeleted = true;
     message.content = '';
     message.attachments = [];
@@ -170,6 +225,7 @@ export const deleteMessage = asyncHandler(async (req, res) => {
   } else {
     await Message.findByIdAndUpdate(message._id, { $addToSet: { deletedFor: req.user._id } });
   }
+  invalidateChatListCache(req.user._id); // same rationale as editMessage above
   res.json({ success: true });
 });
 
@@ -178,7 +234,7 @@ export const reactToMessage = asyncHandler(async (req, res) => {
   const { emoji } = req.body;
   const message = await Message.findById(req.params.id);
   if (!message) throw new ApiError(404, 'Message not found.');
-  await assertMember(message.chat, req.user._id);
+  await assertIsMember(message.chat, req.user._id);
 
   const existing = message.reactions.find((r) => String(r.user) === String(req.user._id));
   if (existing && existing.emoji === emoji) {
@@ -190,7 +246,7 @@ export const reactToMessage = asyncHandler(async (req, res) => {
   }
   await message.save();
 
-  const populated = await populateMessage(Message.findById(message._id));
+  const populated = await populateInPlace(message);
   emitToChat(String(message.chat), 'message-reaction', {
     chatId: String(message.chat),
     messageId: String(message._id),
@@ -201,24 +257,24 @@ export const reactToMessage = asyncHandler(async (req, res) => {
 
 // POST /api/messages/:id/star  (toggle)
 export const toggleStar = asyncHandler(async (req, res) => {
-  const message = await Message.findById(req.params.id);
+  const message = await Message.findById(req.params.id).select('chat starredBy');
   if (!message) throw new ApiError(404, 'Message not found.');
-  await assertMember(message.chat, req.user._id);
+  await assertIsMember(message.chat, req.user._id);
   const starred = message.starredBy.some((u) => String(u) === String(req.user._id));
-  await Message.findByIdAndUpdate(message._id, starred ? { $pull: { starredBy: req.user._id } } : { $addToSet: { starredBy: req.user._id } });
+  await Message.updateOne({ _id: message._id }, starred ? { $pull: { starredBy: req.user._id } } : { $addToSet: { starredBy: req.user._id } });
   res.json({ success: true, starred: !starred });
 });
 
 // GET /api/messages/starred
 export const getStarred = asyncHandler(async (req, res) => {
-  const messages = await populateMessage(Message.find({ starredBy: req.user._id }).sort({ createdAt: -1 }).limit(100));
+  const messages = await populateMessage(Message.find({ starredBy: req.user._id }).sort({ createdAt: -1 }).limit(100).lean());
   res.json({ success: true, messages });
 });
 
 // POST /api/messages/read  { chatId }
 export const markRead = asyncHandler(async (req, res) => {
   const { chatId } = req.body;
-  await assertMember(chatId, req.user._id);
+  await assertIsMember(chatId, req.user._id);
   await Message.updateMany(
     { chat: chatId, sender: { $ne: req.user._id }, 'readBy.user': { $ne: req.user._id } },
     { $push: { readBy: { user: req.user._id, at: new Date() } } }
@@ -227,12 +283,13 @@ export const markRead = asyncHandler(async (req, res) => {
   if (req.user.privacy?.readReceipts !== false) {
     emitToChat(chatId, 'message-read', { chatId, userId: String(req.user._id) });
   }
+  invalidateChatListCache(req.user._id); // this chat's unreadCount just dropped to 0
   res.json({ success: true });
 });
 
 // GET /api/messages/:chatId/search?q=
 export const searchMessages = asyncHandler(async (req, res) => {
-  await assertMember(req.params.chatId, req.user._id);
+  await assertIsMember(req.params.chatId, req.user._id);
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ success: true, messages: [] });
   const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -240,6 +297,7 @@ export const searchMessages = asyncHandler(async (req, res) => {
     Message.find({ chat: req.params.chatId, content: rx, isDeleted: false, deletedFor: { $ne: req.user._id } })
       .sort({ createdAt: -1 })
       .limit(50)
+      .lean()
   );
   res.json({ success: true, messages });
 });
@@ -250,7 +308,7 @@ export const searchMessages = asyncHandler(async (req, res) => {
 export const markViewed = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id);
   if (!message) throw new ApiError(404, 'Message not found.');
-  const chat = await assertMember(message.chat, req.user._id);
+  const chat = await assertMemberFields(message.chat, req.user._id, 'participants');
   const uid = String(req.user._id);
   if (!message.viewOnce || String(message.sender) === uid) return res.json({ success: true });
 
@@ -262,7 +320,7 @@ export const markViewed = asyncHandler(async (req, res) => {
       message.content = '';
     }
     await message.save();
-    const populated = await populateMessage(Message.findById(message._id));
+    const populated = await populateInPlace(message);
     emitToChat(String(message.chat), 'message-updated', { chatId: String(message.chat), message: populated });
   }
   res.json({ success: true });
@@ -301,7 +359,8 @@ export const createPoll = asyncHandler(async (req, res) => {
   chat.lastMessage = message._id;
   await chat.save();
 
-  message = await populateMessage(Message.findById(message._id));
+  message = await populateInPlace(message);
+  invalidateChatListCache(chat.participants.map((p) => p.user));
   for (const p of chat.participants) emitToUser(String(p.user), 'receive-message', { chatId, message });
   for (const p of chat.participants) {
     if (String(p.user) !== String(req.user._id)) emitToUser(String(p.user), 'chat-updated', { chatId });
@@ -313,7 +372,7 @@ export const createPoll = asyncHandler(async (req, res) => {
 export const votePoll = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id);
   if (!message || message.type !== 'poll' || !message.poll) throw new ApiError(404, 'Poll not found.');
-  await assertMember(message.chat, req.user._id);
+  await assertIsMember(message.chat, req.user._id);
   if (message.poll.closed) throw new ApiError(400, 'This poll is closed.');
 
   const idx = Number(req.body.optionIndex);
@@ -337,18 +396,18 @@ export const votePoll = asyncHandler(async (req, res) => {
   });
 
   await message.save();
-  const populated = await populateMessage(Message.findById(message._id));
+  const populated = await populateInPlace(message);
   emitToChat(String(message.chat), 'message-updated', { chatId: String(message.chat), message: populated });
   res.json({ success: true, message: populated });
 });
 
 // POST /api/messages/:id/pin  (toggle at chat level)
 export const togglePin = asyncHandler(async (req, res) => {
-  const message = await Message.findById(req.params.id);
+  const message = await Message.findById(req.params.id).select('chat');
   if (!message) throw new ApiError(404, 'Message not found.');
-  const chat = await assertMember(message.chat, req.user._id);
+  const chat = await assertMemberFields(message.chat, req.user._id, 'pinnedMessages');
   const pinned = chat.pinnedMessages.some((m) => String(m) === String(message._id));
-  await Chat.findByIdAndUpdate(chat._id, pinned ? { $pull: { pinnedMessages: message._id } } : { $addToSet: { pinnedMessages: message._id } });
+  await Chat.updateOne({ _id: chat._id }, pinned ? { $pull: { pinnedMessages: message._id } } : { $addToSet: { pinnedMessages: message._id } });
   emitToChat(String(chat._id), 'message-pinned', { chatId: String(chat._id), messageId: String(message._id), pinned: !pinned });
   res.json({ success: true, pinned: !pinned });
 });

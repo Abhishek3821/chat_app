@@ -30,6 +30,7 @@ function sanitizeSettings(s) {
   if (s.joinAnytime !== undefined) out.joinAnytime = Boolean(s.joinAnytime);
   if (s.muteOnEntry !== undefined) out.muteOnEntry = Boolean(s.muteOnEntry);
   if (s.autoRecord !== undefined) out.autoRecord = Boolean(s.autoRecord);
+  if (s.askToJoin !== undefined) out.askToJoin = Boolean(s.askToJoin);
   return out;
 }
 
@@ -185,7 +186,9 @@ export const joinMeetingByCode = asyncHandler(async (req, res) => {
 
   const already = meeting.participants.some((p) => String(p.user) === String(req.user._id));
   const isHost = String(meeting.host) === String(req.user._id);
-  if (!already && !isHost) meeting.participants.push({ user: req.user._id, response: 'going' });
+  // viaLink: a link-join is NOT an invite — the socket-level ask-to-join gate
+  // still makes these users knock (the host admits them Google-Meet style).
+  if (!already && !isHost) meeting.participants.push({ user: req.user._id, response: 'going', viaLink: true });
   if (meeting.status === 'scheduled') meeting.status = 'ongoing'; // it's live the moment someone joins
   await meeting.save();
 

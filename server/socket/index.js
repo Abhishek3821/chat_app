@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { verifyToken } from '../utils/token.js';
+import { verifyToken, signMeetingPass } from '../utils/token.js';
 import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
@@ -73,13 +73,19 @@ async function setPresence(userId, online) {
   }
 }
 
-/** True only if A and B have each accepted the other as a contact. */
+/**
+ * True only if A and B have each accepted the other as a contact. A SINGLE
+ * query (both docs via $in) rather than two sequential/parallel round-trips —
+ * this runs on every WebRTC signal (ICE candidates alone can be dozens per call).
+ */
 async function areMutualContacts(aId, bId) {
   if (!aId || !bId) return false;
-  const a = await User.findById(aId).select('contacts');
-  if (!a || !(a.contacts || []).some((c) => String(c) === String(bId))) return false;
-  const b = await User.findById(bId).select('contacts');
-  return !!b && (b.contacts || []).some((c) => String(c) === String(aId));
+  const users = await User.find({ _id: { $in: [aId, bId] } }).select('contacts').lean();
+  if (users.length < 2) return false;
+  const contactsOf = new Map(users.map((u) => [String(u._id), u.contacts || []]));
+  const aContacts = contactsOf.get(String(aId));
+  const bContacts = contactsOf.get(String(bId));
+  return aContacts.some((c) => String(c) === String(bId)) && bContacts.some((c) => String(c) === String(aId));
 }
 
 /**
@@ -253,8 +259,20 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     // always signal — otherwise both parties must belong to the SAME live call
     // (ad-hoc conference legs between members who aren't personal contacts;
     // membership only ever grows via a contact-gated call:invite below).
-    const canCallSignal = async (to, chatId, callId) =>
-      (await canSignal(userId, to, chatId)) || (await inSameCall(callId, userId, to).catch(() => false));
+    // Cached per socket connection: a single call negotiation fires this check
+    // on every offer/answer/ICE candidate (dozens per call) for the same pair,
+    // and mutual-contact/group-membership/call-membership can't meaningfully
+    // change mid-negotiation. Only positive results are cached — a `false`
+    // could be a transient race (e.g. a conference invite DB write still in
+    // flight) and must never stick.
+    const signalAuthCache = new Map(); // "to:chatId:callId" -> true
+    const canCallSignal = async (to, chatId, callId) => {
+      const key = `${to}:${chatId || ''}:${callId || ''}`;
+      if (signalAuthCache.has(key)) return true;
+      const allowed = (await canSignal(userId, to, chatId)) || (await inSameCall(callId, userId, to).catch(() => false));
+      if (allowed) signalAuthCache.set(key, true);
+      return allowed;
+    };
     // Live call legs this socket is signaling with (peerId -> callId). Lets the
     // disconnect handler end the call for the OTHER side when this browser dies
     // abruptly (crash/network loss) instead of leaving them hanging and the Call
@@ -399,11 +417,11 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // Join a room → get the list of peers already inside, and announce yourself
     // to them. The NEWCOMER initiates the offer to each existing peer (no glare).
-    socket.on('meeting:join', async ({ meetingId } = {}, cb) => {
+    socket.on('meeting:join', async ({ meetingId, pass } = {}, cb) => {
       if (!isId(meetingId)) return typeof cb === 'function' && cb({ ok: false, error: 'Invalid meeting.' });
       let meeting;
       try {
-        meeting = await Meeting.findById(meetingId).select('status host settings');
+        meeting = await Meeting.findById(meetingId).select('status host settings participants');
       } catch {
         meeting = null;
       }
@@ -411,13 +429,48 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         return typeof cb === 'function' && cb({ ok: false, error: 'Meeting not available.' });
       }
       const isHost = String(meeting.host) === userId;
+      // Genuinely invited only — link-joiners (viaLink) must still be admitted.
+      const isInvited = (meeting.participants || []).some((p) => String(p.user) === userId && !p.viaLink);
       const peers = await meetingPeers(meetingId, socket.id);
+      const hostPresent = peers.some((p) => String(p.userId) === String(meeting.host));
       // Host-controlled "join anytime": if off, a guest can't enter until the
       // host is actually in the room.
-      if (meeting.settings?.joinAnytime === false && !isHost) {
-        const hostPresent = peers.some((p) => String(p.userId) === String(meeting.host));
-        if (!hostPresent) {
-          return typeof cb === 'function' && cb({ ok: false, waiting: true, error: 'The host hasn’t started this meeting yet.' });
+      if (meeting.settings?.joinAnytime === false && !isHost && !hostPresent) {
+        return typeof cb === 'function' && cb({ ok: false, waiting: true, error: 'The host hasn’t started this meeting yet.' });
+      }
+      // Google-Meet-style admission ("ask to join"): people who weren't invited
+      // knock and wait for the host to let them in. An admitted guest carries a
+      // short-lived signed pass (issued by meeting:admit) proving the host said yes.
+      if (meeting.settings?.askToJoin !== false && !isHost && !isInvited) {
+        let admitted = false;
+        if (typeof pass === 'string' && pass) {
+          try {
+            const d = verifyToken(pass);
+            admitted = d.scope === 'meet-admit' && String(d.id) === userId && String(d.meetingId) === String(meetingId);
+          } catch {
+            admitted = false;
+          }
+        }
+        if (!admitted) {
+          if (!hostPresent) {
+            return typeof cb === 'function' && cb({ ok: false, waiting: true, error: 'The host hasn’t started this meeting yet.' });
+          }
+          // Knock on every host socket in the room (host may have several tabs).
+          try {
+            const roomSockets = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
+            roomSockets
+              .filter((s) => String(s.data.userId) === String(meeting.host))
+              .forEach((s) => {
+                ioRef.to(s.id).emit('meeting:knock', {
+                  meetingId: String(meetingId),
+                  socketId: socket.id,
+                  userId,
+                  name: socket.data.name,
+                  avatar: socket.data.avatar,
+                });
+              });
+          } catch { /* knock is best-effort */ }
+          return typeof cb === 'function' && cb({ ok: false, knocking: true, error: 'Waiting for the host to let you in…' });
         }
       }
       socket.join(meetingRoom(meetingId));
@@ -490,6 +543,20 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     });
 
     // ── Host moderation (host socket only) ──
+    // Admission verdict for a knocking guest. Admit → the guest gets a signed,
+    // short-lived pass and re-joins with it (stateless, works across instances).
+    // Deny → they're told the host said no. Other host tabs clear the prompt.
+    socket.on('meeting:admit', ({ meetingId, socketId, userId: guestId, allow } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !socketId || !isId(String(guestId || ''))) return;
+      if (allow) {
+        ioRef.to(socketId).emit('meeting:admitted', { meetingId: String(meetingId), pass: signMeetingPass(guestId, meetingId) });
+      } else {
+        ioRef.to(socketId).emit('meeting:denied', { meetingId: String(meetingId) });
+      }
+      // Clear this knock on the host's OTHER tabs too.
+      socket.to(`user:${userId}`).emit('meeting:knock-handled', { meetingId: String(meetingId), socketId });
+    });
+
     // Ask everyone (or one person) to mute; the client disables its own mic. This
     // is a request the browser CANNOT force — but it always mutes a compliant client.
     socket.on('meeting:mute-all', ({ meetingId } = {}) => {

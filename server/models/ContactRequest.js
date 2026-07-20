@@ -11,6 +11,10 @@ const contactRequestSchema = new mongoose.Schema(
 );
 
 contactRequestSchema.index({ from: 1, to: 1 }, { unique: true });
+// Support getRequests' two queries ({ to, status: 'pending' } / { from, status: 'pending' }) —
+// the unique index above doesn't serve a `status` filter as a usable prefix.
+contactRequestSchema.index({ to: 1, status: 1 });
+contactRequestSchema.index({ from: 1, status: 1 });
 
 const ContactRequest = mongoose.model('ContactRequest', contactRequestSchema);
 export default ContactRequest;

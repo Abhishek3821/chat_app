@@ -4,8 +4,18 @@ import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat } from '../socket/index.js';
 import { verifyTwoStepPin } from './userController.js';
+import {
+  getCachedChatList,
+  setCachedChatList,
+  getCachedLockedChatList,
+  setCachedLockedChatList,
+  invalidateChatListCache,
+} from '../utils/chatCache.js';
 
-const USER_FIELDS = 'name username email avatar bio isOnline lastSeen';
+// `email` deliberately excluded — nothing in the chat/participant UI reads it
+// off this payload, and it's duplicated per-participant on every chat on every
+// load of the (hottest) chat list, for free bandwidth once dropped.
+const USER_FIELDS = 'name username avatar bio isOnline lastSeen';
 
 /** Populate a chat with participant + lastMessage details. */
 function populateChat(query) {
@@ -39,9 +49,18 @@ async function unreadCountsFor(chatIds, userId) {
 // GET /api/chats  — all conversations for the current user (locked chats hidden;
 // they surface only via POST /api/chats/locked after the PIN is entered)
 export const getChats = asyncHandler(async (req, res) => {
+  // Read-through cache: the hottest endpoint in the app (fetched on every load/
+  // reload/reconnect). Short TTL backs up the explicit invalidation calls
+  // sprinkled across every write that can change this response (see
+  // utils/chatCache.js) — most requests are invalidated well before it matters.
+  const cached = await getCachedChatList(req.user._id);
+  if (cached) return res.json({ success: true, chats: cached });
+
   const locked = (req.user.lockedChats || []).map(String);
+  // .lean(): this response is read-only (never .save()'d), so skip Mongoose
+  // document hydration entirely on the single most-hit endpoint in the app.
   const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } }).sort({ updatedAt: -1 })
+    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } }).sort({ updatedAt: -1 }).lean()
   );
 
   // Per-user chat flags (pin / archive / mute) live on the User doc — surface
@@ -54,7 +73,7 @@ export const getChats = asyncHandler(async (req, res) => {
   const withMeta = chats.map((chat) => {
     const id = String(chat._id);
     return {
-      ...chat.toObject(),
+      ...chat,
       unreadCount: counts.get(id) || 0,
       pinned: pinned.has(id),
       archived: archived.has(id),
@@ -62,6 +81,7 @@ export const getChats = asyncHandler(async (req, res) => {
     };
   });
 
+  setCachedChatList(req.user._id, withMeta); // fire-and-forget, best-effort (never throws)
   res.json({ success: true, chats: withMeta });
 });
 
@@ -98,13 +118,14 @@ export const accessDirectChat = asyncHandler(async (req, res) => {
     });
   }
 
-  chat = await populateChat(Chat.findById(chat._id));
+  chat = await populateChat(Chat.findById(chat._id).lean());
+  invalidateChatListCache([req.user._id, otherId]); // a new chat changes both parties' lists
   res.json({ success: true, chat });
 });
 
 // GET /api/chats/:id
 export const getChatById = asyncHandler(async (req, res) => {
-  const chat = await populateChat(Chat.findById(req.params.id));
+  const chat = await populateChat(Chat.findById(req.params.id).lean());
   if (!chat) throw new ApiError(404, 'Chat not found.');
   const isMember = chat.participants.some((p) => String(p.user._id) === String(req.user._id));
   if (!isMember) throw new ApiError(403, 'You are not a participant of this chat.');
@@ -120,6 +141,7 @@ export const setDisappearing = asyncHandler(async (req, res) => {
   chat.disappearingSeconds = seconds;
   await chat.save();
   emitToChat(String(chat._id), 'chat-disappearing', { chatId: String(chat._id), seconds });
+  invalidateChatListCache(chat.participants.map((p) => p.user));
   res.json({ success: true, disappearingSeconds: seconds });
 });
 
@@ -130,24 +152,32 @@ export const lockChat = asyncHandler(async (req, res) => {
   if (!chat) throw new ApiError(403, 'You are not a participant of this chat.');
   if (!req.user.twoStepEnabled) throw new ApiError(400, 'Set up a two-step PIN first to lock chats.');
   await User.findByIdAndUpdate(req.user._id, { $addToSet: { lockedChats: chat._id } });
+  invalidateChatListCache(req.user._id); // moves the chat OUT of getChats, INTO getLockedChats
   res.json({ success: true, locked: true });
 });
 
 // POST /api/chats/:id/unlock — move a chat back to the main list
 export const unlockChat = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(req.user._id, { $pull: { lockedChats: req.params.id } });
+  invalidateChatListCache(req.user._id);
   res.json({ success: true, locked: false });
 });
 
 // POST /api/chats/locked  { pin }  — reveal locked chats after verifying the PIN
 export const getLockedChats = asyncHandler(async (req, res) => {
   if (!(await verifyTwoStepPin(req.user._id, req.body.pin))) throw new ApiError(403, 'Incorrect PIN.');
+
+  const cached = await getCachedLockedChatList(req.user._id);
+  if (cached) return res.json({ success: true, chats: cached });
+
   const locked = (req.user.lockedChats || []).map(String);
   const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $in: locked } }).sort({ updatedAt: -1 })
+    Chat.find({ 'participants.user': req.user._id, _id: { $in: locked } }).sort({ updatedAt: -1 }).lean()
   );
   const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
-  const withMeta = chats.map((chat) => ({ ...chat.toObject(), unreadCount: counts.get(String(chat._id)) || 0, locked: true }));
+  const withMeta = chats.map((chat) => ({ ...chat, unreadCount: counts.get(String(chat._id)) || 0, locked: true }));
+
+  setCachedLockedChatList(req.user._id, withMeta);
   res.json({ success: true, chats: withMeta });
 });
 
@@ -159,6 +189,7 @@ export const clearChat = asyncHandler(async (req, res) => {
     { chat: req.params.id },
     { $addToSet: { deletedFor: req.user._id } }
   );
+  invalidateChatListCache(req.user._id); // unreadCount/preview for this user changes
   res.json({ success: true, message: 'Chat cleared for you.' });
 });
 
@@ -166,6 +197,7 @@ export const clearChat = asyncHandler(async (req, res) => {
 export const deleteChat = asyncHandler(async (req, res) => {
   const chat = await Chat.findById(req.params.id);
   if (!chat) throw new ApiError(404, 'Chat not found.');
+  const priorParticipants = chat.participants.map((p) => p.user);
 
   if (chat.isGroup) {
     chat.participants = chat.participants.filter((p) => String(p.user) !== String(req.user._id));
@@ -175,5 +207,6 @@ export const deleteChat = asyncHandler(async (req, res) => {
     // For 1:1, just clear it for this user.
     await Message.updateMany({ chat: chat._id }, { $addToSet: { deletedFor: req.user._id } });
   }
+  invalidateChatListCache(chat.isGroup ? priorParticipants : req.user._id);
   res.json({ success: true, message: 'Chat removed.' });
 });

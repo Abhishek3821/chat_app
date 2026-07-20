@@ -63,5 +63,12 @@ export const serveUpload = asyncHandler(async (req, res) => {
 
   const filePath = path.join(uploadDir, filename);
   if (!filePath.startsWith(uploadDir) || !fs.existsSync(filePath)) throw new ApiError(404, 'File not found.');
+  // `private`, never `public`: this is per-user access-controlled media (chat
+  // attachments gated by chat membership, status media gated by audience), so a
+  // SHARED cache (CDN/corporate proxy) must never store a copy that could be
+  // replayed to someone else. `private` still lets the REQUESTING browser skip
+  // re-downloading the same image/video on scrollback/reopen — a real, common
+  // case in a chat UI — without weakening the access control at all.
+  res.set('Cache-Control', 'private, max-age=3600');
   res.sendFile(filePath);
 });

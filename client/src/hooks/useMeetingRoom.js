@@ -30,6 +30,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const [chatMessages, setChatMessages] = useState([]); // [{ id, socketId, name, avatar, text, at, mine }]
   const [reactions, setReactions] = useState([]); // transient floating [{ id, socketId, emoji }]
   const [raisedHands, setRaisedHands] = useState({}); // socketId ('me' for self) -> true
+  const [knocks, setKnocks] = useState([]); // host only: [{ socketId, userId, name, avatar }] waiting to be admitted
   const handRaised = !!raisedHands.me;
   const reactSeq = useRef(0);
 
@@ -43,6 +44,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const recRef = useRef(null); // active recording context
   const startRecordingRef = useRef(null); // late-bound so the join callback can auto-start
   const cancelRef = useRef(null); // clears a pending "waiting for host" retry
+  const passRef = useRef(null); // signed admission pass (set when the host admits us)
   const closedRef = useRef(false);
   useEffect(() => { remotesRef.current = remotes; }, [remotes]);
 
@@ -187,6 +189,18 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       toast.error(`${by || 'The host'} removed you from the meeting`);
       setStatus('left');
     };
+    // Someone is knocking (host only — the server sends this just to host sockets).
+    const onKnock = (k) => {
+      if (String(k?.meetingId) !== String(meetingId) || !k?.socketId) return;
+      setKnocks((prev) => (prev.some((x) => x.socketId === k.socketId) ? prev : [...prev, k]));
+      // A knock that's never answered shouldn't pile up forever.
+      setTimeout(() => setKnocks((prev) => prev.filter((x) => x.socketId !== k.socketId)), 90000);
+    };
+    // Another of the host's tabs already admitted/denied this knock.
+    const onKnockHandled = ({ meetingId: mid, socketId }) => {
+      if (String(mid) !== String(meetingId)) return;
+      setKnocks((prev) => prev.filter((x) => x.socketId !== socketId));
+    };
 
     (async () => {
       try {
@@ -212,10 +226,13 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:hand', onHand);
       socket.on('meeting:force-mute', onForceMute);
       socket.on('meeting:removed', onRemoved);
+      socket.on('meeting:knock', onKnock);
+      socket.on('meeting:knock-handled', onKnockHandled);
 
       let waitTimer = null;
+      let knockTimer = null;
       let joinedOnce = false;
-      const join = () => socket.emit('meeting:join', { meetingId }, (res) => {
+      const join = () => socket.emit('meeting:join', { meetingId, pass: passRef.current || undefined }, (res) => {
         if (cancelled) return;
         if (!res?.ok) {
           // "Join anytime" is off and the host isn't here yet → wait & retry.
@@ -224,8 +241,18 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
             waitTimer = setTimeout(join, 4000);
             return;
           }
+          // Ask-to-join: we knocked — hold here until the host admits or denies.
+          if (res?.knocking) {
+            setStatus('knocking'); setMediaError(res.error || '');
+            if (knockTimer) clearTimeout(knockTimer);
+            knockTimer = setTimeout(() => {
+              if (!cancelled && !joinedOnce) { setStatus('denied'); setMediaError('No one let you in. Try again later.'); }
+            }, 90000);
+            return;
+          }
           setStatus('error'); setMediaError(res?.error || 'Could not join the meeting.'); return;
         }
+        if (knockTimer) { clearTimeout(knockTimer); knockTimer = null; }
         const isRejoin = joinedOnce;
         joinedOnce = true;
         setMediaError(null);
@@ -237,6 +264,24 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         // Host-controlled auto-record: begin a local recording on join.
         if (!isRejoin && autoRecord) setTimeout(() => startRecordingRef.current?.(), 800);
       });
+      // The host let us in → re-join carrying the signed pass. Denied → dead end.
+      const onAdmitted = ({ meetingId: mid, pass }) => {
+        if (cancelled || String(mid) !== String(meetingId) || joinedOnce) return;
+        passRef.current = pass || null;
+        if (knockTimer) { clearTimeout(knockTimer); knockTimer = null; }
+        setStatus('connecting');
+        join();
+      };
+      const onDenied = ({ meetingId: mid }) => {
+        if (cancelled || String(mid) !== String(meetingId) || joinedOnce) return;
+        if (knockTimer) { clearTimeout(knockTimer); knockTimer = null; }
+        setStatus('denied');
+        setMediaError('The host didn’t let you in.');
+      };
+      socket.on('meeting:admitted', onAdmitted);
+      socket.on('meeting:denied', onDenied);
+      const offAdmission = () => { socket.off('meeting:admitted', onAdmitted); socket.off('meeting:denied', onDenied); };
+
       const onConnect = () => {
         if (cancelled || closedRef.current) return;
         if (!joinedOnce) return join();
@@ -252,7 +297,12 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         join();
       };
       socket.on('connect', onConnect);
-      cancelRef.current = () => { if (waitTimer) clearTimeout(waitTimer); socket.off('connect', onConnect); };
+      cancelRef.current = () => {
+        if (waitTimer) clearTimeout(waitTimer);
+        if (knockTimer) clearTimeout(knockTimer);
+        offAdmission();
+        socket.off('connect', onConnect);
+      };
       if (socket.connected) join();
     })();
 
@@ -271,6 +321,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:hand', onHand);
       socket.off('meeting:force-mute', onForceMute);
       socket.off('meeting:removed', onRemoved);
+      socket.off('meeting:knock', onKnock);
+      socket.off('meeting:knock-handled', onKnockHandled);
       if (screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: false });
       socket.emit('meeting:leave', { meetingId });
       peersRef.current.forEach((pc) => { try { pc.close(); } catch { /* noop */ } });
@@ -437,11 +489,18 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     getSocket()?.emit('meeting:remove', { meetingId, to: socketId });
     closePeer(socketId);
   }, [meetingId, closePeer]);
+  // Host verdict on a knocking guest (admit or deny) — clears the prompt locally;
+  // the server tells the host's other tabs via meeting:knock-handled.
+  const admitGuest = useCallback((knock, allow) => {
+    if (!knock?.socketId) return;
+    getSocket()?.emit('meeting:admit', { meetingId, socketId: knock.socketId, userId: knock.userId, allow: !!allow });
+    setKnocks((prev) => prev.filter((k) => k.socketId !== knock.socketId));
+  }, [meetingId]);
 
   return {
     localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
-    chatMessages, reactions, raisedHands, handRaised,
+    chatMessages, reactions, raisedHands, handRaised, knocks, admitGuest,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
   };
 }

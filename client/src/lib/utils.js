@@ -74,6 +74,22 @@ export function formatBytes(bytes = 0) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
+/**
+ * Responsive column count for a video-tile grid (calls + meeting rooms), tuned
+ * across every Tailwind breakpoint (xs default, sm/md/lg/xl) so tiles stay a
+ * sensible size whether there are 2 people on a phone or 12 on a monitor.
+ * `total` = every visible tile, including your own.
+ */
+export function videoGridCols(total) {
+  if (total <= 1) return 'grid-cols-1';
+  if (total === 2) return 'grid-cols-1 sm:grid-cols-2';
+  if (total <= 4) return 'grid-cols-2';
+  if (total <= 6) return 'grid-cols-2 sm:grid-cols-3';
+  if (total <= 9) return 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-3';
+  if (total <= 12) return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
+  return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5';
+}
+
 /** Deterministic gradient per id/name — used for avatars & accents. */
 const GRADIENTS = [
   'from-brand-500 to-violet-500',

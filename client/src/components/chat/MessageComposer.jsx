@@ -1,9 +1,7 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, lazy, Suspense } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import EmojiPicker, { Theme } from 'emoji-picker-react';
-import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2, BarChart3, Eye, Radio, ShoppingBag } from 'lucide-react';
-import GifPicker from './GifPicker';
+import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2, BarChart3, Eye, Radio, ShoppingBag, RotateCcw } from 'lucide-react';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useBusiness } from '../../store/useBusiness';
@@ -15,6 +13,12 @@ import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
 import Switch from '../ui/Switch';
+
+// Both pickers are opened rarely (a click toggle, not on mount) and are sizable
+// on their own (emoji-picker-react ships its full emoji dataset) — loading them
+// only when opened keeps them out of the initial bundle entirely.
+const EmojiPicker = lazy(() => import('emoji-picker-react'));
+const GifPicker = lazy(() => import('./GifPicker'));
 
 export default function MessageComposer({ chatId, replyTo, onClearReply, onSend, mentionables = [] }) {
   const theme = useUI((s) => s.theme);
@@ -36,6 +40,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const [recording, setRecording] = useState(false);
   const [recSeconds, setRecSeconds] = useState(0);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState(null); // { blob, url } captured photo awaiting confirm
   const [pollOpen, setPollOpen] = useState(false);
   const [poll, setPoll] = useState({ question: '', options: ['', ''], multi: false });
   const [viewOnceNext, setViewOnceNext] = useState(false); // send the next photo as view-once
@@ -313,12 +318,21 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     }
   };
 
+  const clearSnapshot = () => {
+    setSnapshot((s) => {
+      if (s) URL.revokeObjectURL(s.url);
+      return null;
+    });
+  };
+
   const closeCamera = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    clearSnapshot();
     setCameraOpen(false);
   };
 
+  // Capture freezes the frame into a preview; the stream stays live so Retake is instant.
   const capturePhoto = async () => {
     const video = videoRef.current;
     if (!video) return;
@@ -326,10 +340,15 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     canvas.width = video.videoWidth || 720;
     canvas.height = video.videoHeight || 720;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    closeCamera();
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.9));
-    if (!blob) return;
-    const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    if (!blob) return toast.error('Could not capture photo.');
+    setSnapshot({ blob, url: URL.createObjectURL(blob) });
+  };
+
+  const sendSnapshot = async () => {
+    if (!snapshot) return;
+    const file = new File([snapshot.blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    closeCamera();
     setUploading(true);
     try {
       const attachments = await uploadFiles([file]);
@@ -435,12 +454,28 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
       <AnimatePresence>
         {cameraOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-4">
-            <video ref={videoRef} playsInline muted className="max-h-[70vh] w-full max-w-lg rounded-2xl bg-black object-contain" />
-            <div className="mt-6 flex items-center gap-6">
-              <button onClick={closeCamera} className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"><X size={22} /></button>
-              <button onClick={capturePhoto} className="h-16 w-16 rounded-full border-4 border-white bg-white/30 transition-transform active:scale-90" aria-label="Capture" />
-              <span className="h-12 w-12" />
-            </div>
+            {/* Keep the <video> mounted (hidden) during preview so the stream survives Retake. */}
+            <video ref={videoRef} playsInline muted className={cn('max-h-[70vh] w-full max-w-lg rounded-2xl bg-black object-contain', snapshot && 'hidden')} />
+            {snapshot && (
+              <img src={snapshot.url} alt="Captured" className="max-h-[70vh] w-full max-w-lg rounded-2xl bg-black object-contain" />
+            )}
+            {snapshot ? (
+              <div className="mt-6 flex items-center gap-6">
+                <button onClick={closeCamera} className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20" aria-label="Close"><X size={22} /></button>
+                <button onClick={clearSnapshot} className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-3 text-sm font-semibold text-white hover:bg-white/20">
+                  <RotateCcw size={18} /> Retake
+                </button>
+                <button onClick={sendSnapshot} className="grid h-14 w-14 place-items-center rounded-full bg-brand-500 text-white shadow-lg transition-transform hover:bg-brand-600 active:scale-90" aria-label="Send photo">
+                  <SendHorizontal size={22} />
+                </button>
+              </div>
+            ) : (
+              <div className="mt-6 flex items-center gap-6">
+                <button onClick={closeCamera} className="grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20" aria-label="Close"><X size={22} /></button>
+                <button onClick={capturePhoto} className="h-16 w-16 rounded-full border-4 border-white bg-white/30 transition-transform active:scale-90" aria-label="Capture" />
+                <span className="h-12 w-12" />
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -470,25 +505,29 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         )}
       </AnimatePresence>
 
-      {/* Emoji picker */}
+      {/* Emoji picker — lazy-loaded (its dataset only needs to download once opened) */}
       <AnimatePresence>
         {showEmoji && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 mb-2 z-30">
-            <EmojiPicker theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT} width={320} height={380} onEmojiClick={(e) => setText((t) => { const next = t + e.emoji; saveDraftDebounced(next); return next; })} lazyLoadEmojis previewConfig={{ showPreview: false }} />
+            <Suspense fallback={<div className="grid h-[380px] w-[320px] place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
+              <EmojiPicker theme={theme === 'dark' ? 'dark' : 'light'} width={320} height={380} onEmojiClick={(e) => setText((t) => { const next = t + e.emoji; saveDraftDebounced(next); return next; })} lazyLoadEmojis previewConfig={{ showPreview: false }} />
+            </Suspense>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* GIF picker (Tenor) */}
+      {/* GIF picker (Tenor) — lazy-loaded */}
       <AnimatePresence>
         {showGif && (
           <>
             <div className="fixed inset-0 z-20" onClick={() => setShowGif(false)} />
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 z-30 mb-2">
-              <GifPicker
-                onClose={() => setShowGif(false)}
-                onPick={(gif) => { onSend({ content: '', type: 'image', attachments: [gif] }); setShowGif(false); }}
-              />
+              <Suspense fallback={<div className="grid h-[380px] w-[320px] place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
+                <GifPicker
+                  onClose={() => setShowGif(false)}
+                  onPick={(gif) => { onSend({ content: '', type: 'image', attachments: [gif] }); setShowGif(false); }}
+                />
+              </Suspense>
             </motion.div>
           </>
         )}

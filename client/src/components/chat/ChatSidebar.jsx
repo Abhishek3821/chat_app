@@ -17,7 +17,7 @@ const FILTERS = ['All', 'Unread', 'Groups', 'Archived', 'Locked'];
 
 // Memoized with a stable onOpen callback: one incoming message re-renders only
 // the affected row (its chat object changes), not every row in the list.
-const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser }) {
+const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, animateReorder = true }) {
   const d = getChatDisplay(chat, currentUser);
   const peerOnline = useChat((s) => (d.peer?._id ? Boolean(s.online[d.peer._id]) : false));
   const isOnline = peerOnline || d.isOnline;
@@ -27,7 +27,10 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser }) {
   const sentByMe = lastSenderId != null && String(lastSenderId) === String(currentUser?._id || 'me');
   return (
     <motion.button
-      layout
+      // `layout` makes framer-motion FLIP-measure EVERY row on any reorder (a
+      // new message bumping a chat to the top) — real cost on a long list. Only
+      // the near-top rows (where reordering is actually visible/likely) get it.
+      layout={animateReorder}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       onClick={() => onOpen(chat._id)}
@@ -150,14 +153,14 @@ export default function ChatSidebar() {
                 <Pin size={11} className="mr-1 inline" /> Pinned
               </div>
             )}
-            {pinned.map((c) => (
-              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} />
+            {pinned.map((c, i) => (
+              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} animateReorder={i < 30} />
             ))}
             {pinned.length > 0 && recent.length > 0 && (
               <div className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-content-muted">Recent</div>
             )}
-            {recent.map((c) => (
-              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} />
+            {recent.map((c, i) => (
+              <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} animateReorder={i < 30} />
             ))}
             {filtered.length === 0 && (
               <p className="px-4 py-10 text-center text-sm text-content-muted">No chats found.</p>

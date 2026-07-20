@@ -27,6 +27,14 @@ export default defineConfig({
           // LiveKit is only used inside the (lazy) meeting room — keep it out of
           // the eager vendor bundle so it loads only when someone joins a meeting.
           if (id.includes('livekit-client') || id.includes('@livekit')) return 'livekit';
+          // emoji-picker-react is only ever reached via a dynamic import() (the
+          // emoji button toggle, not on mount) — returning undefined here lets
+          // Rollup fall through to its OWN automatic splitting for dynamically-
+          // imported modules, giving it a separate async chunk. Forcing it into
+          // 'vendor' (the blanket rule below) would silently defeat the lazy()
+          // call entirely, since a manualChunks assignment overrides Rollup's
+          // dynamic-import chunking.
+          if (id.includes('emoji-picker-react')) return undefined;
           return 'vendor';
         },
       },
