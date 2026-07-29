@@ -2,7 +2,7 @@
    Dependency-free; handles push display/click routing AND caches the app so it
    opens (installed, like a native app) without a network connection. */
 
-const CACHE = 'cc-shell-v1';
+const CACHE = 'cc-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/logo.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -73,7 +73,15 @@ self.addEventListener('push', (event) => {
     renotify: Boolean(data.tag),
     data: data.data || {},
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  // The server pushes to every recipient regardless of whether they have the app
+  // open. If a window is visible right now the page is already alerting the user
+  // in-app, so showing this too would double-notify.
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      if (wins.some((w) => w.visibilityState === 'visible' && w.focused)) return undefined;
+      return self.registration.showNotification(title, options);
+    })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

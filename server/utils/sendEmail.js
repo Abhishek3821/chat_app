@@ -36,10 +36,19 @@ function makeTransport(port) {
     port,
     secure: port === 465, // 465 = implicit TLS; 587/2525 = STARTTLS
     auth: { user, pass },
+    // Pooled + kept alive. The TLS handshake is ~2.5s of the ~3s a single OTP
+    // send took, and without a pool it was paid again on every request.
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 200,
+    // Gmail/Outlook publish AAAA records. On a host with half-working IPv6 the
+    // connect attempt hangs until it times out, which surfaces to the user as
+    // "the email server is unreachable" even though IPv4 is fine.
+    family: 4,
     // Fail fast instead of hanging a request if the SMTP host is unreachable.
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 20_000,
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 15_000,
   });
 }
 
@@ -78,14 +87,32 @@ async function sendWithFallback(mail) {
   } catch (err) {
     if (!isConnectionError(err)) throw err;
     const primary = smtpEnv().port;
+    // A dropped pool socket or a one-off network blip looks identical to a
+    // blocked port. Rebuild the transport and retry the SAME port once before
+    // concluding the port itself is unreachable.
+    console.warn(`⚠️  SMTP send failed (${err.code || err.message}) — reconnecting on ${primary}…`);
+    try {
+      transporter?.close?.();
+      transporter = makeTransport(primary);
+      return await transporter.sendMail(mail);
+    } catch (retryErr) {
+      if (!isConnectionError(retryErr)) throw retryErr;
+    }
     const alternate = primary === 465 ? 587 : 465;
-    console.warn(`⚠️  SMTP port ${primary} unreachable (${err.code || err.message}) — retrying on ${alternate}…`);
+    console.warn(`⚠️  SMTP port ${primary} unreachable — retrying on ${alternate}…`);
     const fallback = makeTransport(alternate);
     const info = await fallback.sendMail(mail); // throws to caller if this fails too
+    transporter?.close?.();
     transporter = fallback; // it worked — use this port from now on
     console.log(`✅ SMTP fallback to port ${alternate} succeeded.`);
     return info;
   }
+}
+
+/** Release pooled SMTP sockets so the process can exit cleanly. */
+export function closeEmailTransport() {
+  transporter?.close?.();
+  transporter = null;
 }
 
 /** Verify email connectivity/credentials. Used at boot and by /api/health. */
@@ -190,6 +217,33 @@ export async function sendEmail({ to, subject, html, text, attachments }) {
     ...(attachments?.length ? { attachments } : {}),
   });
   return { sent: true, messageId: info.messageId };
+}
+
+/**
+ * Send, but stop *waiting* after `deadlineMs`. Resolves with:
+ *   'sent'    — delivered to the relay;
+ *   'logged'  — no mailer configured (dev fallback);
+ *   'failed'  — the relay rejected it (`error` is set, so callers can classify);
+ *   'pending' — still in flight at the deadline. The send continues in the
+ *               background and the mail still arrives — the caller just stops
+ *               blocking on it, which is what keeps OTP requests feeling instant.
+ */
+export function sendEmailWithin(mail, deadlineMs = 800) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ state: 'pending' }), deadlineMs);
+    timer.unref?.();
+    sendEmail(mail).then(
+      (r) => {
+        clearTimeout(timer);
+        resolve({ state: r?.sent ? 'sent' : 'logged' });
+      },
+      (err) => {
+        clearTimeout(timer);
+        console.error('❌ Email send failed:', err.message);
+        resolve({ state: 'failed', error: err }); // ignored if the deadline already won
+      }
+    );
+  });
 }
 
 export function otpEmailTemplate(name, otp) {

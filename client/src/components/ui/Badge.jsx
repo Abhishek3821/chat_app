@@ -27,7 +27,7 @@ export function Chip({ children, active, className, ...props }) {
   return (
     <button
       className={cn(
-        'rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors',
+        'ring-brand rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors',
         active ? 'bg-brand-gradient text-white shadow-glow' : 'bg-content/5 text-content-muted hover:text-content',
         className
       )}

@@ -10,6 +10,7 @@ import ErrorBoundary from '../ErrorBoundary';
 import { useChat } from '../../store/useChat';
 import { useWorkspace } from '../../store/useWorkspace';
 import { useSocket } from '../../hooks/useSocket';
+import { askPermissionOnFirstGesture } from '../../lib/notify';
 
 export default function AppLayout() {
   const loadChats = useChat((s) => s.loadChats);
@@ -22,6 +23,10 @@ export default function AppLayout() {
     loadChats();
     loadWorkspace(); // so nav can surface team-only tools (Business)
   }, [loadChats, loadWorkspace]);
+
+  // Ask for desktop-notification permission on the first interaction after
+  // signing in (browsers reject the prompt outside a user gesture).
+  useEffect(askPermissionOnFirstGesture, []);
 
   // On the chat page the conversation region handles its own scrolling;
   // other pages get a scrollable content area.

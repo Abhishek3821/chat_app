@@ -60,11 +60,15 @@ export function vapidPublicKey() {
  */
 export async function sendPushToUser(userId, payload) {
   if (!configured || !userId) return 0;
-  // Do-Not-Disturb: the in-app bell still records the notification, but we don't
-  // ping the user's devices while they're in DND.
+  // Do-Not-Disturb and per-chat mute: the in-app bell still records the
+  // notification, but we don't ping the user's devices.
   try {
-    const u = await User.findById(userId).select('presenceState').lean();
+    const u = await User.findById(userId).select('presenceState mutedChats settings.notifications').lean();
     if (u?.presenceState === 'dnd') return 0;
+    const chatId = payload?.data?.chatId;
+    if (chatId && (u?.mutedChats || []).some((c) => String(c) === String(chatId))) return 0;
+    if (u?.settings?.notifications?.messages === false && payload?.type === 'message') return 0;
+    if (u?.settings?.notifications?.groups === false && payload?.type === 'group_message') return 0;
   } catch {
     /* if the lookup fails, fall through and deliver */
   }

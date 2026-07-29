@@ -16,6 +16,8 @@ export function notifyUser(userId, { from, type = 'system', title, body, url = '
   enqueue('notification.create', { user: uid, from, type, title, body, data });
   enqueue('push.send', {
     userId: uid,
-    payload: { title, body, tag, data: { ...data, url } },
+    // `type` rides along so the sender can apply the recipient's per-category
+    // notification preferences before waking their devices.
+    payload: { type, title, body, tag, data: { ...data, url } },
   });
 }

@@ -5,6 +5,7 @@ import { useUI } from '../store/useUI';
 import { useAuth } from '../store/useAuth';
 import { useChat } from '../store/useChat';
 import { emitSocket } from './useSocket';
+import { startRingtone, startRingback, stopRingtone } from '../lib/sounds';
 
 /**
  * Real WebRTC audio/video calling — 1:1 and small group ("add people").
@@ -831,6 +832,18 @@ export function useWebRTC(call) {
   }, [createPeer, flushCandidates, closePeer, teardown, peerId, emitSig, isGroupCall, myId]);
 
   useEffect(() => () => cleanup(), [cleanup]);
+
+  /**
+   * Ring audibly while the call is ringing, and stop the instant it isn't.
+   * Driven off `status` rather than the individual accept/reject/cancel/timeout
+   * events so no terminal path can leave the ringtone playing.
+   */
+  useEffect(() => {
+    if (status === 'incoming') startRingtone();
+    else if (status === 'calling') startRingback();
+    else stopRingtone();
+    return stopRingtone;
+  }, [status]);
 
   const toggleMute = useCallback(() => {
     const s = localStreamRef.current;

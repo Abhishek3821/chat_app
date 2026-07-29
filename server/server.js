@@ -17,7 +17,7 @@ import { apiLimiter } from './middleware/rateLimit.js';
 import { mongoSanitize } from './middleware/sanitize.js';
 import { csrfGuard, isAllowedOrigin } from './middleware/csrf.js';
 import { serveUpload } from './controllers/mediaController.js';
-import { verifyEmailTransport } from './utils/sendEmail.js';
+import { verifyEmailTransport, closeEmailTransport, isEmailConfigured } from './utils/sendEmail.js';
 import { initSocket } from './socket/index.js';
 import { getAdapterPair, redisEnabled } from './utils/redis.js';
 import { initQueue } from './utils/queue.js';
@@ -64,9 +64,11 @@ function validateEnv() {
   }
   // Email verification with no mail transport = users can never receive their
   // code (in production the OTP is not returned in the response). Surface it.
-  if (process.env.ENABLE_EMAIL_VERIFICATION === 'true' && !process.env.EMAIL_HOST) {
-    const msg = 'ENABLE_EMAIL_VERIFICATION=true but no EMAIL_HOST is configured — signups cannot receive their verification code.';
-    if (isProd) console.error(`❌ ${msg} Configure SMTP (EMAIL_*) or disable verification.`);
+  // Checked via isEmailConfigured() so the SMTP_* aliases and BREVO_API_KEY
+  // count — reading EMAIL_HOST alone warned about a perfectly working mailer.
+  if (process.env.ENABLE_EMAIL_VERIFICATION === 'true' && !isEmailConfigured()) {
+    const msg = 'ENABLE_EMAIL_VERIFICATION=true but no mail transport is configured — signups cannot receive their verification code.';
+    if (isProd) console.error(`❌ ${msg} Configure SMTP (EMAIL_*/SMTP_*) or BREVO_API_KEY, or disable verification.`);
     else console.warn(`⚠️  ${msg} (dev: the code is returned in the API response instead.)`);
   }
 }
@@ -176,6 +178,7 @@ async function shutdown(signal) {
   try {
     await new Promise((resolve) => server.close(resolve)); // stop new HTTP conns
     io.close(); // disconnect sockets (clients auto-reconnect to the new instance)
+    closeEmailTransport(); // release pooled SMTP sockets
     await mongoose.connection.close();
   } catch (err) {
     console.error('Shutdown error:', err?.message || err);

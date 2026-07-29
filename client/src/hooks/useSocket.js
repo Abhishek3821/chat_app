@@ -8,6 +8,8 @@ import { useUI } from '../store/useUI';
 import { useNotifications } from '../store/useNotifications';
 import { useContacts } from '../store/useContacts';
 import { useStatus } from '../store/useStatus';
+import { notifyMessage, messageAlertsAllowed } from '../lib/notify';
+import { playMessageTone } from '../lib/sounds';
 
 /** Short preview of a message for notifications. */
 function preview(m) {
@@ -112,7 +114,8 @@ export function useSocket() {
       if (String(senderId) !== String(userId)) {
         // Acknowledge delivery (✓✓ on the sender's side)...
         socket.emit('message:delivered', { chatId, messageId: message._id });
-        if (chat.activeChatId === chatId && document.visibilityState === 'visible') {
+        const viewingThisChat = chat.activeChatId === chatId && document.visibilityState === 'visible';
+        if (viewingThisChat) {
           // ...and if I'm actively viewing this chat, mark it read (coloured ✓✓).
           socket.emit('message:read', { chatId });
         } else {
@@ -123,6 +126,20 @@ export function useSocket() {
             body: preview(message),
             from: message.sender,
             data: { chatId },
+          });
+        }
+        const isGroup = !!chat.chats.find((c) => c._id === chatId)?.isGroup;
+        // Ping for anything not already on screen. An OS notification only fires
+        // when the window is unfocused (notifyMessage decides) — the sound plays
+        // either way, which is what makes an open-but-scrolled-away tab noticeable.
+        if (!viewingThisChat && messageAlertsAllowed({ isGroup, chatId })) {
+          playMessageTone();
+          notifyMessage({
+            chatId,
+            title: message.sender?.name || 'New message',
+            body: preview(message),
+            icon: message.sender?.avatar,
+            isGroup,
           });
         }
       }
@@ -217,6 +234,7 @@ export function useSocket() {
         return;
       }
       // OS-level notification so an unfocused/backgrounded desktop still rings.
+      // (The audible ringtone is driven by call status inside useWebRTC.)
       notifyIncomingCallDesktop(caller, type);
       // Group call: attach the group chat (for the roster + header) so useWebRTC
       // can mesh-connect to everyone, not just the caller.

@@ -8,7 +8,7 @@ import Session from '../models/Session.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken, generateOTP } from '../utils/token.js';
 import { sendTokenResponse, setAuthCookies, clearAuthCookies, rotateSession, isSessionValid, hashToken } from '../utils/session.js';
-import { sendEmail, otpEmailTemplate, isEmailConfigured, classifySendError } from '../utils/sendEmail.js';
+import { sendEmailWithin, otpEmailTemplate, isEmailConfigured, classifySendError } from '../utils/sendEmail.js';
 import { normalizePhone } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
@@ -85,23 +85,18 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
   );
 
   const emailConfigured = isEmailConfigured();
-  let sent = false;
-  let sendErr = null;
-  try {
-    const r = await sendEmail({
-      to: email,
-      subject: 'Verify your email for ChatConnect',
-      html: otpEmailTemplate('there', otp),
-      text: `Your ChatConnect verification code is ${otp}. It expires in 10 minutes.`,
-    });
-    sent = !!r?.sent;
-  } catch (err) {
-    sendErr = err;
-    console.error('❌ Signup email code failed:', err.message);
-  }
-  // SMTP is set up but the send failed → surface an ACTIONABLE error (which of
-  // credentials / connectivity broke), not a mystery.
-  if (emailConfigured && !sent) {
+  // Wait only long enough to catch a *fast* rejection (bad credentials, refused
+  // recipient). A relay that is merely slow finishes in the background rather
+  // than holding the request open for seconds.
+  const { state, error: sendErr } = await sendEmailWithin({
+    to: email,
+    subject: 'Verify your email for ChatConnect',
+    html: otpEmailTemplate('there', otp),
+    text: `Your ChatConnect verification code is ${otp}. It expires in 10 minutes.`,
+  });
+  // SMTP is set up but the send was REJECTED → surface an ACTIONABLE error
+  // (which of credentials / connectivity broke), not a mystery.
+  if (emailConfigured && state === 'failed') {
     const kind = classifySendError(sendErr);
     throw new ApiError(
       502,
@@ -112,6 +107,7 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
           : 'We could not send the verification email right now. Please try again in a moment.'
     );
   }
+  const sent = state === 'sent' || state === 'pending';
   // In production a missing mailer is a server misconfiguration — say so
   // plainly instead of returning success with no way to get a code.
   if (!emailConfigured && process.env.NODE_ENV === 'production') {
@@ -291,16 +287,12 @@ export const resendOtp = asyncHandler(async (req, res) => {
   user.otpAttempts = 0; // fresh code → reset the lockout counter
   await user.save();
   const emailConfigured = isEmailConfigured();
-  try {
-    await sendEmail({
-      to: user.email,
-      subject: 'Your new ChatConnect code',
-      html: otpEmailTemplate(user.name, otp),
-      text: `Your ChatConnect verification code is ${otp}`,
-    });
-  } catch (err) {
-    console.error('❌ OTP resend email failed:', err.message);
-  }
+  await sendEmailWithin({
+    to: user.email,
+    subject: 'Your new ChatConnect code',
+    html: otpEmailTemplate(user.name, otp),
+    text: `Your ChatConnect verification code is ${otp}`,
+  });
   res.json({
     success: true,
     message: 'A new code has been sent.',
@@ -459,16 +451,12 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
-    try {
-      await sendEmail({
-        to: user.email,
-        subject: 'Reset your ChatConnect password',
-        html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
-        text: `Reset your password: ${resetUrl}`,
-      });
-    } catch (err) {
-      console.error('❌ Password-reset email failed:', err.message);
-    }
+    await sendEmailWithin({
+      to: user.email,
+      subject: 'Reset your ChatConnect password',
+      html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+      text: `Reset your password: ${resetUrl}`,
+    });
   }
   res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
 });
@@ -588,17 +576,13 @@ export const requestTwoStepReset = asyncHandler(async (req, res) => {
   await user.save({ validateBeforeSave: false });
 
   const emailConfigured = isEmailConfigured();
-  try {
-    await sendEmail({
-      to: user.email,
-      subject: 'Reset your ChatConnect PIN',
-      html: otpEmailTemplate(user.name, otp),
-      text: `Your ChatConnect PIN reset code is ${otp}. It expires in 10 minutes.`,
-    });
-  } catch (err) {
-    console.error('❌ PIN-reset email failed:', err.message);
-    securityEvent('twostep.reset.email.failed', req, { userId: String(user._id) });
-  }
+  const { state } = await sendEmailWithin({
+    to: user.email,
+    subject: 'Reset your ChatConnect PIN',
+    html: otpEmailTemplate(user.name, otp),
+    text: `Your ChatConnect PIN reset code is ${otp}. It expires in 10 minutes.`,
+  });
+  if (state === 'failed') securityEvent('twostep.reset.email.failed', req, { userId: String(user._id) });
   securityEvent('twostep.reset.requested', req, { userId: String(user._id) });
   res.json({
     success: true,

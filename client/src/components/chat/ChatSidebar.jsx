@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Search, Plus, Pin, BellOff, Check, CheckCheck, Users, Archive, Lock, LockOpen, Megaphone } from 'lucide-react';
+import { Search, Plus, Pin, BellOff, Check, CheckCheck, Users, Archive, Lock, LockOpen, Megaphone, MessageSquareOff } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { CountBadge, Chip } from '../ui/Badge';
 import { ChatRowSkeleton } from '../ui/Skeleton';
@@ -35,7 +35,7 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
       animate={{ opacity: 1, y: 0 }}
       onClick={() => onOpen(chat._id)}
       className={cn(
-        'group relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors',
+        'ring-brand group relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors',
         active ? 'bg-brand-gradient shadow-glow' : 'hover:bg-content/5'
       )}
     >
@@ -61,6 +61,19 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
     </motion.button>
   );
 });
+
+/** Compact empty-state for the sidebar list — matches the app's visual
+ *  language (icon badge + muted caption) instead of a bare line of text. */
+function SidebarEmpty({ icon: Icon, message }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-content/5 text-content-muted">
+        <Icon size={20} />
+      </span>
+      <p className="text-sm text-content-muted">{message}</p>
+    </div>
+  );
+}
 
 export default function ChatSidebar() {
   // Narrow subscriptions: the sidebar must not re-render on typing ticks,
@@ -163,7 +176,10 @@ export default function ChatSidebar() {
               <ChatRow key={c._id} chat={c} active={c._id === activeChatId} onOpen={openChat} currentUser={currentUser} animateReorder={i < 30} />
             ))}
             {filtered.length === 0 && (
-              <p className="px-4 py-10 text-center text-sm text-content-muted">No chats found.</p>
+              <SidebarEmpty
+                icon={query ? Search : MessageSquareOff}
+                message={query ? `No chats match "${query}"` : filter === 'All' ? 'No chats yet' : `No ${filter.toLowerCase()} chats`}
+              />
             )}
           </>
         )}
@@ -240,10 +256,10 @@ function LockedSection() {
           placeholder="••••"
           className="mt-4 w-full rounded-xl border border-border bg-surface-2 px-3 py-3 text-center text-lg tracking-[0.4em] text-content outline-none focus:border-brand-500"
         />
-        <button type="submit" disabled={busy || pin.length < 4} className="mt-3 w-full rounded-xl bg-brand-gradient py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={busy || pin.length < 4} className="ring-brand mt-3 w-full rounded-xl bg-brand-gradient py-2.5 text-sm font-semibold text-white disabled:opacity-50">
           {busy ? 'Checking…' : 'Reveal'}
         </button>
-        <button type="button" onClick={() => setForgot(true)} className="mt-3 text-xs font-medium text-brand-500 hover:underline">
+        <button type="button" onClick={() => setForgot(true)} className="ring-brand mt-3 rounded px-1 text-xs font-medium text-brand-500 hover:underline">
           Forgot PIN?
         </button>
       </form>
@@ -253,7 +269,7 @@ function LockedSection() {
   return (
     <div className="scrollbar-thin mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
       {lockedChats.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-content-muted">No locked chats.</p>
+        <SidebarEmpty icon={Lock} message="No locked chats yet" />
       ) : (
         lockedChats.map((c) => {
           const d = getChatDisplay(c, currentUser);
@@ -266,7 +282,7 @@ function LockedSection() {
               </div>
               <button
                 onClick={async () => { await unlockChat(c._id); toast.success('Chat unlocked — back in your list.'); }}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-brand-500/10 px-2.5 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-500/20"
+                className="ring-brand inline-flex shrink-0 items-center gap-1 rounded-lg bg-brand-500/10 px-2.5 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-500/20"
               >
                 <LockOpen size={13} /> Unlock
               </button>

@@ -119,6 +119,10 @@ userSchema.pre('save', async function hashPassword(next) {
 });
 
 userSchema.methods.matchPassword = function matchPassword(entered) {
+  // Accounts created without a local password (OAuth) have none to compare —
+  // bcrypt.compare would reject, and login resolves an identifier by trying each
+  // candidate in turn, so a throw here would abort before reaching the real match.
+  if (!this.password || typeof entered !== 'string' || !entered) return Promise.resolve(false);
   return bcrypt.compare(entered, this.password);
 };
 

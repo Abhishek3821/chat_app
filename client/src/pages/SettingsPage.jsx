@@ -253,16 +253,14 @@ const PRESENCE_OPTIONS = [
   { value: 'dnd', label: 'Do not disturb', dot: 'bg-red-600', desc: 'Push & desktop muted' },
 ];
 
+const NOTIFICATION_DEFAULTS = { messages: true, groups: true, calls: true, meetings: true, sound: true };
+
 function NotificationsPanel() {
   const presenceState = useAuth((s) => s.user?.presenceState || 'available');
   const setPresence = useAuth((s) => s.setPresence);
-  const [prefs, setPrefs] = useState({
-    messages: true,
-    groups: true,
-    calls: true,
-    meetings: true,
-    sounds: false,
-  });
+  const updateSettings = useAuth((s) => s.updateSettings);
+  const saved = useAuth((s) => s.user?.settings?.notifications);
+  const prefs = { ...NOTIFICATION_DEFAULTS, ...(saved || {}) };
   // Real, system-level Web Push opt-in for THIS device.
   const [pushState, setPushState] = useState('default'); // default | subscribed | denied | unsupported
   const [pushBusy, setPushBusy] = useState(false);
@@ -292,9 +290,11 @@ function NotificationsPanel() {
     }
   };
 
+  // The server replaces `notifications` wholesale, so send the full object.
   const toggle = (key, label) => (next) => {
-    setPrefs((p) => ({ ...p, [key]: next }));
-    toast.success(`${label} ${next ? 'on' : 'off'}`);
+    updateSettings({ notifications: { ...prefs, [key]: next } })
+      .then(() => toast.success(`${label} ${next ? 'on' : 'off'}`))
+      .catch(() => toast.error(`Could not save ${label.toLowerCase()}.`));
   };
 
   return (
@@ -383,9 +383,9 @@ function NotificationsPanel() {
           <ToggleRow
             icon={Volume2}
             title="Sounds"
-            description="Play a sound for new activity"
-            checked={prefs.sounds}
-            onChange={toggle('sounds', 'Sounds')}
+            description="Play a sound for new messages & incoming calls"
+            checked={prefs.sound}
+            onChange={toggle('sound', 'Sounds')}
           />
         </Rows>
       </Section>
