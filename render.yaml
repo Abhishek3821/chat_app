@@ -44,6 +44,15 @@ services:
       # and the BullMQ job queue. Required before raising numInstances above 1.
       # - key: REDIS_URL
       #   sync: false
+      # Optional: LiveKit SFU for meetings — lets a room scale past the
+      # ~6-person peer-to-peer mesh ceiling. Free tier at livekit.io. Unset →
+      # meetings fall back to the mesh automatically (no code change needed).
+      # - key: LIVEKIT_URL
+      #   sync: false
+      # - key: LIVEKIT_API_KEY
+      #   sync: false
+      # - key: LIVEKIT_API_SECRET
+      #   sync: false
       # Email verification is ON: signup issues an OTP that must be verified
       # before the account can log in. Requires the SMTP vars below to be set in
       # the dashboard (the pipeline is built and verified). PIN reset ("forgot

@@ -32,3 +32,22 @@ export const authLimiter = rateLimit({
   store: makeStore('rl:auth:'),
   message: { success: false, message: 'Too many attempts. Try again in a few minutes.' },
 });
+
+/**
+ * Incoming-webhook ingress (POST /api/hooks/:token) is unauthenticated by
+ * design — the token IS the credential — so it must NOT rely on the generic
+ * per-IP apiLimiter alone: a leaked token can be replayed from many source
+ * IPs (never sharing the same IP bucket), and legitimate high-volume callers
+ * (CI, monitoring) can share an IP/NAT with unrelated traffic. Keying on the
+ * token itself caps abuse of ONE webhook without punishing every other
+ * request from the same network.
+ */
+export const webhookIngressLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30, // generous for CI/alerting bursts, tight enough to stop spam-flooding a group
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: makeStore('rl:hook:'),
+  keyGenerator: (req) => req.params.token || req.ip,
+  message: { success: false, message: 'This webhook is receiving too many requests. Slow down.' },
+});

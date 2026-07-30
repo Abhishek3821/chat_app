@@ -266,7 +266,9 @@ async function main() {
 
   // ── meeting:presenting broadcast ──
   {
-    const created = await http('POST', '/meetings', { token: tokA, body: { title: 'Present test', type: 'video' } });
+    // B is pre-invited (participants: [idB]) so the "ask to join" knock/admit
+    // flow doesn't apply to them — only un-invited link-joiners must knock.
+    const created = await http('POST', '/meetings', { token: tokA, body: { title: 'Present test', type: 'video', participants: [idB] } });
     const meetingId = String(created.data?.meeting?._id || '');
     check('meeting created', !!meetingId, JSON.stringify(created.data)?.slice(0, 120));
     const joinAck = (sock) => new Promise((res) => sock.emit('meeting:join', { meetingId }, res));
@@ -277,6 +279,31 @@ async function main() {
     sockA.emit('meeting:presenting', { meetingId, on: true });
     const p = await presAtB;
     check('meeting:presenting broadcast to the room', typeof p?.socketId === 'string' && p?.on === true);
+    sockA.emit('meeting:leave', { meetingId });
+    sockB.emit('meeting:leave', { meetingId });
+  }
+
+  // ── meeting "ask to join" (knock/admit) — B is NOT invited this time ──
+  {
+    const created = await http('POST', '/meetings', { token: tokA, body: { title: 'Knock test', type: 'video' } });
+    const meetingId = String(created.data?.meeting?._id || '');
+    const hostJoin = await new Promise((res) => sockA.emit('meeting:join', { meetingId }, res));
+    check('host joins instantly (no knock)', hostJoin?.ok === true, JSON.stringify(hostJoin)?.slice(0, 120));
+
+    const knockAtA = waitFor(sockA, 'meeting:knock');
+    const guestKnock = await new Promise((res) => sockB.emit('meeting:join', { meetingId }, res));
+    check('uninvited guest is told to knock', guestKnock?.ok === false && guestKnock?.knocking === true, JSON.stringify(guestKnock)?.slice(0, 120));
+    const knock = await knockAtA;
+    check('host receives the knock event', String(knock?.userId) === String(idB) && typeof knock?.socketId === 'string');
+
+    const admittedAtB = waitFor(sockB, 'meeting:admitted');
+    sockA.emit('meeting:admit', { meetingId, socketId: knock.socketId, userId: idB, allow: true });
+    const admitted = await admittedAtB;
+    check('admitted guest receives a signed pass', typeof admitted?.pass === 'string' && admitted.pass.length > 20);
+
+    const rejoin = await new Promise((res) => sockB.emit('meeting:join', { meetingId, pass: admitted.pass }, res));
+    check('guest joins after admission with the pass', rejoin?.ok === true, JSON.stringify(rejoin)?.slice(0, 120));
+
     sockA.emit('meeting:leave', { meetingId });
     sockB.emit('meeting:leave', { meetingId });
   }

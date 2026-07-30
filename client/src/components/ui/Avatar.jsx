@@ -13,7 +13,7 @@ export default function Avatar({ src, name = '', size = 'md', online, ring, clas
   return (
     <div className={cn('relative shrink-0', className)}>
       {ring && (
-        <span className="absolute -inset-1 rounded-full bg-brand-gradient opacity-80 blur-[1px]" aria-hidden />
+        <span className="absolute -inset-0.5 rounded-full ring-2 ring-brand-500/50" aria-hidden />
       )}
       <div
         className={cn(

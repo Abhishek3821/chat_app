@@ -3,7 +3,9 @@ import crypto from 'crypto';
 
 const rsvpSchema = new mongoose.Schema(
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // Indexed: getMeetings does `{ $or: [{ host }, { 'participants.user' }] }`
+    // on every "my meetings" load — without this it's a full collection scan.
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     response: { type: String, enum: ['going', 'maybe', 'not_going', 'pending'], default: 'pending' },
     // True when this row came from a shareable-link join rather than a real
     // invite. Link-joiners still get the meeting in their list, but they do NOT
@@ -32,7 +34,7 @@ const meetingSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 120 },
     description: { type: String, default: '', maxlength: 1000 },
-    host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     participants: [rsvpSchema],
     chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat' },
 

@@ -33,8 +33,7 @@ export default function AppLayout() {
   const isChat = pathname === '/';
 
   return (
-    <div className="relative flex h-[100dvh] overflow-hidden bg-mesh-light dark:bg-mesh-dark">
-      <div className="pointer-events-none absolute inset-0 bg-[rgb(var(--app-bg))]/60" />
+    <div className="relative flex h-[100dvh] overflow-hidden bg-[rgb(var(--app-bg))]">
       <div className="relative z-10 flex h-full w-full">
         <NavRail />
         <div className="flex min-w-0 flex-1 flex-col">

@@ -154,6 +154,7 @@ function SfuRoom({ meeting, code, me, isHost, rtc, onLeave }) {
     muteOnEntry: meeting.settings?.muteOnEntry,
     autoRecord: meeting.settings?.autoRecord,
     isHost,
+    code,
     rtc,
   });
   return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} />;

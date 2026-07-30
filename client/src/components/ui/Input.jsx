@@ -10,7 +10,7 @@ export const Input = forwardRef(function Input({ className, icon: Icon, ...props
       <input
         ref={ref}
         className={cn(
-          'ring-brand w-full rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm text-content placeholder:text-content-muted transition-colors',
+          'ring-brand w-full rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm text-content placeholder:text-content-muted transition-colors focus:border-brand-400/60',
           Icon && 'pl-11',
           className
         )}
@@ -25,7 +25,7 @@ export const Textarea = forwardRef(function Textarea({ className, ...props }, re
     <textarea
       ref={ref}
       className={cn(
-        'ring-brand w-full resize-none rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm text-content placeholder:text-content-muted',
+        'ring-brand w-full resize-none rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm text-content placeholder:text-content-muted transition-colors focus:border-brand-400/60',
         className
       )}
       {...props}

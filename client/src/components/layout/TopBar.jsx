@@ -75,7 +75,7 @@ export default function TopBar() {
   };
 
   return (
-    <header className="z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/60 px-4 backdrop-blur-xl md:px-6">
+    <header className="frost z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       <div className="flex items-center gap-2 md:hidden">
         <LogoMark size={30} />
       </div>
@@ -85,7 +85,7 @@ export default function TopBar() {
         <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={18} />
         <input
           placeholder="Search people, messages, meetings…"
-          className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-11 pr-4 text-sm placeholder:text-content-muted"
+          className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-11 pr-4 text-sm transition-colors placeholder:text-content-muted focus:border-brand-400/60"
         />
       </div>
 

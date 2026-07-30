@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { listWebhooks, createWebhook, deleteWebhook, receiveWebhook } from '../controllers/webhookController.js';
 import { protect } from '../middleware/auth.js';
+import { webhookIngressLimiter } from '../middleware/rateLimit.js';
 
 // Authenticated management of incoming webhooks (owned via group membership).
 export const webhookRoutes = Router();
@@ -12,4 +13,4 @@ webhookRoutes.delete('/:id', deleteWebhook);
 // PUBLIC ingress: the unguessable token in the URL IS the credential, so this
 // router has NO `protect`. Mounted at /api/hooks.
 export const hookIngressRoutes = Router();
-hookIngressRoutes.post('/:token', receiveWebhook);
+hookIngressRoutes.post('/:token', webhookIngressLimiter, receiveWebhook);

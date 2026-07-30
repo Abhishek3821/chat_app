@@ -111,7 +111,7 @@ export default function ChatSidebar() {
   }, [setActiveChat, setChatListOpen]);
 
   return (
-    <aside className="flex h-full w-full flex-col border-r border-border bg-surface/50 backdrop-blur-xl md:w-[340px] lg:w-[380px]">
+    <aside className="frost flex h-full w-full flex-col border-r border-border/70 md:w-[340px] lg:w-[380px]">
       <div className="flex items-center justify-between px-4 pt-4">
         <h2 className="text-lg font-bold text-content">Chats</h2>
         <div className="flex items-center gap-1.5">
@@ -138,7 +138,7 @@ export default function ChatSidebar() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm placeholder:text-content-muted"
+            className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm transition-colors placeholder:text-content-muted focus:border-brand-400/60"
           />
         </div>
       </div>

@@ -45,7 +45,7 @@ export default function NavRail() {
     : baseItems;
 
   return (
-    <nav className="z-30 hidden h-full w-[76px] shrink-0 flex-col items-center gap-1 border-r border-border bg-surface/60 py-4 backdrop-blur-xl md:flex">
+    <nav className="frost z-30 hidden h-full w-[76px] shrink-0 flex-col items-center gap-1 border-r border-border/70 py-4 md:flex">
       <button onClick={() => navigate('/')} className="mb-3 grid h-11 w-11 place-items-center rounded-2xl transition-transform hover:scale-105">
         <LogoMark size={34} />
       </button>

@@ -7,6 +7,7 @@ import { useChat } from '../../store/useChat';
 import { useBusiness } from '../../store/useBusiness';
 import { useWorkspace } from '../../store/useWorkspace';
 import { emitSocket } from '../../hooks/useSocket';
+import { useViewportSize } from '../../hooks/useViewportSize';
 import { uploadFiles, mediaUrl } from '../../lib/api';
 import { cn, formatDuration } from '../../lib/utils';
 import Avatar from '../ui/Avatar';
@@ -41,6 +42,13 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const [recSeconds, setRecSeconds] = useState(0);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [snapshot, setSnapshot] = useState(null); // { blob, url } captured photo awaiting confirm
+
+  // Emoji/GIF popovers are a fixed 320×380 by design, but that overflows past the
+  // edge of narrow phones (≤375px) since they're anchored at a fixed left offset.
+  // Clamp both dimensions to the actual viewport so they always stay on-screen.
+  const viewport = useViewportSize();
+  const pickerWidth = Math.min(320, viewport.width - 32);
+  const pickerHeight = Math.min(380, Math.round(viewport.height * 0.55));
   const [pollOpen, setPollOpen] = useState(false);
   const [poll, setPoll] = useState({ question: '', options: ['', ''], multi: false });
   const [viewOnceNext, setViewOnceNext] = useState(false); // send the next photo as view-once
@@ -372,7 +380,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   ];
 
   return (
-    <div className="relative shrink-0 border-t border-border bg-surface/60 px-3 py-3 backdrop-blur-xl sm:px-4">
+    <div className="frost relative shrink-0 border-t border-border/70 px-3 py-3 sm:px-4">
       {/* hidden file inputs */}
       <input ref={photoInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => handleFiles(e, 'image')} />
       <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" multiple hidden onChange={(e) => handleFiles(e, 'document')} />
@@ -509,8 +517,8 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
       <AnimatePresence>
         {showEmoji && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 mb-2 z-30">
-            <Suspense fallback={<div className="grid h-[380px] w-[320px] place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
-              <EmojiPicker theme={theme === 'dark' ? 'dark' : 'light'} width={320} height={380} onEmojiClick={(e) => setText((t) => { const next = t + e.emoji; saveDraftDebounced(next); return next; })} lazyLoadEmojis previewConfig={{ showPreview: false }} />
+            <Suspense fallback={<div style={{ width: pickerWidth, height: pickerHeight }} className="grid place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
+              <EmojiPicker theme={theme === 'dark' ? 'dark' : 'light'} width={pickerWidth} height={pickerHeight} onEmojiClick={(e) => setText((t) => { const next = t + e.emoji; saveDraftDebounced(next); return next; })} lazyLoadEmojis previewConfig={{ showPreview: false }} />
             </Suspense>
           </motion.div>
         )}
@@ -522,8 +530,10 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
           <>
             <div className="fixed inset-0 z-20" onClick={() => setShowGif(false)} />
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="absolute bottom-full left-3 z-30 mb-2">
-              <Suspense fallback={<div className="grid h-[380px] w-[320px] place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
+              <Suspense fallback={<div style={{ width: pickerWidth, height: pickerHeight }} className="grid place-items-center rounded-2xl bg-surface-2 shadow-soft-lg"><Loader2 size={22} className="animate-spin text-brand-500" /></div>}>
                 <GifPicker
+                  width={pickerWidth}
+                  height={pickerHeight}
                   onClose={() => setShowGif(false)}
                   onPick={(gif) => { onSend({ content: '', type: 'image', attachments: [gif] }); setShowGif(false); }}
                 />
@@ -598,7 +608,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
             {uploading ? <Loader2 size={22} className="animate-spin text-brand-500" /> : <Plus size={22} />}
           </button>
 
-          <div className="flex flex-1 items-end gap-1 rounded-2xl border border-border bg-surface-2 px-2 py-1">
+          <div className="flex flex-1 items-end gap-1 rounded-2xl border border-border bg-surface-2 px-2 py-1 transition-colors focus-within:border-brand-400/60">
             <button onClick={() => { setShowEmoji((v) => !v); setShowGif(false); setShowAttach(false); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-content-muted hover:text-brand-500">
               <Smile size={21} />
             </button>

@@ -3,22 +3,25 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────
-   ChatConnect — semantic design tokens
+   ChatConnect — "Clean Minimal" design language
+   Flat, quiet surfaces. No decorative background, no heavy glass —
+   just solid panels separated by hairline borders and generous
+   whitespace. One accent colour carries emphasis.
+
    Light & dark are driven by CSS variables so every component
    automatically adapts. Values are "R G B" for Tailwind's
    rgb(var(--x) / <alpha>) syntax.
    ───────────────────────────────────────────────────────────── */
 :root {
-  --surface: 255 255 255;
-  --surface-2: 248 250 252; /* slate-50 */
-  --border: 226 232 240; /* slate-200 */
-  --content: 15 23 42; /* slate-900 */
-  --content-muted: 100 116 139; /* slate-500 */
-  --app-bg: 244 246 251;
+  --surface: 255 255 255; /* panels / cards */
+  --surface-2: 245 246 248; /* inputs / recessed rows */
+  --border: 229 231 235; /* gray-200 hairlines */
+  --content: 17 24 39; /* gray-900 ink */
+  --content-muted: 107 114 128; /* gray-500 */
+  --app-bg: 250 250 251; /* near-white canvas, no colour */
 
-  /* Brand / accent palette (default: Indigo). These are runtime-swappable so
-     the Appearance → Accent color picker actually recolors the whole app. Every
-     `brand-*` Tailwind class and `bg-brand-gradient` resolves through these. */
+  /* Single accent (default: Indigo). Runtime-swappable via the
+     Appearance → Accent picker. Every `brand-*` class resolves here. */
   --brand-50: 238 242 255;
   --brand-100: 224 231 255;
   --brand-200: 199 210 254;
@@ -29,23 +32,25 @@
   --brand-700: 67 56 202;
   --brand-800: 55 48 163;
   --brand-900: 49 46 129;
+  /* Kept for compatibility with existing gradient tokens, but flattened
+     to the single accent so the UI reads solid, not gradient. */
   --grad-from: 99 102 241;
-  --grad-via: 139 92 246;
-  --grad-to: 6 182 212;
+  --grad-via: 99 102 241;
+  --grad-to: 99 102 241;
 }
 
 .dark {
-  --surface: 20 27 45; /* navy-800-ish */
-  --surface-2: 15 23 42; /* navy-900 */
-  --border: 40 51 74;
-  --content: 226 232 240; /* slate-200 */
-  --content-muted: 148 163 184; /* slate-400 */
-  --app-bg: 10 15 30; /* navy-950 */
+  --surface: 24 24 27; /* zinc-900 */
+  --surface-2: 32 33 38;
+  --border: 39 39 46; /* visible hairline in dark */
+  --content: 244 244 245;
+  --content-muted: 161 161 170;
+  --app-bg: 15 15 17; /* neutral near-black, no colour */
 }
 
 /* ── Accent presets ───────────────────────────────────────────────
-   Applied via <html data-accent="…"> (see useUI + App.jsx). Indigo is the
-   :root default above; the rest override the brand scale + gradient stops. */
+   Applied via <html data-accent="…"> (see useUI + App.jsx). Indigo is
+   the :root default; the rest override the brand scale + grad stops. */
 :root[data-accent='violet'] {
   --brand-50: 245 243 255;
   --brand-100: 237 233 254;
@@ -57,9 +62,9 @@
   --brand-700: 109 40 217;
   --brand-800: 91 33 182;
   --brand-900: 76 29 149;
-  --grad-from: 167 139 250;
+  --grad-from: 139 92 246;
   --grad-via: 139 92 246;
-  --grad-to: 124 58 237;
+  --grad-to: 139 92 246;
 }
 :root[data-accent='cyan'] {
   --brand-50: 236 254 255;
@@ -72,9 +77,9 @@
   --brand-700: 14 116 144;
   --brand-800: 21 94 117;
   --brand-900: 22 78 99;
-  --grad-from: 34 211 238;
+  --grad-from: 6 182 212;
   --grad-via: 6 182 212;
-  --grad-to: 8 145 178;
+  --grad-to: 6 182 212;
 }
 :root[data-accent='emerald'] {
   --brand-50: 236 253 245;
@@ -87,9 +92,9 @@
   --brand-700: 4 120 87;
   --brand-800: 6 95 70;
   --brand-900: 6 78 59;
-  --grad-from: 52 211 153;
+  --grad-from: 16 185 129;
   --grad-via: 16 185 129;
-  --grad-to: 5 150 105;
+  --grad-to: 16 185 129;
 }
 :root[data-accent='rose'] {
   --brand-50: 255 241 242;
@@ -102,9 +107,9 @@
   --brand-700: 190 18 60;
   --brand-800: 159 18 57;
   --brand-900: 136 19 55;
-  --grad-from: 251 113 133;
+  --grad-from: 244 63 94;
   --grad-via: 244 63 94;
-  --grad-to: 225 29 72;
+  --grad-to: 244 63 94;
 }
 :root[data-accent='amber'] {
   --brand-50: 255 251 235;
@@ -117,9 +122,9 @@
   --brand-700: 180 83 9;
   --brand-800: 146 64 14;
   --brand-900: 120 53 15;
-  --grad-from: 251 191 36;
+  --grad-from: 245 158 11;
   --grad-via: 245 158 11;
-  --grad-to: 217 119 6;
+  --grad-to: 245 158 11;
 }
 
 @layer base {
@@ -136,30 +141,44 @@
     -webkit-tap-highlight-color: transparent;
   }
   ::selection {
-    @apply bg-brand-500/30;
+    @apply bg-brand-500/25;
   }
 }
 
 @layer components {
-  /* Glassmorphism surfaces */
+  /* Flat surfaces — solid fill + hairline border. The old glass/frost
+     helpers now resolve to the same quiet panel so every screen that
+     referenced them stays consistent without per-file edits. */
   .glass {
-    @apply bg-white/70 dark:bg-white/[0.06] backdrop-blur-xl border border-white/40 dark:border-white/10;
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
   }
   .glass-strong {
-    @apply bg-white/80 dark:bg-white/[0.09] backdrop-blur-2xl border border-white/50 dark:border-white/10;
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
+    box-shadow: 0 8px 30px -14px rgb(17 24 39 / 0.18);
+  }
+  .frost {
+    background: rgb(var(--surface));
   }
   .card {
-    @apply bg-surface border border-border rounded-2xl shadow-soft;
+    @apply rounded-2xl;
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
   }
   .gradient-text {
-    @apply bg-brand-gradient bg-clip-text text-transparent;
+    @apply text-brand-600 dark:text-brand-400;
   }
+  /* Primary action = solid accent, quiet lift on hover. */
   .btn-gradient {
-    @apply bg-brand-gradient text-white shadow-glow hover:shadow-glow-cyan transition-shadow;
+    @apply bg-brand-600 text-white transition-colors;
+  }
+  .btn-gradient:hover {
+    @apply bg-brand-700;
   }
   /* Focus ring used across inputs / buttons */
   .ring-brand {
-    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus-visible:ring-offset-0;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-0;
   }
 }
 
@@ -177,6 +196,9 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
     @apply bg-content-muted/30 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-content-muted/50;
   }
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
@@ -197,12 +219,16 @@
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
     animation: shimmer 1.6s infinite;
   }
+  .text-shadow-glow {
+    text-shadow: none;
+  }
 }
 
-/* Emoji picker (light/dark friendly container) */
+/* Emoji picker (light/dark friendly, flat container) */
 .EmojiPickerReact {
   --epr-bg-color: rgb(var(--surface)) !important;
   --epr-category-label-bg-color: rgb(var(--surface)) !important;
   border: 1px solid rgb(var(--border)) !important;
   border-radius: 1rem !important;
+  box-shadow: 0 8px 30px -14px rgb(17 24 39 / 0.18) !important;
 }

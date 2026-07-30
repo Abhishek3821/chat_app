@@ -9,7 +9,7 @@ import { Search, Loader2, X } from 'lucide-react';
 const TENOR_KEY = import.meta.env.VITE_TENOR_KEY || '';
 const TENOR = 'https://tenor.googleapis.com/v2';
 
-export default function GifPicker({ onPick, onClose }) {
+export default function GifPicker({ onPick, onClose, width = 320, height = 380 }) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -53,7 +53,7 @@ export default function GifPicker({ onPick, onClose }) {
   }, [q]);
 
   return (
-    <div className="glass-strong flex h-[380px] w-[320px] flex-col overflow-hidden rounded-2xl shadow-soft-lg">
+    <div style={{ width, height }} className="glass-strong flex flex-col overflow-hidden rounded-2xl shadow-soft-lg">
       <div className="flex items-center gap-2 border-b border-border p-2.5">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-muted" size={15} />

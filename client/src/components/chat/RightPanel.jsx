@@ -117,7 +117,7 @@ export default function RightPanel({ chat, currentUser }) {
   };
 
   const panel = (
-    <div className="flex h-full w-full flex-col bg-surface/70 backdrop-blur-xl">
+    <div className="flex h-full w-full flex-col bg-surface">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-border px-4">
         <p className="font-semibold text-content">{chat?.isGroup ? 'Group info' : 'Contact info'}</p>
         <button onClick={() => setRightPanel(false)} className="grid h-9 w-9 place-items-center rounded-xl text-content-muted hover:bg-content/5"><X size={18} /></button>
@@ -255,7 +255,7 @@ export default function RightPanel({ chat, currentUser }) {
       <AnimatePresence>
         {rightPanelOpen && (
           <div className="fixed inset-0 z-40 lg:hidden">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setRightPanel(false)} className="absolute inset-0 bg-navy-950/50 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setRightPanel(false)} className="absolute inset-0 bg-black/50" />
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', stiffness: 320, damping: 34 }} className="absolute right-0 top-0 h-full w-full max-w-sm">
               {panel}
             </motion.div>

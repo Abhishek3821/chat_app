@@ -417,10 +417,15 @@ export default function MeetingsPage() {
     }
   };
 
-  // Accept a raw code OR a pasted full link.
+  // Accept a raw code OR a pasted full link. Room codes are always
+  // lowercase-alphanumeric-plus-hyphen (see generateRoomCode server-side) —
+  // stripping anything else before it hits navigate() blocks a malicious
+  // paste (e.g. a backslash/protocol payload) from being used as an open
+  // redirect via useNavigate.
   const goJoin = (e) => {
     e.preventDefault();
-    const code = (joinCode.includes('/meet/') ? joinCode.split('/meet/')[1] : joinCode).trim().replace(/\/+$/, '');
+    const raw = (joinCode.includes('/meet/') ? joinCode.split('/meet/')[1] : joinCode).trim();
+    const code = raw.replace(/[^a-z0-9-]/gi, '');
     if (code) navigate(`/meet/${code}`);
   };
 

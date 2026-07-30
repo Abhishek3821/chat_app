@@ -76,7 +76,7 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
   // ── Search mode: replace the header with a live in-chat message filter ──
   if (searchOpen) {
     return (
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border bg-surface/60 px-3 backdrop-blur-xl sm:px-4">
+      <header className="frost flex h-16 shrink-0 items-center gap-2 border-b border-border/70 px-3 sm:px-4">
         <Search size={18} className="shrink-0 text-content-muted" />
         <input
           autoFocus
@@ -93,7 +93,7 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-surface/60 px-3 backdrop-blur-xl sm:px-4">
+    <header className="frost flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-3 sm:px-4">
       <button onClick={() => setChatListOpen(true)} className="grid h-9 w-9 place-items-center rounded-xl text-content-muted hover:bg-content/5 md:hidden">
         <ArrowLeft size={20} />
       </button>
@@ -116,7 +116,7 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
         {menuOpen && (
           <>
             <button className="fixed inset-0 z-10 cursor-default" onClick={() => setMenuOpen(false)} aria-label="Close menu" />
-            <div className="absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg">
+            <div className="glass-strong absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-2xl py-1">
               <MenuRow icon={Info} label={d.isGroup ? 'Group info' : 'Contact info'} onClick={() => { toggleRightPanel(); setMenuOpen(false); }} />
               <MenuRow icon={Search} label="Search messages" onClick={openSearch} />
               <MenuRow icon={Lock} label="Lock chat" onClick={handleLock} />

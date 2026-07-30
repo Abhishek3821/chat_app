@@ -87,9 +87,9 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = t
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
           onMouseEnter={() => setShowActions(true)}
           className={cn(
-            'relative px-3.5 py-2.5 text-sm shadow-soft',
+            'relative px-3.5 py-2.5 text-sm',
             isMine
-              ? 'rounded-[20px] rounded-br-md bg-brand-gradient text-white'
+              ? 'rounded-[20px] rounded-br-md bg-brand-gradient text-white shadow-glow'
               : 'glass rounded-[20px] rounded-bl-md text-content'
           )}
         >
@@ -146,7 +146,7 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = t
 
           {/* reactions */}
           {reactions.length > 0 && (
-            <div className={cn('absolute -bottom-3 flex gap-0.5 rounded-full border border-border bg-surface px-1.5 py-0.5 shadow-soft', isMine ? 'right-2' : 'left-2')}>
+            <div className={cn('glass absolute -bottom-3 flex gap-0.5 rounded-full px-1.5 py-0.5', isMine ? 'right-2' : 'left-2')}>
               {reactions.slice(0, 3).map((r, i) => (
                 <span key={i} className="text-xs">{r.emoji}</span>
               ))}
@@ -162,7 +162,7 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = t
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className={cn('absolute -top-9 z-10 flex items-center gap-0.5 rounded-full border border-border bg-surface p-1 shadow-soft-lg', isMine ? 'right-0' : 'left-0')}
+              className={cn('glass-strong absolute -top-9 z-10 flex items-center gap-0.5 rounded-full p-1', isMine ? 'right-0' : 'left-0')}
             >
               <button onClick={() => setShowEmoji((v) => !v)} className="grid h-7 w-7 place-items-center rounded-full text-content-muted hover:bg-content/10 hover:text-content"><Smile size={15} /></button>
               <button onClick={() => onReply?.(message)} className="grid h-7 w-7 place-items-center rounded-full text-content-muted hover:bg-content/10 hover:text-content"><Reply size={15} /></button>
@@ -170,7 +170,7 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = t
 
               <AnimatePresence>
                 {showEmoji && (
-                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className="absolute -top-11 left-1/2 flex -translate-x-1/2 gap-1 rounded-full border border-border bg-surface px-2 py-1.5 shadow-soft-lg">
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className="glass-strong absolute -top-11 left-1/2 flex -translate-x-1/2 gap-1 rounded-full px-2 py-1.5">
                     {QUICK.map((e) => (
                       <button key={e} onClick={() => { onReact?.(message._id, e); setShowEmoji(false); }} className="text-lg transition-transform hover:scale-125">{e}</button>
                     ))}
@@ -180,7 +180,7 @@ function MessageBubble({ message, isMine, showAvatar, isGroup, status, isNew = t
 
               <AnimatePresence>
                 {showMenu && (
-                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className={cn('absolute top-9 z-20 w-48 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-soft-lg', isMine ? 'right-0' : 'left-0')}>
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} className={cn('glass-strong absolute top-9 z-20 w-48 overflow-hidden rounded-2xl py-1', isMine ? 'right-0' : 'left-0')}>
                     <MenuItem icon={Reply} label="Reply" onClick={() => { onReply?.(message); setShowMenu(false); }} />
                     <MenuItem icon={Star} label={message.starred ? 'Unstar' : 'Star'} onClick={() => { onStar?.(message); setShowMenu(false); }} />
                     <MenuItem icon={Pin} label={message.pinned ? 'Unpin' : 'Pin'} onClick={() => { onPin?.(message); setShowMenu(false); }} />

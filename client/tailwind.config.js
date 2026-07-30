@@ -23,7 +23,12 @@ export default {
           500: '#8b5cf6', // secondary
           600: '#7c3aed',
         },
+        fuchsia: {
+          500: '#d946ef',
+          600: '#c026d3',
+        },
         cyan: {
+          400: '#22d3ee',
           500: '#06b6d4', // accent
           600: '#0891b2',
         },
@@ -47,18 +52,22 @@ export default {
         xl: '1rem',
         '2xl': '1.25rem',
         '3xl': '1.75rem',
+        '4xl': '2.25rem',
       },
       boxShadow: {
-        soft: '0 4px 24px -8px rgb(15 23 42 / 0.12)',
-        'soft-lg': '0 12px 40px -12px rgb(15 23 42 / 0.25)',
-        glow: '0 0 0 1px rgb(var(--brand-500) / 0.15), 0 8px 32px -8px rgb(var(--brand-500) / 0.35)',
-        'glow-cyan': '0 8px 32px -8px rgb(var(--grad-to) / 0.45)',
+        soft: '0 4px 24px -8px rgb(15 23 42 / 0.1)',
+        'soft-lg': '0 12px 40px -12px rgb(15 23 42 / 0.18)',
+        // Flat design: "glow" is now just a quiet neutral lift, no colour halo.
+        glow: '0 2px 8px -2px rgb(17 24 39 / 0.12)',
+        'glow-lg': '0 6px 20px -6px rgb(17 24 39 / 0.16)',
+        'glow-cyan': '0 2px 8px -2px rgb(17 24 39 / 0.12)',
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, rgb(var(--grad-from)) 0%, rgb(var(--grad-via)) 50%, rgb(var(--grad-to)) 100%)',
-        'brand-gradient-soft': 'linear-gradient(135deg, rgb(var(--grad-from) / 0.12) 0%, rgb(var(--grad-via) / 0.10) 50%, rgb(var(--grad-to) / 0.10) 100%)',
-        'mesh-dark': 'radial-gradient(at 0% 0%, rgb(var(--grad-from) / 0.18) 0px, transparent 50%), radial-gradient(at 100% 0%, rgb(var(--grad-to) / 0.14) 0px, transparent 50%), radial-gradient(at 100% 100%, rgb(var(--grad-via) / 0.16) 0px, transparent 50%)',
-        'mesh-light': 'radial-gradient(at 0% 0%, rgb(var(--grad-from) / 0.10) 0px, transparent 50%), radial-gradient(at 100% 0%, rgb(var(--grad-to) / 0.08) 0px, transparent 50%), radial-gradient(at 100% 100%, rgb(var(--grad-via) / 0.08) 0px, transparent 50%)',
+        // Flattened to a solid accent so the UI reads clean, not gradient.
+        'brand-gradient': 'linear-gradient(rgb(var(--brand-600)), rgb(var(--brand-600)))',
+        'brand-gradient-soft': 'linear-gradient(rgb(var(--brand-500) / 0.1), rgb(var(--brand-500) / 0.1))',
+        'mesh-dark': 'none',
+        'mesh-light': 'none',
       },
       keyframes: {
         'fade-in': {

@@ -1,0 +1,58 @@
+name: CI
+
+# Gate before merge: the client must build, and the server test suites must
+# pass. The suites hit a real MongoDB Atlas cluster (see server/tests/ — they
+# derive an isolated `_e2e` database and drop it, never touching the real one),
+# so they only run when a MONGO_URI secret is configured on this repo. Without
+# it they're skipped with a clear notice rather than failing CI on missing
+# secrets — add the secret (Settings → Secrets and variables → Actions) to
+# turn on full verification.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  client-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  server-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Skip notice (no MONGO_URI secret configured)
+        if: ${{ env.MONGO_URI == '' }}
+        run: echo "::warning::MONGO_URI secret not set — skipping server test suites. Add it in repo Settings → Secrets to enable full CI verification."
+      - name: e2e suite (54 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/e2e.mjs
+      - name: new-features suite
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/new-features.mjs
+      - name: push-pipeline suite (11 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/push-pipeline.mjs

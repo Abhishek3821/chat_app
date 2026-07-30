@@ -7,6 +7,7 @@ import { notifyUser } from '../utils/notify.js';
 import { sendEmail } from '../utils/sendEmail.js';
 import { buildMeetingICS } from '../utils/ics.js';
 import { livekitEnabled, livekitUrl, createLivekitToken } from '../utils/livekit.js';
+import { verifyToken } from '../utils/token.js';
 
 const USER_FIELDS = 'name username avatar email';
 
@@ -196,16 +197,43 @@ export const joinMeetingByCode = asyncHandler(async (req, res) => {
   res.json({ success: true, meeting: populated });
 });
 
-// GET /api/meetings/code/:code/rtc — media-transport config for the room.
+// GET /api/meetings/code/:code/rtc?pass=… — media-transport config for the room.
 // When LiveKit (SFU) is configured, returns a join token + server URL so the
 // client routes media through it (scales past the mesh's ~6-peer ceiling).
 // Otherwise { enabled: false } and the client uses the peer-to-peer mesh.
+//
+// SECURITY: this must enforce the EXACT same admission gate as the socket
+// meeting:join handler (server/socket/index.js) — host, pre-invited
+// participant, askToJoin explicitly disabled, or a signed admission pass from
+// meeting:admit. Un-invited link-joiners get NO token here; without this
+// check, anyone who could resolve a meeting code could mint themselves a
+// working LiveKit token and connect directly to the room's media, completely
+// bypassing the "ask to join" knock/admit flow the socket path enforces.
 export const getMeetingRtc = asyncHandler(async (req, res) => {
   if (!livekitEnabled()) return res.json({ success: true, enabled: false });
   const meeting = await findByCodeOrId(req.params.code);
   if (!meeting) throw new ApiError(404, 'This meeting link is invalid or has expired.');
   if (meeting.status === 'cancelled') throw new ApiError(410, 'This meeting has been cancelled.');
+
   const isHost = String(meeting.host) === String(req.user._id);
+  const isInvited = (meeting.participants || []).some((p) => String(p.user) === String(req.user._id) && !p.viaLink);
+  let admitted = isHost || isInvited || meeting.settings?.askToJoin === false;
+
+  if (!admitted && typeof req.query.pass === 'string' && req.query.pass) {
+    try {
+      const d = verifyToken(req.query.pass);
+      admitted = d.scope === 'meet-admit' && String(d.id) === String(req.user._id) && String(d.meetingId) === String(meeting._id);
+    } catch {
+      admitted = false;
+    }
+  }
+
+  if (!admitted) {
+    // Not an error — the client falls back to knocking over the socket (same
+    // UX as the mesh path), then retries this endpoint with the admit pass.
+    return res.json({ success: true, enabled: true, requiresAdmission: true });
+  }
+
   const token = await createLivekitToken({
     room: `mtg_${meeting._id}`,
     identity: `${req.user._id}_${Math.random().toString(36).slice(2, 8)}`,

@@ -4,10 +4,10 @@ import { cn } from '../../lib/utils';
 
 const variants = {
   primary: 'btn-gradient text-white',
-  glass: 'glass text-content hover:bg-white/80 dark:hover:bg-white/10',
+  glass: 'border border-border bg-surface text-content hover:bg-content/5',
   ghost: 'text-content-muted hover:text-content hover:bg-content/5',
-  outline: 'border border-border text-content hover:bg-content/5',
-  danger: 'bg-red-500/90 text-white hover:bg-red-500 shadow-soft',
+  outline: 'border border-border bg-surface text-content hover:bg-content/5 hover:border-brand-400/50',
+  danger: 'bg-red-500 text-white hover:bg-red-600',
   subtle: 'bg-brand-500/10 text-brand-600 dark:text-brand-300 hover:bg-brand-500/20',
 };
 
@@ -30,7 +30,7 @@ const Button = forwardRef(function Button(
       whileHover={{ scale: 1.01 }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
       className={cn(
-        'ring-brand inline-flex items-center justify-center rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none',
+        'ring-brand inline-flex items-center justify-center rounded-2xl font-semibold transition-all disabled:opacity-50 disabled:pointer-events-none',
         variants[variant],
         sizes[size],
         className
