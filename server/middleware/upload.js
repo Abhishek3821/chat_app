@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { cloudStorageEnabled } from '../utils/storage.js';
+import { ApiError } from '../utils/asyncHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -31,15 +32,43 @@ const storage = cloudStorageEnabled() ? multer.memoryStorage() : diskStorage;
 // lookalikes that merely contain an allowed word (".docm", ".fakepdf", ".xmp4").
 const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/;
 
+export const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_FILES = 10;
+
 function fileFilter(req, file, cb) {
   const extOk = ALLOWED.test(path.extname(file.originalname).toLowerCase());
   // mimetype check is loose because browsers vary; extension is the gate.
   if (extOk) return cb(null, true);
-  cb(new Error('Unsupported file type.'));
+  // ApiError (not a bare Error) so the central handler answers 400 with this
+  // text. A bare Error has no statusCode → 500, and in production the handler
+  // replaces non-operational 5xx messages with a generic string, so the caller
+  // would never learn *why* the upload was refused.
+  cb(new ApiError(400, 'Unsupported file type.'));
 }
 
 export const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
 });
+
+/**
+ * Translate multer's own MulterErrors into user-facing 4xx responses.
+ * Mount directly after the `upload.*()` middleware — multer rejects with a
+ * MulterError carrying only a `code`, which would otherwise surface as a 500.
+ */
+export function handleUploadErrors(err, _req, _res, next) {
+  if (!(err instanceof multer.MulterError)) return next(err);
+  const mb = Math.round(MAX_FILE_BYTES / (1024 * 1024));
+  const messages = {
+    LIMIT_FILE_SIZE: `File too large. Each file must be under ${mb} MB.`,
+    LIMIT_FILE_COUNT: `Too many files. At most ${MAX_FILES} per upload.`,
+    LIMIT_UNEXPECTED_FILE: 'Unexpected file field — use "files".',
+    LIMIT_PART_COUNT: 'Too many parts in the upload.',
+    LIMIT_FIELD_KEY: 'Upload field name is too long.',
+    LIMIT_FIELD_VALUE: 'Upload field value is too long.',
+    LIMIT_FIELD_COUNT: 'Too many fields in the upload.',
+  };
+  const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+  return next(new ApiError(status, messages[err.code] || 'Upload rejected.'));
+}

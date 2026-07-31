@@ -56,3 +56,6 @@ jobs:
       - name: push-pipeline suite (11 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/push-pipeline.mjs
+      - name: upload-validation suite (11 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/upload-validation.mjs

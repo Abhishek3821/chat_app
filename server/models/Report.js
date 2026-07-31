@@ -14,5 +14,13 @@ const reportSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Every admin query on this collection was previously a full scan:
+//   listReports  → find().sort({ createdAt: -1 }).limit(200)  (in-memory sort)
+//   dashboard    → countDocuments({ status: 'open' })         (runs on each load)
+//   deleteAccount→ deleteMany({ reporter })
+reportSchema.index({ createdAt: -1 });
+reportSchema.index({ status: 1, createdAt: -1 });
+reportSchema.index({ reporter: 1 });
+
 const Report = mongoose.model('Report', reportSchema);
 export default Report;

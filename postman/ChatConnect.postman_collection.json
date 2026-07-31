@@ -1,0 +1,5376 @@
+{
+  "info": {
+    "_postman_id": "c0ffee00-1111-4222-8333-chatconnect01",
+    "name": "ChatConnect API",
+    "description": "Complete REST collection for the ChatConnect backend, generated from the verified\nendpoint reference in `docs/API.md` (158 endpoints).\n\n## Quick start\n1. Select the **ChatConnect (local)** environment, or set `baseUrl` yourself.\n2. Run **Auth → POST login** with an existing account. The test script stores\n   `accessToken` and `myUserId` as collection variables automatically.\n3. Every other request inherits `Authorization: Bearer {{accessToken}}`.\n\nTo create a fresh account instead, run in order:\n`Auth → POST email/send-code` → `POST email/verify-code` (stores `emailToken`)\n→ `POST signup`. In development with SMTP unconfigured the code comes back as\n`devOtp` in the send-code response.\n\n## Auth models\n- Most endpoints: session access token (Bearer, or the httpOnly `token` cookie).\n- `Public API v1`: `X-API-Key: {{apiKey}}` — create one under `API keys`.\n- `Webhook ingress`: the token in the URL is the only credential.\n\nPath parameters use collection variables (`{{chatId}}`, `{{messageId}}`, …) —\nfill them in as you go. See `docs/API.md` for full body/response schemas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "mediaToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "emailToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "myUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userEmail",
+      "value": "you@example.com",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "ChangeMe123!",
+      "type": "string"
+    },
+    {
+      "key": "otp",
+      "value": "123456",
+      "type": "string"
+    },
+    {
+      "key": "pin",
+      "value": "1234",
+      "type": "string"
+    },
+    {
+      "key": "chatId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "messageId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contactUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "resourceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "inviteCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "roomCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhookToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "description": "Unauthenticated liveness probe.",
+      "item": [
+        {
+          "name": "GET /api/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Returns db + email configuration status."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "Signup, login, sessions, password + two-step PIN.",
+      "item": [
+        {
+          "name": "POST email/send-code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email/send-code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email",
+                "send-code"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** upserts an `EmailVerification` doc (`otp`, 10-min `expires`, `attempts: 0`, `verifiedAt: null`); logs `securityEvent('signup.email.code')`. Send uses `sendEmailWithin` (only fast rejections are surfaced; slow relays finish in background).",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST email/verify-code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email/verify-code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email",
+                "verify-code"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** `emailToken` is a JWT `{ email, purpose: 'signup-email' }` valid **30 minutes**, required by `/signup` when `ENABLE_EMAIL_VERIFICATION=true`. On success clears the stored OTP and stamps `verifiedAt`. Failed attempts increment `attempts`; `securityEvent` on locked/failure/verified.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  pm.collectionVariables.set('emailToken', pm.response.json().emailToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST signup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "signup"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** username auto-derived from the email local part (retries up to 3× on the unique-index race); `role` forced to `'user'`, `isVerified: true`. Attaches the account via `joinWorkspaceByCode` / `joinPersonalSpace` / `createWorkspaceForUser`. Deletes the `EmailVerification` record. Sets httpOnly `token` (1 h) and `refreshToken` (path `/api/auth`, `REFRESH_TOKEN_DAYS` default 30 d) cookies and creates a `Session` row. `securityEvent('signup.success')`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{password}}\",\n  \"confirmPassword\": \"{{password}}\",\n  \"phone\": \"+919876543210\",\n  \"emailToken\": \"{{emailToken}}\",\n  \"inviteCode\": \"{{inviteCode}}\",\n  \"accountType\": \"personal\",\n  \"workspaceName\": \"example\",\n  \"username\": \"postmantest\",\n  \"avatar\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  pm.collectionVariables.set('accessToken', pm.response.json().token);\n  pm.collectionVariables.set('myUserId', pm.response.json().user._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** a phone identifier may match several stored formats — up to 5 candidates are fetched and bcrypt-compared, so the password disambiguates. Sets `isOnline: true`, `lastSeen`; creates a `Session` + sets both auth cookies. `securityEvent('login.success' | 'login.failure')`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  pm.collectionVariables.set('accessToken', pm.response.json().token);\n  pm.collectionVariables.set('myUserId', pm.response.json().user._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH change-password",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** bumps `tokenVersion`, revokes every live session, re-issues cookies/session for the current device. `securityEvent('password.change' | 'password.change.failure')`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST forgot-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "forgot-password"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** stores `sha256(resetToken)` in `resetPasswordToken` with a 30-minute `resetPasswordExpires`, and emails `${CLIENT_URL}/reset-password/<rawToken>`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** revokes the `Session` matched by `hash(refreshToken)` — or `req.sessionId` if no cookie — so the access token dies immediately; clears both cookies; sets `isOnline: false` and `lastSeen`."
+          },
+          "response": []
+        },
+        {
+          "name": "GET me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** returns `req.user.toSafeJSON()` — the document already loaded by `protect`, no extra query."
+          },
+          "response": []
+        },
+        {
+          "name": "POST refresh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "**Auth:** none via `protect` — authenticated **by the httpOnly `refreshToken` cookie** (deliberately outside `protect` so it works after the access token expires)\n\n**Notes:** rotates the refresh token (old one becomes unusable), mints a new access token bound to the same `sid`, resets both cookies.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  pm.collectionVariables.set('accessToken', pm.response.json().token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST resend-otp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/resend-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "resend-otp"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** writes a new `otp` with 10-min expiry on the User doc and resets `otpAttempts`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST reset-password/:token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/reset-password/:token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "reset-password",
+                ":token"
+              ],
+              "variable": [
+                {
+                  "key": "token",
+                  "value": "{{webhookToken}}",
+                  "description": "token path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** none (the token is the credential)\n\n**Notes:** bumps `tokenVersion` (invalidating every previously issued JWT), revokes **all** tracked sessions, then creates a fresh session for this device. `securityEvent('password.reset')`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sessions"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** only non-revoked, unexpired sessions, sorted by `lastActiveAt` desc. `current` compares against `req.sessionId`. `refreshHash`/`userAgent` are never exposed."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE sessions/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sessions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sessions",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** the update is scoped `{ _id, user: req.user._id }`, so revoking someone else's session silently no-ops; **returns `success: true` even when nothing matched**. Revoking your own current session is allowed."
+          },
+          "response": []
+        },
+        {
+          "name": "POST sessions/revoke-others",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sessions/revoke-others",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sessions",
+                "revoke-others"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** sets `revokedAt` on every other live session of the caller — those devices' access tokens stop working on their next request."
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/change",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/change",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "change"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `securityEvent('twostep.change' | 'twostep.change.failure')`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/disable",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/disable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "disable"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** not rate-limited, unlike `/verify` and `/change`. Clears `twoStepPin` and sets `twoStepEnabled: false`. Any chats in `lockedChats` remain in that array but can no longer be revealed via `POST /api/chats/locked` (which requires an enabled PIN). `securityEvent('twostep.disable')`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/enable",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/enable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "enable"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** stores `bcrypt.hash(pin, 10)` in `twoStepPin` (`select: false`). The same PIN gates chat lock (`POST /api/chats/locked`). `securityEvent('twostep.enable')`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/forgot",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/forgot",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "forgot"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** writes `twoStepResetOtp` + 10-min `twoStepResetExpires`, resets `twoStepResetAttempts`, emails the OTP to the account address. `securityEvent('twostep.reset.requested')` (and `twostep.reset.email.failed` if the send failed)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "reset"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** locked chats stay locked and open with the new PIN. `securityEvent('twostep.reset.success' | '.failure' | '.locked')`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST two-step/verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/two-step/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "two-step",
+                "verify"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** returns `verified: true` immediately (no PIN needed) when `twoStepEnabled` is false. Purely a check — no server-side \"unlocked\" state is stored. `securityEvent('twostep.verify.failure')` on a wrong PIN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST verify-otp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "**Auth:** none\n\n**Notes:** sets `isVerified: true`, clears `otp`/`otpExpires`/`otpAttempts`, creates a session (logs the user in). Deliberately never mints a session on the \"already verified\" branch.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Users & profile",
+      "description": "Profile, privacy, settings, contacts list, per-chat flags.",
+      "item": [
+        {
+          "name": "GET :id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** any user is viewable by id across workspaces (global reachability); presence/identifier privacy applied via `applyPresencePrivacy`. No block check."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE me",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** GDPR-style cascade, no confirmation required. For each chat the user belongs to: direct chats (and chats left with 0 members) are deleted along with all their `Message`s; group chats keep going with the user removed and ownership reassigned to `participants[0]` if the owner left. Then deletes their `Message`s (in surviving groups), `Status`, `ContactRequest` (both directions), `Notification` (as `user` or `from`), `Call` (initiator/participant), `Meeting` (as host) + pulls them from other meetings' participants, `Report` (as reporter), and `$pull`s their id from every other user's `contacts`/`favorites`/`blockedUsers`. Finally deletes the `User` and expires the `token` cookie — note the **`refreshToken` cookie is not cleared** and `Session` rows are not revoked (they become unusable because `protect` 401s with `\"User no longer exists.\"`). Chat-list caches are **not** invalidated for remaining participants."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `runValidators: true`. Fields like `role`, `accountStatus`, `workspace`, `privacy`, `settings` cannot be set here.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"bio\": \"example\",\n  \"avatar\": \"\",\n  \"phone\": \"+919876543210\",\n  \"username\": \"postmantest\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/block/:id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/block/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "block",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** toggle on `blockedUsers`; affects search results and contact requests in both directions. Does not remove an existing contact link or delete chats. No socket event."
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/chats/:chatId/:action",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/chats/:chatId/:action",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "chats",
+                ":chatId",
+                ":action"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                },
+                {
+                  "key": "action",
+                  "value": "mute",
+                  "description": "action path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** toggles `pinnedChats` / `archivedChats` / `mutedChats` on the User doc. **Does not verify chat membership and does not invalidate the chat-list cache**, so the new flag may not appear in `GET /api/chats` until the cache TTL lapses or another write invalidates it."
+          },
+          "response": []
+        },
+        {
+          "name": "GET me/contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "contacts"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** populates in place on the `req.user` doc loaded by `protect` (no second `findById`)."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE me/contacts/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/contacts/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "contacts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** one-sided — `$pull`s from the caller's `contacts` **and** `favorites` only; the other user still lists the caller as a contact. No socket event, no cache invalidation. Succeeds even if the id was never a contact."
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/contacts/:id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/contacts/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "contacts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** consent-based — creates a **pending `ContactRequest`**, never a unilateral contact. Idempotent when a pending request already exists (no duplicate, no socket event). Emits socket `contact-request` `{ from: { _id, name, avatar } }` to the target. **Stricter than `/api/contacts/request/:userId`**: this route enforces same-workspace, that one allows cross-workspace requests. No push/in-app `notifyUser` here."
+          },
+          "response": []
+        },
+        {
+          "name": "GET me/export",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "export"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** only the caller's **own** messages (`sender: uid`) are exported, so it can't exfiltrate a partner's content. `name` is `null` for direct chats."
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/favorites/:id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/favorites/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "favorites",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** toggle (`$addToSet` / `$pull` on `favorites`); does not verify the id is a real user or a contact."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me/presence",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/presence",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "presence"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** emits socket `presence-state` `{ userId, state }` **to the caller's own personal room** (`emitToUser(req.user._id, ...)`), not to contacts. `'dnd'` suppresses push/desktop notifications elsewhere in the app.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"available\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me/privacy",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/privacy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "privacy"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** merges onto the existing `privacy` object; `markModified('privacy')` + `save({ validateBeforeSave: false })`. Unknown keys are dropped. Enforced later by `applyPresencePrivacy`, `markRead` (`readReceipts`) and `addMembers` (`groupAddPermission`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"accepted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me/settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "settings"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `notifications` is replaced wholesale (not deep-merged) and its contents are not validated here (the sub-schema coerces booleans). Saved with `validateBeforeSave: false`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"theme\": \"dark\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "search"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** global reachability by **exact** `email`/`username`/`phone` (phone matched with and without a leading `+`); partial regex search additionally over `{ workspace: req.user.workspace }` only when the caller's workspace `type !== 'personal'`. Excludes `req.user._id` and everyone in `req.user.blockedUsers`. Capped at 20 results. Each result passes through `applyPresencePrivacy` (so non-contacts get no `email`/`phone`, and `isOnline`/`lastSeen` honor privacy). Does **not** filter out users who blocked *you*."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Contact requests",
+      "description": "Send / accept / reject contact requests.",
+      "item": [
+        {
+          "name": "PATCH request/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/request/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "request",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** ownership check — only the recipient can respond. On accept: `$addToSet` both directions of `contacts`, socket `contact-accepted` `{ by: req.user.name }` to the sender, plus `notifyUser` (Notification + push). On reject: status only, no notification. Chat-list caches are not touched (a new DM chat is only created later by `POST /api/chats/direct/:userId`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST request/:userId",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/request/:userId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "request",
+                ":userId"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** cross-workspace requests are **allowed here** (global reachability), unlike `POST /api/users/me/contacts/:id`. Mutual-pending auto-accept adds each user to the other's `contacts`, emits socket `contact-accepted` `{ by }` to the other party and `notifyUser` (in-app Notification + Web Push, `type: 'contact_request'`, `url: '/contacts'`). Otherwise a stale `rejected`/`accepted` request doc is reused (reset to `pending`) so the unique `{from,to}` index never 500s and a rejection isn't permanent; emits `contact-request` `{ from: { _id, name, avatar } }` + `notifyUser`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "requests"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** only `status: 'pending'` rows in both directions; no privacy filtering (email is always returned here)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Chats",
+      "description": "Chat list, direct chats, chat lock, disappearing messages.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** read-through Redis cache (`utils/chatCache.js` — `getCachedChatList`/`setCachedChatList`); cached responses skip the per-user flag/unread recomputation entirely. Excludes `req.user.lockedChats`. Sorted `updatedAt` desc. `unreadCount` comes from one aggregation over all chats (messages not sent by you, not `isDeleted`, not in your `readBy`, not in your `deletedFor`). `pinned`/`archived`/`muted` are derived from the User doc's arrays."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** **no membership check.** For a group it removes the caller from `participants` (deleting the chat entirely if that empties it) — effectively a silent leave with **no system message and no `group-updated` socket event** (unlike `POST /api/groups/:id/leave`, and without the owner-reassignment step). For a 1:1 it just marks every message `deletedFor` the caller. Invalidates the chat-list cache for all prior participants (groups) or just the caller (direct)."
+          },
+          "response": []
+        },
+        {
+          "name": "GET :id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** no `unreadCount`/`pinned`/`archived`/`muted` fields (unlike the list endpoint). Locked chats are returned by id without a PIN."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id/clear",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id/clear",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id",
+                "clear"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** clear-for-me only — `$addToSet: { deletedFor: req.user._id }` on every message; nothing is deleted for other participants. Invalidates the caller's chat-list cache. No socket event."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id/disappearing",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id/disappearing",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id",
+                "disappearing"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** **any member** can change the timer (no admin gate, groups included). Applies only to *future* messages, which get `expiresAt` and are removed by the Mongo TTL index. Emits socket `chat-disappearing` `{ chatId, seconds }` to the chat room; invalidates the chat-list cache for all participants.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 3600\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/lock",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id/lock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id",
+                "lock"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `$addToSet` on the caller's `lockedChats`; invalidates their chat-list cache (the chat moves out of `GET /api/chats` and into `POST /api/chats/locked`). Per-user, not per-chat — the other participant is unaffected."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/unlock",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/:id/unlock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                ":id",
+                "unlock"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** **no PIN and no membership check** — a blind `$pull` from `lockedChats`; succeeds even if the chat wasn't locked. Invalidates the caller's chat-list cache."
+          },
+          "response": []
+        },
+        {
+          "name": "POST direct/:userId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/direct/:userId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                "direct",
+                ":userId"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** get-or-create; an existing 1:1 chat is returned regardless of current contact state. New cross-workspace DMs are created with `workspace: null` (so workspace member-removal sweeps never touch them); same-workspace DMs keep the workspace tag. Invalidates the chat-list cache for **both** users. No socket event is emitted."
+          },
+          "response": []
+        },
+        {
+          "name": "POST locked",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/chats/locked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "chats",
+                "locked"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** PIN checked with `verifyTwoStepPin` (bcrypt) from `userController`. Separate cache namespace (`getCachedLockedChatList`/`setCachedLockedChatList`); note the cache is read **after** the PIN check, so it can't be bypassed. Returns only chats in `lockedChats` where the caller is still a participant.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"{{pin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Messages",
+      "description": "Send, edit, delete, react, star, pin, polls, view-once.",
+      "item": [
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** stamps `expiresAt` when the chat has `disappearingSeconds > 0` (TTL index self-deletes). Sender is pre-marked in `deliveredTo` and `readBy`. Updates `chat.lastMessage` (an ObjectId ref) and thus `chat.updatedAt`. Invalidates the chat-list cache for **every** participant. Sockets: `receive-message` `{ chatId, message }` to each participant's **personal** room, plus `chat-updated` `{ chatId }` to everyone but the sender. `notifyUser` per recipient (in-app Notification + Web Push, `type: 'group_message' | 'message'`, `url: '/?chat=<id>'`). For direct chats also enqueues `automsg.maybe` (business greeting/away auto-reply).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\",\n  \"content\": \"Hello from Postman\",\n  \"type\": \"text\",\n  \"attachments\": [\n    {\n      \"url\": \"/uploads/example.jpg\",\n      \"name\": \"example.jpg\",\n      \"mime\": \"image/jpeg\",\n      \"size\": 12345\n    }\n  ],\n  \"location\": {\n    \"lat\": 28.6139,\n    \"lng\": 77.209,\n    \"label\": \"New Delhi\"\n  },\n  \"replyTo\": \"example\",\n  \"mentions\": [\n    \"{{contactUserId}}\"\n  ],\n  \"forwardedFrom\": \"example\",\n  \"viewOnce\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET :chatId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:chatId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":chatId"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** excludes messages the caller has in `deletedFor`; `isDeleted` (deleted-for-everyone) messages **are** returned so the client can show the tombstone. Fetched `createdAt` desc + `.limit()` then `.reverse()`d. Locked chats are readable without a PIN."
+          },
+          "response": []
+        },
+        {
+          "name": "GET :chatId/search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:chatId/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":chatId",
+                "search"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** matches `content` only (not attachment names / poll text), excludes `isDeleted` and the caller's `deletedFor`, newest first, capped at 50."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `scope=everyone` sets `isDeleted: true` and blanks `content`/`attachments` (document kept as a tombstone), then emits `message-deleted` `{ chatId, messageId, scope }` to the chat room. `scope=me` just `$addToSet`s the caller into `deletedFor` (no socket event). Either way invalidates the caller's chat-list cache; `chat.lastMessage` is **not** rewritten."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** ownership + 5-minute window (`EDIT_WINDOW_MS`). Sets `isEdited: true`, `editedAt`. Emits socket `message-edited` `{ chatId, message }` to the chat room; invalidates only the editor's chat-list cache.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hello from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/pin",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id/pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id",
+                "pin"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** chat-level, not per-user — toggles `Chat.pinnedMessages`, so **any member** (no admin gate) pins for everyone. Emits socket `message-pinned` `{ chatId, messageId, pinned }` to the chat room."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/react",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id/react",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id",
+                "react"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** one reaction per user — same emoji again removes it, a different emoji replaces it. Emits socket `message-reaction` `{ chatId, messageId, reactions }` (populated reactions) to the chat room. No cache invalidation, no notification.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emoji\": \"👍\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/star",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id/star",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id",
+                "star"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** per-user toggle on `starredBy`; no socket event."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/viewed",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id/viewed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id",
+                "viewed"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** no-op `{ success: true }` when the message isn't `viewOnce` or the caller is the sender. Adds the caller to `viewedBy`; once `viewedBy.length >= (participants excluding the sender)`, the media is purged (`attachments: []`, `content: ''`). Emits socket `message-updated` `{ chatId, message }` to the chat room only on the first view by that user."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/vote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/:id/vote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                ":id",
+                "vote"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `multi: true` toggles just the clicked option; single-choice clears the voter from every option first (re-clicking the same option clears the vote). Emits socket `message-updated` `{ chatId, message }` to the chat room. There is no endpoint in these files to *close* a poll.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"optionIndex\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/poll",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                "poll"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** creates a `type: 'poll'` message, respects `disappearingSeconds`, sets `chat.lastMessage`, invalidates the chat-list cache for all participants, emits `receive-message` to every participant's personal room and `chat-updated` to everyone but the creator. **No `notifyUser` push/in-app notification** (unlike a normal send).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                "read"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `$push`es `{ user, at }` into `readBy` for every message in the chat not sent by the caller and not already read by them. Emits socket `message-read` `{ chatId, userId }` to the chat room **only when `req.user.privacy.readReceipts !== false`** — the DB write happens either way. Invalidates the caller's chat-list cache (unread count drops to 0).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET starred",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/messages/starred",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "messages",
+                "starred"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `Message.find({ starredBy: req.user._id })`, newest first, hard-capped at 100. **No membership re-check** — messages from chats the user has since left are still returned; `deletedFor` is not filtered out."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Groups",
+      "description": "Create, join by invite code, members and roles.",
+      "item": [
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** the creator becomes `role: 'owner'`; requested members are de-duplicated, self-filtered, and **silently dropped unless they share the creator's `workspace`** (tenant isolation — no error for the dropped ones). `groupAddPermission` is **not** honored at creation (only in `addMembers`). `inviteCode` is auto-generated (10 chars, CSPRNG) by the Chat pre-save hook. Posts a `type: 'system'` message `\"<name> created “<group>”\"` (`systemEvent: 'group_created'`) which becomes `lastMessage`, and emits `receive-message` to the chat room plus `chat-updated` `{ chatId }` to every participant's personal room. **Does not invalidate the chat-list cache.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** emits socket `group-updated` `{ chat }` (full populated chat) to the chat room. No cache invalidation, so `GET /api/chats` may serve a stale name/avatar until the TTL lapses.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/leave",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/:id/leave",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                ":id",
+                "leave"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) — must be a participant; no role required\n\n**Notes:** if the owner leaves, `participants[0]` (earliest remaining) is promoted to `owner`. Emptying the group deletes the `Chat` (its `Message`s are **not** deleted). Otherwise posts a system message `\"<name> left the group\"` (`systemEvent: 'member_left'`, emits `receive-message`) and emits `group-updated` `{ chatId }` — note this payload carries `chatId`, not the full `chat` object that the other group endpoints send. No cache invalidation."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/members",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/:id/members",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                ":id",
+                "members"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** existing participants are filtered out; candidates must be in the **group's** `workspace`; each invitee's `privacy.groupAddPermission === 'contacts'` means they're added only if the caller is in their `contacts`. Rejected invitees are dropped silently. New members get `role: 'member'`. If anyone was added: system message `\"<name> added A, B\"` (`systemEvent: 'member_added'`) → `receive-message` to the chat room. Emits `chat-updated` `{ chatId }` to each added user's personal room and `group-updated` `{ chat }` to the chat room. No cache invalidation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"members\": [\n    \"{{contactUserId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id/members/:userId",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/:id/members/:userId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                ":id",
+                "members",
+                ":userId"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                },
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** the owner is protected even from themselves (they must use `POST /:id/leave`, which reassigns ownership). Removing a non-member silently succeeds. System message `\"<name> was removed\"` (`systemEvent: 'member_removed'`) only when the target User doc still exists. Emits `chat-updated` `{ chatId }` to the removed user and `group-updated` `{ chat }` to the chat room. No cache invalidation."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id/members/:userId/role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/:id/members/:userId/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                ":id",
+                "members",
+                ":userId",
+                "role"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                },
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** an admin can promote/demote other admins (including the one who promoted them); only the owner role is protected. Emits `group-updated` `{ chat }` to the chat room. No system message, no cache invalidation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST join/:inviteCode",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/groups/join/:inviteCode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "groups",
+                "join",
+                ":inviteCode"
+              ],
+              "variable": [
+                {
+                  "key": "inviteCode",
+                  "value": "{{inviteCode}}",
+                  "description": "inviteCode path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** joins with `role: 'member'`; posts a system message `\"<name> joined via invite link\"` (`systemEvent: 'member_joined'`) which emits `receive-message` to the chat room. Groups with `workspace: null` are joinable from any workspace. No `group-updated` event, no cache invalidation."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Calls",
+      "description": "Start / accept / reject / end calls and call history.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** **reachability filter** — group path keeps only ids that are members of `chatId`; 1:1 path keeps only **mutual** contacts. `receiver` is set only when `!isGroup` and exactly one target survives. Emits socket `call:incoming` (`{ callId, from:{_id,name,avatar}, type, isGroup, chatId }`) to each allowed user's personal room, plus an `incoming_call` notification + Web Push each.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"text\",\n  \"chatId\": \"{{chatId}}\",\n  \"participants\": [\n    \"{{contactUserId}}\"\n  ],\n  \"isGroup\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** setting `status` to `completed`/`missed`/`rejected` also stamps `endedAt`. Unlike the `/end` etc. endpoints this bypasses `transitionCall`, so terminal states *can* be overwritten here.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"accepted\",\n  \"duration\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST end",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                "end"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** delegates to `transitionCall(..., 'end')` (`utils/callService.js`) — shared with the socket signaling handlers. A live call (`accepted`/`ongoing`) becomes `completed` and the caller's participant row becomes `left`; hanging up while still `ringing` becomes `missed`. Terminal states (`completed`/`missed`/`rejected`) never regress (idempotent).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callId\": \"{{contactUserId}}\",\n  \"duration\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                "history"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** matches calls where the user is `initiator`, `receiver`, or in `participants.user`. `direction` and `peer` are computed per record (not stored). Populated user fields are `name username avatar isOnline`."
+          },
+          "response": []
+        },
+        {
+          "name": "POST missed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/missed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                "missed"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `transitionCall(..., 'missed')` — only a still-`ringing` call flips to `missed`. If the record has a `receiver` other than the requester, sends a `missed_call` notification + Web Push to them.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callId\": \"{{contactUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                "reject"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `transitionCall(..., 'reject')` → `status:'rejected'`, `endedAt` set, requester's participant row `rejected`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callId\": \"{{contactUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/calls/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "calls",
+                "start"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** creates the Call record *before* signaling. If the receiver has no live socket (`isUserOnline`), the record is created with `status:'missed'` + `endedAt`. Fires `notifyUser` for the receiver (`incoming_call` or `missed_call`) → persists a `Notification` and sends Web Push with `tag: \"call:<id>\"`, `url: \"/calls\"`, `data.callId`. No `call:incoming` socket event from this endpoint (the client's socket signaling does the ringing).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"receiverId\": \"{{contactUserId}}\",\n  \"callType\": \"video\",\n  \"type\": \"video\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Meetings",
+      "description": "Schedule, instant meetings, join by code, knock/admit, ics.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** returns meetings where the user is `host` **or** in `participants.user`, sorted `startAt` asc. `attendeeCount` and `durationSeconds` (from `startedAt`→`endedAt`) are computed. **The detailed `attendees` array is deleted for non-hosts.** Also exposed as `GET /api/v1/meetings`."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** allocates an unguessable `roomCode` (`abc-defg-hij`) and `link = <CLIENT_URL>/meet/<roomCode>`. Emits socket `meeting-invited` (`{ meetingId, title, startAt }`) to each in-workspace invitee and a `meeting_reminder` notification + Web Push. Fire-and-forget email invites (max 50 unique valid addresses) to invitees' emails + `inviteEmails`, with an `invite.ics` calendar attachment (`utils/ics.js`). Host is **not** added to `participants`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman meeting\",\n  \"description\": \"Created from the Postman collection.\",\n  \"startAt\": \"2026-12-01T10:00:00.000Z\",\n  \"durationMinutes\": 30,\n  \"timezone\": \"Asia/Kolkata\",\n  \"type\": \"video\",\n  \"participants\": [\n    \"{{contactUserId}}\"\n  ],\n  \"recurrence\": \"weekly\",\n  \"reminderMinutes\": 30,\n  \"chatId\": \"{{chatId}}\",\n  \"inviteEmails\": [],\n  \"settings\": {\n    \"joinAnytime\": true,\n    \"muteOnEntry\": false,\n    \"askToJoin\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **host only**\n\n**Notes:** soft cancel — sets `status:'cancelled'` (the document is kept, and the code/link endpoints then return `410`). No socket events, no cancellation email."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **host only**\n\n**Notes:** no socket events / no re-invite emails.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reminderMinutes\": \"example\",\n  \"settings\": {\n    \"joinAnytime\": true,\n    \"muteOnEntry\": false,\n    \"askToJoin\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET :id/report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/:id/report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                ":id",
+                "report"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **host only**\n\n**Notes:** `attendees` sorted by `joinedAt` asc; rows are written by the socket meeting-room handlers, not by REST."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/rsvp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/:id/rsvp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                ":id",
+                "rsvp"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** updates the existing participant row, or pushes a new row when the **host** RSVPs.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET code/:code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/code/:code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                "code",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "{{roomCode}}",
+                  "description": "code path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** pre-join summary for anyone signed in who holds the link. `host` populated with `name username avatar` only. No mutation."
+          },
+          "response": []
+        },
+        {
+          "name": "POST code/:code/join",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/code/:code/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                "code",
+                ":code",
+                "join"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "{{roomCode}}",
+                  "description": "code path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** any signed-in user with the link may join (Google-Meet style). Adds `{ user, response:'going', viaLink:true }` to `participants` unless already present or host — `viaLink:true` means they still have to knock through the ask-to-join gate. A `scheduled` meeting flips to `ongoing`. No socket events emitted here."
+          },
+          "response": []
+        },
+        {
+          "name": "GET code/:code/rtc",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/meetings/code/:code/rtc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "meetings",
+                "code",
+                ":code",
+                "rtc"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "{{roomCode}}",
+                  "description": "code path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** media-transport config. **Admission gate mirrors the socket `meeting:join` handler**: admitted if host, a *non-`viaLink`* participant, `settings.askToJoin === false`, or a valid `pass` whose `scope === 'meet-admit'`, `id === req.user._id` and `meetingId === meeting._id`. Un-admitted callers get `requiresAdmission` (not an error) and are expected to knock over the socket. LiveKit token: 3h TTL, identity `<userId>_<rand>`, `roomAdmin` only for the host (`utils/livekit.js`)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Status (stories)",
+      "description": "Post, view, reply; 24h expiry.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** candidate set is the user's own statuses + their contacts', newest first, then filtered per-status by `canView`, then grouped by owner. **Privacy: `viewers` and `replies` are deleted from any status the requester does not own.** `seenAll` is always `false` (client-side concern). Statuses self-delete 24h after creation via a TTL index."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `privacy` is stored as sent (no field whitelisting). Fire-and-forget fan-out: emits socket `status-updated` (`{ userId }`) to every contact allowed by the audience — a content-free hint, so clients refetch the feed and privacy is re-applied server-side.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"text\",\n  \"content\": \"Hello from Postman\",\n  \"media\": \"\",\n  \"background\": \"\",\n  \"privacy\": {\n    \"type\": \"contacts\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **owner only**\n\n**Notes:** hard delete. Re-emits `status-updated` to the audience so contacts drop it live."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/:id/reply",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                ":id",
+                "reply"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** pushes `{ user, text, at }` onto `replies` and emits socket `status-reply` (`{ from: <replier name>, text }`) to the **owner's** personal room. No push notification.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Hello from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/view",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/:id/view",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                ":id",
+                "view"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** idempotent — appends `{ user, at }` to `viewers` only if absent."
+          },
+          "response": []
+        },
+        {
+          "name": "GET :id/viewers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/status/:id/viewers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "status",
+                ":id",
+                "viewers"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **owner only**"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "description": "In-app bell feed.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `type` enum: `message`, `group_message`, `mention`, `incoming_call`, `missed_call`, `meeting_reminder`, `status_reply`, `contact_request`, `system`. Rows are written asynchronously by `utils/notify.js` (BullMQ when Redis is configured, else inline)."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id/read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/:id/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                ":id",
+                "read"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH read",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/read",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                "read"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `updateMany({ user: me, isRead: false }, { isRead: true })`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Web Push",
+      "description": "VAPID key, subscribe, unsubscribe.",
+      "item": [
+        {
+          "name": "GET key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/push/key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "push",
+                "key"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `enabled` reflects whether the `VAPID_*` env vars are configured (`utils/push.js`); `publicKey` is `''`/undefined when not."
+          },
+          "response": []
+        },
+        {
+          "name": "POST subscribe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/push/subscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "push",
+                "subscribe"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** upsert keyed on `endpoint`, so re-subscribing the same device does not duplicate and reassigns the device to the current user.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"example\",\n  \"keys\": {\n    \"p256dh\": \"example\",\n    \"auth\": \"example\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST unsubscribe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/push/unsubscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "push",
+                "unsubscribe"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Uploads",
+      "description": "Multipart upload + media access token.",
+      "item": [
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "upload"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `STORAGE_DRIVER` decides where bytes land (`utils/storage.js`): `local` (default) writes to `server/uploads` and returns the auth-gated `/uploads/<file>` path; `cloudinary` streams to the CDN (`folder: chatconnect`, `resource_type: auto`) and returns `secure_url` + `width`/`height`.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Up to 10 files. Field name must be \"files\"."
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET access",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/upload/access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "upload",
+                "access"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** mints a **scoped, 6-hour, media-only JWT** (`{ id, scope:'media' }`) that clients append as `?token=` to `<img>`/`<video>` src URLs, so the long-lived session JWT never enters URLs/history/referrers. `protect` explicitly rejects any token carrying a `scope`, so this token cannot be used as an API session. It is consumed by `GET /uploads/:filename` (`serveUpload`, mounted at the app root in `server.js:97`, **not** under `/api`), which additionally enforces chat membership for message attachments and the status audience for status media."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 300) {",
+                  "  pm.collectionVariables.set('mediaToken', pm.response.json().token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Live location",
+      "description": "Start, update, stop live location sharing.",
+      "item": [
+        {
+          "name": "GET :chatId/active",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/live-location/:chatId/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "live-location",
+                ":chatId",
+                "active"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** only shares with `liveLocation.active === true` **and** `expiresAt > now`."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :messageId/stop",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/live-location/:messageId/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "live-location",
+                ":messageId",
+                "stop"
+              ],
+              "variable": [
+                {
+                  "key": "messageId",
+                  "value": "{{messageId}}",
+                  "description": "messageId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **sharer only**\n\n**Notes:** sets `liveLocation.active = false` and emits `live-location-stopped` (`{ chatId, messageId }`) to the chat room. No membership re-check beyond sender identity."
+          },
+          "response": []
+        },
+        {
+          "name": "POST :messageId/update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/live-location/:messageId/update",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "live-location",
+                ":messageId",
+                "update"
+              ],
+              "variable": [
+                {
+                  "key": "messageId",
+                  "value": "{{messageId}}",
+                  "description": "messageId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **sharer only**\n\n**Notes:** high-frequency endpoint — emits the lightweight socket `live-location` event to the **chat room** (`{ chatId, messageId, userId, lat, lng }`) rather than the whole message.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 28.6139\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/live-location/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "live-location",
+                "start"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** creates a real `location` message anchored in the chat and sets `chat.lastMessage`. Emits socket `receive-message` (`{ chatId, message }`) to **every** participant's personal room and `chat-updated` (`{ chatId }`) to everyone except the sharer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\",\n  \"lat\": 28.6139,\n  \"lng\": 77.209,\n  \"durationSecs\": 3600\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Communities",
+      "description": "Groups-of-groups with an announcement channel.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** only communities where the requester is a member, `updatedAt` desc."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** side effect — also creates an **Announcements** group chat (`\"<name> Announcements\"`, `messagingPolicy:'admins'`, creator as `owner`) which becomes `announcementGroup` and the first entry in `groups`. `workspace` is the creator's workspace or `null`. `inviteCode` is generated by a pre-save hook (9 random bytes base64url).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"description\": \"Created from the Postman collection.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET :id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **community member**"
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/groups",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities/:id/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities",
+                ":id",
+                "groups"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **community admin**\n\n**Notes:** creates a new group `Chat` with **only the requester** as `owner` (existing community members are not auto-added) and links it into `community.groups`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/leave",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities/:id/leave",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities",
+                ":id",
+                "leave"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** filters the requester out of `members` and `$pull`s them from the announcement group's participants. No membership pre-check (a non-member's leave is a harmless no-op) and no admin/last-admin protection."
+          },
+          "response": []
+        },
+        {
+          "name": "POST join/:inviteCode",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/communities/join/:inviteCode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "communities",
+                "join",
+                ":inviteCode"
+              ],
+              "variable": [
+                {
+                  "key": "inviteCode",
+                  "value": "{{inviteCode}}",
+                  "description": "inviteCode path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** idempotent — already-members just get the community back. On a fresh join, pushes `{ user, role:'member' }` and adds the user to the announcement group chat as a `member`. No socket event. Note the response is computed **before** the membership push is reflected in `publicCommunity`, so a first-time joiner sees `isAdmin:false` and the pre-join `memberCount`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Business catalog",
+      "description": "Products / storefront.",
+      "item": [
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin\n\n**Notes:** invalidates the workspace's catalog cache.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"description\": \"Created from the Postman collection.\",\n  \"price\": 999,\n  \"currency\": \"USD\",\n  \"images\": [\n    \"/uploads/example.jpg\"\n  ],\n  \"link\": \"https://example.com\",\n  \"inStock\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin\n\n**Notes:** invalidates the catalog cache."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin\n\n**Notes:** invalidates the catalog cache.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"description\": \"Created from the Postman collection.\",\n  \"price\": 999,\n  \"currency\": \"USD\",\n  \"link\": \"https://example.com\",\n  \"inStock\": true,\n  \"images\": [\n    \"/uploads/example.jpg\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/share",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog/:id/share",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog",
+                ":id",
+                "share"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **chat participant** (no catalog-manage permission needed; **any** product id may be shared, including another business's)\n\n**Notes:** creates a `product`-type message with the product **snapshotted** onto it, plus a plain-text `content` fallback. Honours the chat's disappearing timer (`expiresAt = now + chat.disappearingSeconds`). Emits socket `receive-message` to every participant and `chat-updated` to everyone but the sender. Updates `chat.lastMessage`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET :workspaceId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog/:workspaceId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog",
+                ":workspaceId"
+              ],
+              "variable": [
+                {
+                  "key": "workspaceId",
+                  "value": "{{workspaceId}}",
+                  "description": "workspaceId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) — **any signed-in user may browse any business's catalog**\n\n**Notes:** declared last in the router because the param is greedy."
+          },
+          "response": []
+        },
+        {
+          "name": "GET mine",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/catalog/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "catalog",
+                "mine"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** no workspace → `{ success: true, products: [], canManage: false }`. Catalogs are Redis-cached per workspace for 120 s (`catalog:<workspaceId>`; no-op without `REDIS_URL`), invalidated on every write below."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Agent tools",
+      "description": "Labels and quick replies.",
+      "item": [
+        {
+          "name": "GET labels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/labels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "labels"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** a user with no workspace gets `{ success: true, labels: [], canManage: false }`. Sorted `createdAt` asc."
+          },
+          "response": []
+        },
+        {
+          "name": "POST labels",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/labels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "labels"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"color\": \"#6366f1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE labels/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/labels/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "labels",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin\n\n**Notes:** also `$pull`s the label id from every `Chat.labels` array."
+          },
+          "response": []
+        },
+        {
+          "name": "POST labels/:id/apply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/labels/:id/apply",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "labels",
+                ":id",
+                "apply"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **chat participant** (any workspace member — no manage permission needed)\n\n**Notes:** `$addToSet`/`$pull` on `Chat.labels`. No socket event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\",\n  \"apply\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET labels/chat/:chatId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/labels/chat/:chatId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "labels",
+                "chat",
+                ":chatId"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **chat participant**\n\n**Notes:** intersects `chat.labels` with the requester's **own workspace's** labels, so another tenant's labels are never revealed."
+          },
+          "response": []
+        },
+        {
+          "name": "GET quick-replies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/quick-replies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "quick-replies"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** no workspace → `{ success: true, quickReplies: [], canManage: false }`. Sorted by `shortcut` asc."
+          },
+          "response": []
+        },
+        {
+          "name": "POST quick-replies",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/quick-replies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "quick-replies"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shortcut\": \"/hello\",\n  \"text\": \"Hello from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE quick-replies/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/quick-replies/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "quick-replies",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH quick-replies/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/agent/quick-replies/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "quick-replies",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + workspace owner/admin",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shortcut\": \"/hello\",\n  \"text\": \"Hello from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Broadcast lists",
+      "description": "One-to-many DMs.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/broadcasts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "broadcasts"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** sorted `updatedAt` desc; `recipients` populated with `name username avatar isOnline`."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/broadcasts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "broadcasts"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** non-mutual ids are silently dropped, so `recipientCount` can be smaller than what was submitted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"recipients\": [\n    \"{{contactUserId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/broadcasts/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "broadcasts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **list owner**"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH :id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/broadcasts/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "broadcasts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **list owner**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"recipients\": [\n    \"{{contactUserId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST :id/send",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/broadcasts/:id/send",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "broadcasts",
+                ":id",
+                "send"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **list owner**\n\n**Notes:** recipients are **re-validated at send time** (a contact may have been removed since), which is what `skipped` counts. For each recipient it get-or-creates the 1:1 chat (`workspace: null`), creates a separate `Message` (pre-marked delivered/read for the sender), updates `chat.lastMessage`, and emits socket `receive-message` + `chat-updated` to the recipient and `chat-updated` to the sender. Recipients never see each other. No push notification is sent for broadcast messages.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Hello from Postman\",\n  \"type\": \"text\",\n  \"attachments\": [\n    {\n      \"url\": \"/uploads/example.jpg\",\n      \"name\": \"example.jpg\",\n      \"mime\": \"image/jpeg\",\n      \"size\": 12345\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workspaces",
+      "description": "Multi-tenant org management, invites, roles.",
+      "item": [
+        {
+          "name": "GET me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** `inviteCode`, `inviteLink` and `autoReplies` are included **only** for managers of a non-personal workspace. For the shared **personal** workspace (`type:'personal'`) the member roster is deliberately empty and `memberCount` is `undefined` (omitted from JSON) — it would otherwise leak a browsable directory of every personal user. Member fields: `name username avatar isOnline lastSeen workspaceRole accountStatus createdAt`, sorted `createdAt` asc."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `WORKSPACE_SETTINGS` (owner/admin)\n\n**Notes:** `autoReplies` drives the WhatsApp-Business greeting/away auto-responder consumed by the `automsg.maybe` queue job on inbound 1:1 messages.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test\",\n  \"businessProfile\": {\n    \"category\": \"Retail\",\n    \"description\": \"Example business profile.\",\n    \"hours\": \"Mon-Fri 9-5\",\n    \"address\": \"\",\n    \"website\": \"https://example.com\",\n    \"email\": \"{{userEmail}}\"\n  },\n  \"autoReplies\": {\n    \"greeting\": {\n      \"enabled\": true,\n      \"text\": \"Thanks for reaching out! We'll reply shortly.\"\n    },\n    \"away\": {\n      \"enabled\": false,\n      \"text\": \"We are away right now.\",\n      \"startHour\": 9,\n      \"endHour\": 18\n    }\n  },\n  \"greeting\": {\n    \"enabled\": true\n  },\n  \"away\": {\n    \"enabled\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/invite/rotate",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me/invite/rotate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me",
+                "invite",
+                "rotate"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `WORKSPACE_INVITE` (owner/admin)\n\n**Notes:** retries up to 5 times on a duplicate-code collision. Invalidates the previous invite link immediately."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE me/members/:userId",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me/members/:userId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me",
+                "members",
+                ":userId"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `MEMBERS_MANAGE` (owner/admin)\n\n**Notes:** destructive, multi-step eject — (1) `$pull`s the member from **every** chat owned by this workspace, group *and* 1:1, since chat access is membership-based; (2) removes them from other members' `contacts`/`favorites`/`blockedUsers` and clears their own `contacts`/`favorites`; (3) creates a fresh personal workspace for them (`createWorkspaceForUser`); (4) `$inc`s `tokenVersion`, forcing a re-login. Cross-workspace DMs (`workspace: null`) are untouched by design."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me/members/:userId/role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me/members/:userId/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me",
+                "members",
+                ":userId",
+                "role"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `MEMBERS_MANAGE` (owner/admin)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH me/members/:userId/status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me/members/:userId/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me",
+                "members",
+                ":userId",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `MEMBERS_MANAGE` (owner/admin)\n\n**Notes:** suspending bumps `tokenVersion`, killing all live sessions immediately.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"accepted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST me/transfer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/me/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "me",
+                "transfer"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `WORKSPACE_TRANSFER` (**owner only**, or platform admin)\n\n**Notes:** target becomes `workspaceRole:'owner'`, the caller steps down to `admin`, and `Workspace.owner` is repointed. Saves bypass validation (`validateBeforeSave:false`). No session revocation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{contactUserId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "description": "Abuse reporting.",
+      "item": [
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** no verification that the target exists or that the reporter can see it. Reports surface to admins via `GET /api/admin/reports`. No notification/socket side effects.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetType\": \"text\",\n  \"reason\": \"spam\",\n  \"targetUser\": \"example\",\n  \"targetChat\": \"example\",\n  \"targetMessage\": \"example\",\n  \"description\": \"Created from the Postman collection.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "API keys",
+      "description": "Manage your own third-party API keys.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "keys"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** scoped to `owner: req.user._id` — an admin sees only their own keys. The secret is never returned."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "keys"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** only the SHA-256 hash is stored (`hashedKey`, `select:false`); the plaintext is returned exactly once. Writes a `apikey.created` security-log event with `keyId` and `scopes`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"New customer\",\n  \"scopes\": [\n    \"chat:read\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/keys/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** hard delete (`findOneAndDelete` scoped to `owner`). Writes an `apikey.revoked` security-log event."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Platform admin",
+      "description": "Requires role=admin.",
+      "item": [
+        {
+          "name": "GET reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "reports"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** capped at 200, `createdAt` desc."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH reports/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/reports/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "reports",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** uses `findByIdAndUpdate` **without** `runValidators`, so the `status` enum is *not* enforced here — any value (including `undefined`) is written as-is. Writes an `admin.report.update` security-log event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"accepted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "stats"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** `activeUsers` is the live socket presence count (`onlineUserIds().length`). `userGrowth`/`messageVolume` aggregate the last 7 days (from midnight 6 days ago), grouped by `%Y-%m-%d`."
+          },
+          "response": []
+        },
+        {
+          "name": "GET users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** capped at 200, `createdAt` desc. Each user goes through `toSafeJSON()` — strips `password`, `otp`, `otpExpires`, `resetPasswordToken`, `resetPasswordExpires`, `twoStepPin`, `twoStepResetOtp`, `twoStepResetExpires`, `twoStepResetAttempts`."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH users/:id/status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/:id/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                ":id",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + `adminOnly`\n\n**Notes:** suspending/banning also `$inc`s `tokenVersion`, which invalidates every issued access token immediately (`protect` compares `tokenVersion`). Writes an `admin.user.status` security-log event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accountStatus\": \"accepted\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Incoming webhooks",
+      "description": "Manage webhook tokens for a group.",
+      "item": [
+        {
+          "name": "GET (root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** lists webhooks for **all group chats the requester belongs to** (not just ones they created), newest first. `url` includes the live secret token."
+          },
+          "response": []
+        },
+        {
+          "name": "POST (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks"
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **group membership**\n\n**Notes:** token is 24 random bytes base64url. `createdBy` becomes the attributed sender of all ingress messages. Writes a `webhook.created` security-log event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\",\n  \"label\": \"New customer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE :id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/webhooks/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{resourceId}}",
+                  "description": "id path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** access token (`protect`) + **group membership**\n\n**Notes:** any member of the group may revoke, not only the creator. Writes a `webhook.revoked` security-log event."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook ingress (public)",
+      "description": "Token in the URL is the credential — no session.",
+      "item": [
+        {
+          "name": "POST :token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/hooks/:token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "hooks",
+                ":token"
+              ],
+              "variable": [
+                {
+                  "key": "token",
+                  "value": "{{webhookToken}}",
+                  "description": "token path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** **none** — the unguessable `:token` path segment is the credential. Rate-limited by `webhookIngressLimiter`: **30 requests / min keyed on the token** (falls back to IP if absent).\n\n**Notes:** creates a `text` message in the group with content `\"[<label>] <text>\"`, attributed to `hook.createdBy`; updates `chat.lastMessage` and `hook.lastUsedAt`. Emits socket `receive-message` to every participant, plus `chat-updated` and a `group_message` notification + Web Push to everyone except `createdBy`.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Hello from Postman\",\n  \"content\": \"Hello from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Public API v1 (X-API-Key)",
+      "description": "Third-party API authenticated by an API key, not a session.",
+      "item": [
+        {
+          "name": "POST calls",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/calls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "calls"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`calls:write`**\n\n**Notes:** same reachability filter (group membership, or mutual contacts) and the same `call:incoming` socket emit + `incoming_call` notification/Web Push per allowed target.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"text\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET chats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chats"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`chat:read`**\n\n**Notes:** delegates to `getChats`. **Chats the owner has locked behind their two-step PIN are excluded** (they surface only via the app's `POST /api/chats/locked`, which is not exposed on v1). Read-through Redis cache per user; `unreadCount` comes from a single aggregation.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST chats/direct/:userId",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chats/direct/:userId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "chats",
+                "direct",
+                ":userId"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "{{contactUserId}}",
+                  "description": "userId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`chat:write`**\n\n**Notes:** get-or-create. A new cross-workspace DM is created with `workspace: null` so it is never swept by workspace member-removal; a same-workspace DM keeps the workspace tag. Invalidates both parties' chat-list caches.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "contacts"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`contacts:read`**\n\n**Notes:** delegates to `getContacts` (`controllers/userController.js`) — the key owner's own contact + favorites lists.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "**Auth:** apiKey (`apiKeyAuth()`) — **no scope required**, any valid key works\n\n**Notes:** identity/health check for a key. `user` is `toSafeJSON()` (all secret/OTP/PIN fields stripped). Handler is inline in `routes/v1Routes.js`, not a controller.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET meetings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "meetings"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`meetings:read`**\n\n**Notes:** the detailed `attendees` array is still stripped unless the key owner is the meeting's host.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST meetings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "meetings"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`meetings:write`**\n\n**Notes:** the key owner becomes the meeting `host`; pre-invites are restricted to the owner's workspace. Same `meeting-invited` socket emit, notifications, and `.ics` email invitations as the app endpoint.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startAt\": \"2026-12-01T10:00:00.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "messages"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`chat:write`**\n\n**Notes:** full app-equivalent side effects — sets `chat.lastMessage`, stamps `expiresAt` when the chat has a disappearing timer, invalidates every participant's chat-list cache, emits socket `receive-message` to all participants and `chat-updated` + a `message`/`group_message` notification with Web Push to everyone but the sender, and enqueues `automsg.maybe` for 1:1 chats (business greeting/away auto-reply).",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chatId\": \"{{chatId}}\",\n  \"content\": \"Hello from Postman\",\n  \"type\": \"text\",\n  \"attachments\": [\n    {\n      \"url\": \"/uploads/example.jpg\",\n      \"name\": \"example.jpg\",\n      \"mime\": \"image/jpeg\",\n      \"size\": 12345\n    }\n  ],\n  \"location\": {\n    \"lat\": 28.6139,\n    \"lng\": 77.209,\n    \"label\": \"New Delhi\"\n  },\n  \"replyTo\": \"example\",\n  \"mentions\": [\n    \"{{contactUserId}}\"\n  ],\n  \"forwardedFrom\": \"example\",\n  \"viewOnce\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET messages/:chatId",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/messages/:chatId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "messages",
+                ":chatId"
+              ],
+              "variable": [
+                {
+                  "key": "chatId",
+                  "value": "{{chatId}}",
+                  "description": "chatId path parameter"
+                }
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`chat:read`**\n\n**Notes:** returned **oldest-first** (fetched desc, then reversed). Messages the owner deleted for themselves are excluded.",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET users/search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "search"
+              ]
+            },
+            "description": "**Auth:** apiKey — scope **`contacts:read`**\n\n**Notes:** delegates to `searchUsers`. Global reachability by **exact** `email`/`username`/normalized `phone`; **partial** regex matching on `email`/`username`/`name` only inside the owner's own non-personal workspace (so there is no browsable global directory). Excludes the owner and anyone they've blocked, max 20 results, and presence fields are stripped per each result's privacy settings (`applyPresencePrivacy`).",
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{apiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
