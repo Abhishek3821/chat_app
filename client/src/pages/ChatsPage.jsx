@@ -29,7 +29,7 @@ export default function ChatsPage() {
         {activeChat ? (
           <ChatArea key={activeChat._id} chat={activeChat} />
         ) : (
-          <div className="grid h-full place-items-center">
+          <div className="grid h-full place-items-center p-4">
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
               <EmptyState
                 icon={MessagesSquare}

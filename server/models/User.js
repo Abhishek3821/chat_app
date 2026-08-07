@@ -90,7 +90,9 @@ const userSchema = new mongoose.Schema(
     privacy: { type: Object, default: privacyDefaults },
     settings: {
       theme: { type: String, enum: ['light', 'dark', 'system'], default: 'dark' },
-      accent: { type: String, enum: ['indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'], default: 'indigo' },
+      // 'teal' is the brand palette and the default. It has to be in the enum or
+      // saving it from Settings -> Appearance fails validation.
+      accent: { type: String, enum: ['teal', 'indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'], default: 'teal' },
       notifications: {
         messages: { type: Boolean, default: true },
         groups: { type: Boolean, default: true },
@@ -99,6 +101,54 @@ const userSchema = new mongoose.Schema(
         sound: { type: Boolean, default: true },
       },
       enterToSend: { type: Boolean, default: true },
+      // Default chat wallpaper — the id of a preset in the client's wallpaper
+      // catalogue, or '' for the plain surface. Per-chat overrides live in
+      // `chatThemes` below; this is the fallback for every chat without one.
+      wallpaper: { type: String, default: '', maxlength: 64 },
+    },
+
+    /**
+     * Per-chat appearance, personal to this user (the way WhatsApp wallpapers
+     * work — changing yours does not change the other side's). Stored as a
+     * sparse override list rather than a field on Chat: only chats you actually
+     * customised take up a row, and a chat's document stays shared//neutral.
+     */
+    chatThemes: [
+      {
+        _id: false,
+        chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', required: true },
+        wallpaper: { type: String, default: '', maxlength: 64 },
+        // Optional accent override for the bubbles in this one chat.
+        bubble: { type: String, default: '', maxlength: 32 },
+        updatedAt: { type: Date, default: Date.now },
+      },
+    ],
+
+    /**
+     * End-to-end encryption identity (ECDH P-256).
+     *
+     * `publicKey` is public by design — anyone who can message you fetches it to
+     * seal a chat key for you. Everything else is your PRIVATE key, and it is
+     * only ever stored here already encrypted under a key derived from your
+     * E2EE passphrase (PBKDF2-SHA256 → AES-GCM), done entirely in the browser.
+     * The passphrase is never sent. The server therefore holds a blob it cannot
+     * open; this exists so you can unlock the same identity on a second device,
+     * and it is `select: false` so it never rides along on an ordinary user
+     * lookup (profile, search, participant population).
+     *
+     * Lose the passphrase and the blob is unrecoverable — that is the point,
+     * and the client says so before you set one.
+     */
+    e2ee: {
+      publicKey: { type: String, default: '' }, // base64 SPKI
+      wrappedPrivateKey: { type: String, default: '', select: false }, // base64 AES-GCM
+      kdfSalt: { type: String, default: '', select: false }, // base64
+      kdfIterations: { type: Number, default: 0 },
+      wrapIv: { type: String, default: '', select: false }, // base64
+      // Bumped whenever the identity itself is replaced (not on a passphrase
+      // change), so clients can tell "re-wrapped" from "different key".
+      generation: { type: Number, default: 0 },
+      updatedAt: { type: Date },
     },
   },
   { timestamps: true }

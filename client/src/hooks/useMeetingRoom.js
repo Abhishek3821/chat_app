@@ -24,6 +24,9 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const [muted, setMuted] = useState(muteOnEntry && !isHost); // host-controlled mute-on-entry
   const [camOff, setCamOff] = useState(false);
   const [sharingScreen, setSharingScreen] = useState(false);
+  // Server-authoritative: both arrays are replaced wholesale by the broadcast.
+  const [polls, setPolls] = useState([]);
+  const [questions, setQuestions] = useState([]);
   const [recording, setRecording] = useState(false);
   const [mediaError, setMediaError] = useState(null);
   // In-meeting interaction state
@@ -169,6 +172,9 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     const onChat = ({ socketId, name, avatar, text, at }) => {
       setChatMessages((prev) => [...prev, { id: `${socketId}-${at}`, socketId, name, avatar, text, at, mine: false }]);
     };
+    // Whole-array replacements — the server is authoritative for tallies.
+    const onPolls = ({ polls: next }) => { if (Array.isArray(next)) setPolls(next); };
+    const onQuestions = ({ questions: next }) => { if (Array.isArray(next)) setQuestions(next); };
     const onReaction = ({ socketId, emoji }) => {
       const id = `r-${Date.now()}-${reactSeq.current++}`;
       setReactions((prev) => [...prev, { id, socketId, emoji }]);
@@ -222,6 +228,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:peer-left', onPeerLeft);
       socket.on('meeting:presenting', onPresenting);
       socket.on('meeting:chat', onChat);
+      socket.on('meeting:polls', onPolls);
+      socket.on('meeting:questions', onQuestions);
       socket.on('meeting:reaction', onReaction);
       socket.on('meeting:hand', onHand);
       socket.on('meeting:force-mute', onForceMute);
@@ -256,6 +264,11 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         const isRejoin = joinedOnce;
         joinedOnce = true;
         setMediaError(null);
+        // Seed poll / Q&A state from the ack so someone joining a meeting that's
+        // already running sees the polls and questions in flight, not an empty
+        // panel until the next change happens to be broadcast.
+        if (Array.isArray(res.polls)) setPolls(res.polls);
+        if (Array.isArray(res.questions)) setQuestions(res.questions);
         setStatus(res.peers.length ? 'connecting' : 'connected'); // alone = connected (waiting room)
         // I'm the newcomer → I offer to everyone already here.
         res.peers.forEach((p) => { usersRef.current.set(p.socketId, { userId: p.userId, name: p.name, avatar: p.avatar }); offerTo(p.socketId); });
@@ -317,6 +330,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:peer-left', onPeerLeft);
       socket.off('meeting:presenting', onPresenting);
       socket.off('meeting:chat', onChat);
+      socket.off('meeting:polls', onPolls);
+      socket.off('meeting:questions', onQuestions);
       socket.off('meeting:reaction', onReaction);
       socket.off('meeting:hand', onHand);
       socket.off('meeting:force-mute', onForceMute);
@@ -364,7 +379,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         const n = Math.max(1, streams.length);
         const cols = Math.ceil(Math.sqrt(n));
         const rows = Math.ceil(n / cols);
-        ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#061a2a'; /* navy-950 — matches the meeting-room backdrop */ ctx.fillRect(0, 0, canvas.width, canvas.height);
         const cw = canvas.width / cols; const ch = canvas.height / rows;
         streams.forEach((s, i) => {
           const el = elFor(s);
@@ -459,6 +474,36 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     setChatMessages((prev) => [...prev, { id: `me-${Date.now()}`, socketId: 'me', name: 'You', text: body, at: Date.now(), mine: true }]);
   }, [meetingId]);
 
+  /* ── Polls & Q&A ────────────────────────────────────────────────────
+     No optimistic echo here, unlike sendChat: the server owns the tallies (one
+     vote per person, upvote toggles) and re-broadcasts the whole authoritative
+     array, so guessing locally would only risk showing a count that never was. */
+  const createPoll = useCallback((question, options, multi) => {
+    getSocket()?.emit('meeting:poll-create', { meetingId, question, options, multi: !!multi });
+  }, [meetingId]);
+
+  const votePoll = useCallback((pollId, choices) => {
+    getSocket()?.emit('meeting:poll-vote', { meetingId, pollId, choices });
+  }, [meetingId]);
+
+  const closePoll = useCallback((pollId) => {
+    getSocket()?.emit('meeting:poll-close', { meetingId, pollId });
+  }, [meetingId]);
+
+  const askQuestion = useCallback((text, anonymous) => {
+    const body = String(text || '').trim().slice(0, 500);
+    if (!body) return;
+    getSocket()?.emit('meeting:qa-ask', { meetingId, text: body, anonymous: !!anonymous });
+  }, [meetingId]);
+
+  const upvoteQuestion = useCallback((questionId) => {
+    getSocket()?.emit('meeting:qa-upvote', { meetingId, questionId });
+  }, [meetingId]);
+
+  const answerQuestion = useCallback((questionId, answerText) => {
+    getSocket()?.emit('meeting:qa-answer', { meetingId, questionId, answerText });
+  }, [meetingId]);
+
   const sendReaction = useCallback((emoji) => {
     getSocket()?.emit('meeting:reaction', { meetingId, emoji });
     const id = `r-${Date.now()}-${reactSeq.current++}`;
@@ -502,5 +547,6 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised, knocks, admitGuest,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
+    polls, questions, createPoll, votePoll, closePoll, askQuestion, upvoteQuestion, answerQuestion,
   };
 }

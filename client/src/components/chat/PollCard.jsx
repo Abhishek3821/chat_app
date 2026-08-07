@@ -31,12 +31,14 @@ export default function PollCard({ message, mine }) {
               onClick={() => votePoll(chatId, message._id, i)}
               disabled={poll.closed}
               className={cn(
-                'relative block w-full overflow-hidden rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors disabled:cursor-default',
-                mine ? 'border-white/30 hover:bg-white/10' : 'border-border hover:bg-content/5'
+                // Each option is a trough with the result filling it, so the
+                // bar reads as liquid in a channel rather than a painted strip.
+                'neu-press relative block w-full overflow-hidden rounded-xl px-2.5 py-1.5 text-left text-sm disabled:cursor-default',
+                mine ? 'neu-on-accent' : 'neu-inset-sm bg-surface-2'
               )}
             >
               <span
-                className={cn('absolute inset-y-0 left-0 transition-all duration-300', mine ? 'bg-white/20' : 'bg-brand-500/15')}
+                className={cn('absolute inset-y-0 left-0 transition-all duration-300', mine ? 'bg-white/25' : 'bg-brand-gradient opacity-25')}
                 style={{ width: `${pct}%` }}
                 aria-hidden
               />

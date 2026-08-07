@@ -4,10 +4,17 @@ import toast from 'react-hot-toast';
 import { useAuth } from './useAuth';
 
 const storedTheme = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_theme') : null;
-const storedAccent = typeof localStorage !== 'undefined' ? localStorage.getItem('cc_accent') : null;
+// Key is versioned: the pre-rebrand key held 'indigo' for anyone who had used the
+// app before, which pinned them to the old accent and hid the new palette
+// entirely. Bumping it retires those values instead of migrating them.
+const ACCENT_KEY = 'cc_accent_v2';
+const storedAccent = typeof localStorage !== 'undefined' ? localStorage.getItem(ACCENT_KEY) : null;
 
-/** Accent presets — keep in sync with the [data-accent] blocks in index.css. */
+/** Accent presets — keep in sync with the [data-accent] blocks in index.css.
+ *  'teal' is the brand palette and the :root default, so it has no
+ *  [data-accent] block of its own — it's what you get by falling through. */
 export const ACCENTS = [
+  { id: 'teal', name: 'Teal', dot: '#2d5652' },
   { id: 'indigo', name: 'Indigo', dot: '#6366f1' },
   { id: 'violet', name: 'Violet', dot: '#8b5cf6' },
   { id: 'cyan', name: 'Cyan', dot: '#06b6d4' },
@@ -20,7 +27,7 @@ const ACCENT_IDS = ACCENTS.map((a) => a.id);
 /** Global UI state: theme, accent, layout panels, active modal & active call. */
 export const useUI = create((set, get) => ({
   theme: storedTheme || 'dark',
-  accent: ACCENT_IDS.includes(storedAccent) ? storedAccent : 'indigo',
+  accent: ACCENT_IDS.includes(storedAccent) ? storedAccent : 'teal',
   navCollapsed: false,
   chatListOpen: true, // mobile: whether the chat list (vs. conversation) is shown
   rightPanelOpen: false,
@@ -36,7 +43,7 @@ export const useUI = create((set, get) => ({
 
   setAccent: (accent) => {
     if (!ACCENT_IDS.includes(accent)) return;
-    if (typeof localStorage !== 'undefined') localStorage.setItem('cc_accent', accent);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(ACCENT_KEY, accent);
     set({ accent });
   },
 
@@ -45,9 +52,9 @@ export const useUI = create((set, get) => ({
   resetAppearance: () => {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('cc_theme');
-      localStorage.removeItem('cc_accent');
+      localStorage.removeItem(ACCENT_KEY);
     }
-    set({ theme: 'dark', accent: 'indigo' });
+    set({ theme: 'dark', accent: 'teal' });
   },
 
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),

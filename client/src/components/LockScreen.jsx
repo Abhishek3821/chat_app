@@ -34,7 +34,7 @@ export default function LockScreen({ onUnlock }) {
   };
 
   return (
-    <div className="relative grid h-screen place-items-center overflow-hidden bg-[rgb(var(--app-bg))] p-4">
+    <div className="relative grid h-[100dvh] place-items-center overflow-hidden bg-[rgb(var(--app-bg))] p-4">
       {/* Soft brand glow behind the card */}
       <div className="pointer-events-none absolute inset-0 bg-brand-gradient opacity-10 blur-[120px]" />
 

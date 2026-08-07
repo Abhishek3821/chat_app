@@ -46,7 +46,7 @@ export default class ErrorBoundary extends Component {
             <div className="mt-5 flex items-center justify-center gap-2">
               <button
                 onClick={() => this.setState({ error: null })}
-                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-content hover:bg-content/5"
+                className="neu-raised-sm neu-press rounded-2xl bg-surface px-4 py-2.5 text-sm font-semibold text-content"
               >
                 Try again
               </button>

@@ -33,18 +33,37 @@ export default function AppLayout() {
   const isChat = pathname === '/';
 
   return (
-    <div className="relative flex h-[100dvh] overflow-hidden bg-[rgb(var(--app-bg))]">
+    /* The same lit-room wash the conversation canvas uses, so panels lift off
+       the background on every page rather than only inside a chat. */
+    <div className="chat-canvas relative flex h-[100dvh] overflow-hidden">
       <div className="relative z-10 flex h-full w-full">
         <NavRail />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
-          <main className={isChat ? 'min-h-0 flex-1' : 'scrollbar-thin min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0'}>
+          <main
+            className={
+              isChat
+                ? 'min-h-0 flex-1'
+                : // The bottom nav is 68px tall plus the iOS home-indicator inset;
+                  // pb-20 alone left the last row under it on notched phones.
+                  'scrollbar-thin min-h-0 flex-1 overflow-y-auto pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0'
+            }
+          >
             {/* Page-level boundary: a render error in one screen keeps the nav/topbar
                 alive and resets when you navigate (resetKey = pathname). The keyed
                 motion.div gives each route a clean entrance without a fragile
                 mode="wait" that could stall the swap. */}
             <ErrorBoundary resetKey={pathname}>
-              <motion.div key={pathname} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }} className="h-full">
+              <motion.div
+                key={pathname}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.16 }}
+                // Chat runs full-bleed (it manages its own columns). Every other
+                // page gets centred with a ceiling so text lines don't stretch
+                // across an ultrawide monitor.
+                className={isChat ? 'h-full' : 'mx-auto h-full w-full max-w-screen-2xl'}
+              >
                 {outlet}
               </motion.div>
             </ErrorBoundary>

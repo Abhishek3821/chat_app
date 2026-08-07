@@ -739,7 +739,7 @@ or (`200`, when the target had already sent *you* a pending request):
 - **Rate limit**: none beyond `apiLimiter`
 - **Path params**: `id` — `ContactRequest._id`
 - **Query params**: none
-- **Body**: `action` (string, required) — `'accept'`; **anything else (including a missing value) is treated as reject**
+- **Body**: `action` (string, required) — must be exactly `'accept'` or `'reject'`. Any other value (including a missing one) is a `400`; it is **not** silently treated as a reject, because rejection is terminal and would destroy the request.
 - **Success response**:
 ```json
 { "success": true, "request": { "_id": "66e5...", "from": "66a1...", "to": "66a2...", "status": "accepted", "message": "", "createdAt": "…", "updatedAt": "…", "__v": 0 } }
@@ -901,6 +901,30 @@ or (`200`, when the target had already sent *you* a pending request):
   - `400` → `"At most 20 attachments per message."`
   - `400` → `"Message cannot be empty."` (no content, no attachments, no location)
 - **Notes**: stamps `expiresAt` when the chat has `disappearingSeconds > 0` (TTL index self-deletes). Sender is pre-marked in `deliveredTo` and `readBy`. Updates `chat.lastMessage` (an ObjectId ref) and thus `chat.updatedAt`. Invalidates the chat-list cache for **every** participant. Sockets: `receive-message` `{ chatId, message }` to each participant's **personal** room, plus `chat-updated` `{ chatId }` to everyone but the sender. `notifyUser` per recipient (in-app Notification + Web Push, `type: 'group_message' | 'message'`, `url: '/?chat=<id>'`). For direct chats also enqueues `automsg.maybe` (business greeting/away auto-reply).
+
+### POST /api/messages/schedule
+- **Auth**: access token (`protect`)
+- **Body**: same payload as `POST /api/messages` (`chatId`, `content`, `type`, `attachments`, `location`, `replyTo`, `mentions`) — validated by the **same** `validateOutgoing()` the live path uses, so a scheduled message can never carry something a live send would reject — plus:
+  - `sendAt` (date string, **required**) — must parse, and be at least **10 seconds** (`MIN_SCHEDULE_LEAD_MS`) in the future
+- **Success response**: `201 { "success": true, "scheduled": { "_id": "…", "chat": "…", "sender": "…", "type": "text", "content": "…", "sendAt": "…", "status": "pending" } }`
+- **Errors**:
+  - `400 sendAt must be a valid date.`
+  - `400 Pick a time at least a few seconds from now.`
+  - `400 You can have at most 50 scheduled messages per chat.` (`MAX_PENDING_PER_CHAT`)
+  - `404 Chat not found.` / `403` — not a participant, or a group with `messagingPolicy: 'admins'`
+- **Notes**: pending rows live in a **separate `ScheduledMessage` collection**, never in `Message` — so they cannot leak into chat history, search, starred, unread counts or `chat.lastMessage`. `utils/scheduledDispatcher.js` polls every **30 s**, claims a due row with an atomic `findOneAndUpdate` (`pending → sending`) so multiple instances can't double-send, and re-checks chat membership at send time. A row stuck in `sending` for over **5 minutes** is treated as orphaned and reclaimed. Emits `scheduled-message` `{ id, chatId, status }` to the author's own devices.
+
+### GET /api/messages/scheduled/:chatId
+- **Auth**: access token (`protect`) + chat membership
+- **Path params**: `chatId` — the chat whose queue to list
+- **Success response**: `200 { "success": true, "scheduled": [ { "...ScheduledMessage": true } ] }` — **only the caller's own** rows, `status` in `pending`/`failed`, sorted by `sendAt` ascending
+- **Errors**: `404 Chat not found.` / `403` not a participant
+
+### DELETE /api/messages/scheduled/:id
+- **Auth**: access token (`protect`) + row owner
+- **Success response**: `200 { "success": true }`
+- **Errors**: `404 That scheduled message is no longer pending.`
+- **Notes**: the owner check and the still-cancellable state are both in the update **query** (`status: 'pending'` → `cancelled`), so a row the dispatcher has already claimed can't be yanked out from under it. Emits `scheduled-message` `{ status: 'cancelled' }`.
 
 ### POST /api/messages/poll
 - **Auth**: access token (`protect`)
@@ -1379,12 +1403,16 @@ Also exposed as `POST /api/v1/meetings`.
   - `chatId` (string ObjectId, optional) — stored as `meeting.chat`
   - `inviteEmails` (array of strings, optional, default `[]`) — raw email invitations
   - `settings` (object, optional) — whitelisted booleans only: `joinAnytime`, `muteOnEntry`, `autoRecord`, `askToJoin`
-- **Success response**: `201 { "success": true, "meeting": { "...": "populated meeting (same shape as GET /api/meetings item, without attendeeCount/durationSeconds)" } }`
+- **Success response**: `201 { "success": true, "meeting": { "...": "populated meeting (same shape as GET /api/meetings item, without attendeeCount/durationSeconds)" }, "invitesQueued": 2 }`
+  - `invitesQueued` — how many **valid, de-duplicated** addresses were handed to the
+    mailer (invitees' own emails + `inviteEmails`). Malformed addresses are dropped, so
+    this can be lower than the number supplied. It confirms the invites were *queued*,
+    not that they were delivered — sending is fire-and-forget.
 - **Errors**:
   - `400 participants must be a list.`
   - `400 inviteEmails must be a list.`
   - `500 Could not allocate a meeting room. Please retry.` (5 consecutive `roomCode` collisions)
-- **Notes**: allocates an unguessable `roomCode` (`abc-defg-hij`) and `link = <CLIENT_URL>/meet/<roomCode>`. Emits socket `meeting-invited` (`{ meetingId, title, startAt }`) to each in-workspace invitee and a `meeting_reminder` notification + Web Push. Fire-and-forget email invites (max 50 unique valid addresses) to invitees' emails + `inviteEmails`, with an `invite.ics` calendar attachment (`utils/ics.js`). Host is **not** added to `participants`.
+- **Notes**: allocates an unguessable `roomCode` (`abc-defg-hij`) and `link = <CLIENT_URL>/meet/<roomCode>`. Emits socket `meeting-invited` (`{ meetingId, title, startAt }`) to each in-workspace invitee and a `meeting_reminder` notification + Web Push. Fire-and-forget email invites (max 50 unique valid addresses) to invitees' emails + `inviteEmails`, with an `invite.ics` calendar attachment (`utils/ics.js`). Each send's outcome is logged (`✉️  meeting invite sent to …` / `… FAILED [auth|connection|other]` / a warning when no mailer is configured) — invites never fail the request. Host is **not** added to `participants`. **`CLIENT_URL` must be set**, or the emailed join link is a broken relative path.
 
 ### GET /api/meetings/code/:code
 - **Auth**: access token (`protect`)

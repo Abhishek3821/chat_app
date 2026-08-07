@@ -36,7 +36,10 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
       onClick={() => onOpen(chat._id)}
       className={cn(
         'ring-brand group relative flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors',
-        active ? 'bg-brand-gradient shadow-glow' : 'hover:bg-content/5'
+        // Only the open conversation is extruded — a list of 20 raised cards is
+        // noise, and lifting exactly one of them is what makes it read as
+        // selected without needing a border.
+        active ? 'bg-brand-gradient shadow-glow-lg' : 'hover:bg-content/5'
       )}
     >
       <Avatar src={d.avatar} name={d.name} size="md" online={d.isGroup ? undefined : isOnline} />
@@ -44,6 +47,15 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
         <div className="flex items-center gap-1.5">
           {d.isGroup && <Users size={13} className={cn('shrink-0', active ? 'text-white/80' : 'text-content-muted')} />}
           <p className={cn('truncate text-sm font-semibold', active ? 'text-white' : 'text-content')}>{d.name}</p>
+          {/* Which conversations are sealed has to be legible from the list,
+              not only once you're inside one. */}
+          {chat.e2ee?.enabled && (
+            <Lock
+              size={12}
+              aria-label="End-to-end encrypted"
+              className={cn('shrink-0', active ? 'text-white/80' : 'text-brand-500')}
+            />
+          )}
           {chat.pinned && <Pin size={12} className={cn('shrink-0', active ? 'text-white/70' : 'text-content-muted')} />}
           <span className={cn('ml-auto shrink-0 text-[11px]', active ? 'text-white/80' : 'text-content-muted')}>
             {formatChatTime(chat.lastMessage?.createdAt)}
@@ -66,11 +78,12 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
  *  language (icon badge + muted caption) instead of a bare line of text. */
 function SidebarEmpty({ icon: Icon, message }) {
   return (
-    <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-content/5 text-content-muted">
+    <div className="flex flex-col items-center gap-3 px-5 py-12 text-center sm:px-6">
+      <span className="neu-inset grid h-12 w-12 place-items-center rounded-2xl text-content-muted">
         <Icon size={20} />
       </span>
-      <p className="text-sm text-content-muted">{message}</p>
+      {/* the query is interpolated in here — a long unbroken search term must wrap */}
+      <p className="break-words text-sm text-content-muted">{message}</p>
     </div>
   );
 }
@@ -111,39 +124,39 @@ export default function ChatSidebar() {
   }, [setActiveChat, setChatListOpen]);
 
   return (
-    <aside className="frost flex h-full w-full flex-col border-r border-border/70 md:w-[340px] lg:w-[380px]">
-      <div className="flex items-center justify-between px-4 pt-4">
-        <h2 className="text-lg font-bold text-content">Chats</h2>
-        <div className="flex items-center gap-1.5">
+    <aside className="frost flex h-full w-full min-w-0 flex-col border-r border-border/70 md:w-[340px] lg:w-[380px] 2xl:w-[420px]">
+      <div className="flex items-center justify-between gap-2 px-3 pt-4 sm:px-4">
+        <h2 className="min-w-0 truncate text-lg font-bold text-content">Chats</h2>
+        <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={() => navigate('/broadcasts')}
             title="Broadcast lists"
-            className="ring-brand grid h-9 w-9 place-items-center rounded-xl text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+            className="neu-raised-sm neu-press ring-brand grid h-11 w-11 place-items-center rounded-full bg-surface text-content-muted hover:text-content sm:h-9 sm:w-9"
           >
             <Megaphone size={17} />
           </button>
           <button
             onClick={() => openModal('newChat')}
-            className="ring-brand grid h-9 w-9 place-items-center rounded-xl bg-brand-500/10 text-brand-500 transition-colors hover:bg-brand-500/20"
+            className="btn-gradient ring-brand grid h-11 w-11 place-items-center rounded-full sm:h-9 sm:w-9"
           >
             <Plus size={18} />
           </button>
         </div>
       </div>
 
-      <div className="px-4 pt-3">
+      <div className="px-3 pt-3 sm:px-4">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={17} />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 z-[1] -translate-y-1/2 text-content-muted" size={17} />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
-            className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm transition-colors placeholder:text-content-muted focus:border-brand-400/60"
+            className="neu-inset ring-brand h-11 w-full rounded-full bg-surface-2 pl-10 pr-3 text-sm placeholder:text-content-muted sm:h-10"
           />
         </div>
       </div>
 
-      <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto px-4">
+      <div className="no-scrollbar mt-3 flex shrink-0 gap-2 overflow-x-auto px-3 sm:px-4">
         {FILTERS.map((f) => (
           <Chip key={f} active={filter === f} onClick={() => setFilter(f)} className="shrink-0">
             {f === 'Archived' ? <span className="flex items-center gap-1"><Archive size={12} /> Archived</span>
@@ -156,7 +169,9 @@ export default function ChatSidebar() {
       {filter === 'Locked' ? (
         <LockedSection />
       ) : (
-      <div className="scrollbar-thin mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
+      // The chat route is the one page AppLayout does NOT bottom-pad (it manages
+      // its own columns), so the list has to clear the 68px mobile nav itself.
+      <div className="scrollbar-thin mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-[calc(1rem+68px+env(safe-area-inset-bottom))] md:pb-4">
         {loadingChats ? (
           Array.from({ length: 6 }).map((_, i) => <ChatRowSkeleton key={i} />)
         ) : (
@@ -220,8 +235,8 @@ function LockedSection() {
   // Chat lock rides on the two-step PIN — point people to Settings until it's set.
   if (!twoStepEnabled) {
     return (
-      <div className="mt-6 px-6 text-center">
-        <span className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500"><Lock size={24} /></span>
+      <div className="scrollbar-thin mt-6 min-h-0 flex-1 overflow-y-auto px-5 pb-4 text-center sm:px-6">
+        <span className="neu-inset mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl text-brand-600 dark:text-brand-300"><Lock size={24} /></span>
         <p className="text-sm font-semibold text-content">Locked chats</p>
         <p className="mt-1 text-xs text-content-muted">
           Set up a two-step PIN in Settings → Privacy first — then you can hide any chat behind it.
@@ -232,7 +247,7 @@ function LockedSection() {
 
   if (forgot) {
     return (
-      <div className="mt-6 px-6">
+      <div className="scrollbar-thin mt-6 min-h-0 flex-1 overflow-y-auto px-5 pb-4 sm:px-6">
         <PinResetForm
           onDone={() => { setForgot(false); setPin(''); toast('Enter your new PIN to reveal locked chats.', { icon: '🔐' }); }}
           onCancel={() => setForgot(false)}
@@ -243,8 +258,8 @@ function LockedSection() {
 
   if (!revealed) {
     return (
-      <form onSubmit={submit} className="mt-6 px-6 text-center">
-        <span className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500"><Lock size={24} /></span>
+      <form onSubmit={submit} className="scrollbar-thin mt-6 min-h-0 flex-1 overflow-y-auto px-5 pb-4 text-center sm:px-6">
+        <span className="neu-inset mx-auto mb-3 grid h-14 w-14 place-items-center rounded-2xl text-brand-600 dark:text-brand-300"><Lock size={24} /></span>
         <p className="text-sm font-semibold text-content">Locked chats</p>
         <p className="mt-1 text-xs text-content-muted">Enter your two-step PIN to view chats you&apos;ve locked.</p>
         <input
@@ -254,9 +269,9 @@ function LockedSection() {
           type="password"
           autoFocus
           placeholder="••••"
-          className="mt-4 w-full rounded-xl border border-border bg-surface-2 px-3 py-3 text-center text-lg tracking-[0.4em] text-content outline-none focus:border-brand-500"
+          className="neu-inset mt-4 w-full rounded-2xl bg-surface-2 px-3 py-3 text-center text-lg tracking-[0.4em] text-content outline-none"
         />
-        <button type="submit" disabled={busy || pin.length < 4} className="ring-brand mt-3 w-full rounded-xl bg-brand-gradient py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+        <button type="submit" disabled={busy || pin.length < 4} className="btn-gradient ring-brand mt-3 w-full rounded-2xl py-2.5 text-sm font-semibold disabled:opacity-50">
           {busy ? 'Checking…' : 'Reveal'}
         </button>
         <button type="button" onClick={() => setForgot(true)} className="ring-brand mt-3 rounded px-1 text-xs font-medium text-brand-500 hover:underline">
@@ -267,7 +282,7 @@ function LockedSection() {
   }
 
   return (
-    <div className="scrollbar-thin mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 pb-4">
+    <div className="scrollbar-thin mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-[calc(1rem+68px+env(safe-area-inset-bottom))] md:pb-4">
       {lockedChats.length === 0 ? (
         <SidebarEmpty icon={Lock} message="No locked chats yet" />
       ) : (
@@ -282,7 +297,7 @@ function LockedSection() {
               </div>
               <button
                 onClick={async () => { await unlockChat(c._id); toast.success('Chat unlocked — back in your list.'); }}
-                className="ring-brand inline-flex shrink-0 items-center gap-1 rounded-lg bg-brand-500/10 px-2.5 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-500/20"
+                className="neu-raised-sm neu-press ring-brand inline-flex shrink-0 items-center gap-1 rounded-full bg-surface px-2.5 py-1.5 text-xs font-medium text-brand-600 dark:text-brand-300"
               >
                 <LockOpen size={13} /> Unlock
               </button>

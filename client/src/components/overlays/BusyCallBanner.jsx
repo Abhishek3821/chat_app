@@ -27,7 +27,9 @@ export default function BusyCallBanner() {
           initial={{ opacity: 0, x: 40 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 40 }}
-          className="fixed right-4 top-4 z-[130] flex w-[min(92vw,20rem)] items-start gap-3 rounded-2xl bg-navy-900/95 p-3.5 text-white shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl"
+          // top offset clears the notch/status bar on phones; the width is
+          // already viewport-clamped so it can't overflow a 320px screen.
+          className="fixed right-4 top-[calc(1rem+env(safe-area-inset-top))] z-[130] flex w-[min(92vw,20rem)] items-start gap-3 rounded-2xl bg-navy-900/95 p-3.5 text-white shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl sm:top-4"
         >
           <div className="relative shrink-0">
             <Avatar src={busyIncoming.caller?.avatar} name={busyIncoming.caller?.name} size="md" />
@@ -41,7 +43,7 @@ export default function BusyCallBanner() {
               You’re on another call — they’ve been told you’re busy. You can call them back when you’re done.
             </p>
           </div>
-          <button onClick={dismiss} title="Dismiss" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white">
+          <button onClick={dismiss} title="Dismiss" aria-label="Dismiss" className="-m-1.5 grid h-10 w-10 shrink-0 place-items-center rounded-full text-white/60 hover:bg-white/10 hover:text-white sm:-m-0 sm:h-7 sm:w-7">
             <X size={14} />
           </button>
         </motion.div>

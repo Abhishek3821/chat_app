@@ -9,6 +9,7 @@ import Switch from '@/components/ui/Switch';
 import EmptyState from '@/components/ui/EmptyState';
 import { useWorkspace } from '@/store/useWorkspace';
 import { useBusiness } from '@/store/useBusiness';
+import { PAGE_SHELL } from '@/lib/utils';
 
 const TABS = [
   { key: 'profile', label: 'Profile', icon: Store },
@@ -30,7 +31,7 @@ export default function BusinessPage() {
 
   if (isPersonal) {
     return (
-      <div className="grid h-full place-items-center p-6">
+      <div className="grid h-full place-items-center p-4 sm:p-6">
         <EmptyState icon={Store} title="Business tools are for team workspaces" description="Personal accounts don't have a business storefront. Create or join a team workspace to use the catalog, labels and auto-replies." />
       </div>
     );
@@ -38,30 +39,33 @@ export default function BusinessPage() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="mx-auto max-w-4xl p-4 md:p-6">
-        <motion.header initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow"><Store size={22} /></span>
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight md:text-3xl">
-              <span className="gradient-text">{workspace?.name || 'Business'}</span>
-              {workspace?.businessProfile?.verified && <BadgeCheck size={22} className="text-brand-500" title="Verified business" />}
+      <div className={PAGE_SHELL}>
+        <motion.header initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="flex items-start gap-3 sm:items-center">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow"><Store size={22} /></span>
+          <div className="min-w-0">
+            {/* A long workspace name has to wrap under, not shove, the badge. */}
+            <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xl font-bold tracking-tight md:text-3xl">
+              <span className="gradient-text min-w-0 break-words">{workspace?.name || 'Business'}</span>
+              {workspace?.businessProfile?.verified && <BadgeCheck size={22} className="shrink-0 text-brand-500" title="Verified business" />}
             </h1>
             <p className="text-sm text-content-muted">Your WhatsApp-Business storefront and agent tools.</p>
           </div>
         </motion.header>
 
         {!canManage && (
-          <div className="mt-4 flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
-            <ShieldAlert size={16} /> You can view these tools, but only owners/admins can edit them.
+          <div className="mt-4 flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+            <ShieldAlert size={16} className="mt-0.5 shrink-0" /> You can view these tools, but only owners/admins can edit them.
           </div>
         )}
 
-        <div className="mt-5 flex gap-1.5 overflow-x-auto scrollbar-thin">
+        {/* pb-1 keeps the thin scrollbar off the tab pills at 320px, where all
+            five labels overflow and the strip really does scroll. */}
+        <div className="mt-5 flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
           {TABS.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${tab === t.key ? 'bg-brand-gradient text-white shadow-glow' : 'text-content-muted hover:bg-content/5 hover:text-content'}`}
+              className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 py-3 text-sm font-medium transition-colors sm:py-2 ${tab === t.key ? 'bg-brand-gradient text-white shadow-glow' : 'text-content-muted hover:bg-content/5 hover:text-content'}`}
             >
               <t.icon size={16} /> {t.label}
             </button>
@@ -135,19 +139,19 @@ function CatalogTab({ business, canManage }) {
       {business.products.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-border"><EmptyState icon={Package} title="No products yet" description="Add items to your catalog to share them in chats." /></div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {business.products.map((p) => (
             <Card key={p._id}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-content">{p.name}</p>
-                  <p className="text-sm text-brand-600 dark:text-brand-300">{p.price ? `${p.currency} ${p.price}` : 'Free'}{!p.inStock && <span className="ml-2 text-xs text-red-500">Out of stock</span>}</p>
-                  {p.description && <p className="mt-1 line-clamp-2 text-xs text-content-muted">{p.description}</p>}
+                  <p className="break-words text-sm text-brand-600 dark:text-brand-300">{p.price ? `${p.currency} ${p.price}` : 'Free'}{!p.inStock && <span className="ml-2 whitespace-nowrap text-xs text-red-500">Out of stock</span>}</p>
+                  {p.description && <p className="mt-1 line-clamp-2 break-words text-xs text-content-muted">{p.description}</p>}
                 </div>
                 {canManage && (
                   <div className="flex shrink-0 gap-1">
-                    <button onClick={() => setEditing({ ...p, price: String(p.price ?? '') })} className="grid h-8 w-8 place-items-center rounded-lg text-content-muted hover:bg-content/10 hover:text-content"><Pencil size={15} /></button>
-                    <button onClick={() => business.deleteProduct(p._id).then(() => toast.success('Deleted.'))} className="grid h-8 w-8 place-items-center rounded-lg text-red-500 hover:bg-red-500/10"><Trash2 size={15} /></button>
+                    <button onClick={() => setEditing({ ...p, price: String(p.price ?? '') })} className="grid h-10 w-10 place-items-center rounded-lg text-content-muted hover:bg-content/10 hover:text-content sm:h-8 sm:w-8"><Pencil size={15} /></button>
+                    <button onClick={() => business.deleteProduct(p._id).then(() => toast.success('Deleted.'))} className="grid h-10 w-10 place-items-center rounded-lg text-red-500 hover:bg-red-500/10 sm:h-8 sm:w-8"><Trash2 size={15} /></button>
                   </div>
                 )}
               </div>
@@ -204,15 +208,15 @@ function AutoTab({ workspace, canManage }) {
   return (
     <div className="space-y-4">
       <Card>
-        <div className="flex items-center justify-between">
-          <div><p className="font-semibold text-content">Greeting message</p><p className="text-xs text-content-muted">Sent automatically the first time a customer messages you.</p></div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0"><p className="font-semibold text-content">Greeting message</p><p className="text-xs text-content-muted">Sent automatically the first time a customer messages you.</p></div>
           <Switch checked={greeting.enabled} onChange={(v) => setGreeting((g) => ({ ...g, enabled: v }))} disabled={!canManage} />
         </div>
         <Textarea rows={2} className="mt-3" value={greeting.text} onChange={(e) => setGreeting((g) => ({ ...g, text: e.target.value }))} placeholder="Hi! Thanks for reaching out. We'll reply shortly." disabled={!canManage} />
       </Card>
       <Card>
-        <div className="flex items-center justify-between">
-          <div><p className="font-semibold text-content">Away message</p><p className="text-xs text-content-muted">Sent when customers message outside business hours.</p></div>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0"><p className="font-semibold text-content">Away message</p><p className="text-xs text-content-muted">Sent when customers message outside business hours.</p></div>
           <Switch checked={away.enabled} onChange={(v) => setAway((a) => ({ ...a, enabled: v }))} disabled={!canManage} />
         </div>
         <Textarea rows={2} className="mt-3" value={away.text} onChange={(e) => setAway((a) => ({ ...a, text: e.target.value }))} placeholder="We're away right now and will respond during business hours." disabled={!canManage} />
@@ -228,14 +232,17 @@ function AutoTab({ workspace, canManage }) {
 
 function LabelsTab({ business, canManage }) {
   const [name, setName] = useState('');
-  const [color, setColor] = useState('#6366f1');
+  // Brand teal, one step up from brand-600: the swatch is rendered as a bare
+  // dot on both chip surfaces, and #2D5652 sat at 1.5:1 on the dark one.
+  // cyan-500 is the one ramp step that clears 3:1 against both (3.7 / 3.1).
+  const [color, setColor] = useState('#3C8C86');
   return (
     <div className="space-y-4">
       {canManage && (
         <Card>
           <div className="flex items-end gap-2">
             <div className="flex-1"><Field label="New label"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. New customer" /></Field></div>
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-11 w-12 shrink-0 cursor-pointer rounded-xl border border-border bg-surface-2" />
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-11 w-12 shrink-0 cursor-pointer rounded-xl neu-inset bg-surface-2" />
             <Button size="md" disabled={!name.trim()} onClick={async () => { try { await business.addLabel(name.trim(), color); setName(''); } catch (e) { toast.error(e?.message || 'Failed.'); } }}><Plus size={17} /></Button>
           </div>
         </Card>
@@ -245,7 +252,7 @@ function LabelsTab({ business, canManage }) {
       ) : (
         <div className="flex flex-wrap gap-2">
           {business.labels.map((l) => (
-            <span key={l._id} className="inline-flex items-center gap-2 rounded-full border border-border bg-surface-2 py-1.5 pl-2.5 pr-1.5 text-sm">
+            <span key={l._id} className="inline-flex items-center gap-2 rounded-full neu-raised-sm bg-surface py-1.5 pl-2.5 pr-1.5 text-sm">
               <span className="h-3 w-3 rounded-full" style={{ background: l.color }} />
               <span className="text-content">{l.name}</span>
               {canManage && <button onClick={() => business.deleteLabel(l._id)} className="grid h-6 w-6 place-items-center rounded-full text-content-muted hover:bg-red-500/10 hover:text-red-500"><Trash2 size={13} /></button>}

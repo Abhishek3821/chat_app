@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api, { DEMO_MODE } from '../lib/api';
+import { isFresh, markFetched, markStale } from '../lib/freshness';
 
 /** Communities: groups-of-groups with an admins-only announcement group. */
 export const useCommunities = create((set, get) => ({
@@ -7,14 +8,18 @@ export const useCommunities = create((set, get) => ({
   active: null, // full detail (with groups) of the open community
   loading: false,
 
-  load: async () => {
+  load: async ({ force = false } = {}) => {
     if (DEMO_MODE) return;
+    // The page refetches on every mount; skip it if we just did. Writes below
+    // call markStale('communities'), so this never hides the user's own changes.
+    if (!force && isFresh('communities') && get().communities.length) return;
     set({ loading: true });
     try {
       const { data } = await api.get('/communities');
       set({ communities: data.communities || [] });
+      markFetched('communities');
     } catch {
-      /* offline */
+      markStale('communities'); // a failed load must not look fresh
     } finally {
       set({ loading: false });
     }
@@ -34,7 +39,7 @@ export const useCommunities = create((set, get) => ({
 
   join: async (inviteCode) => {
     const { data } = await api.post(`/communities/join/${encodeURIComponent(inviteCode)}`);
-    await get().load();
+    await get().load({ force: true }); // must not be skipped by the freshness guard
     return data.community;
   },
 

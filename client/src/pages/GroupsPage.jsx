@@ -6,7 +6,8 @@ import { Plus, Users, Sparkles, ArrowRight, MessageSquare, Layers } from 'lucide
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
-import { cn, formatChatTime, gradientFor } from '@/lib/utils';
+import PageHeader from '@/components/ui/PageHeader';
+import { cn, formatChatTime, gradientFor, PAGE_SHELL } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useChat } from '@/store/useChat';
 
@@ -39,42 +40,49 @@ export default function GroupsPage() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="mx-auto max-w-6xl p-4 md:p-6">
-        <motion.header
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-          className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl"><span className="gradient-text">Groups</span></h1>
-            <p className="mt-1 text-sm text-content-muted">Spaces where your people gather and ideas take shape.</p>
-          </div>
-          <Button size="md" onClick={() => openModal('createGroup')} className="shrink-0"><Plus size={18} /> New group</Button>
-        </motion.header>
+      <div className={PAGE_SHELL}>
+        <PageHeader
+          icon={Users}
+          title="Groups"
+          subtitle="Spaces where your people gather and ideas take shape."
+          actions={
+            <Button onClick={() => openModal('createGroup')}>
+              <Plus size={18} />
+              <span className="hidden sm:inline">New group</span>
+            </Button>
+          }
+        />
 
-        <motion.section
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 }}
-          className="glass-strong relative mt-6 overflow-hidden rounded-3xl p-5 shadow-soft md:p-6"
-        >
-          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-gradient opacity-20 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-20 left-10 h-40 w-40 rounded-full bg-cyan-500/20 blur-3xl" />
-          <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3">
-              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow"><Sparkles size={22} /></span>
-              <div>
-                <p className="text-sm font-semibold text-content">Your groups</p>
-                <p className="text-xs text-content-muted">You&apos;re in {groups.length} {groups.length === 1 ? 'group' : 'groups'}.</p>
+        {/* Summary band — only once there's something to summarise. It used to
+            render unconditionally, so an account with no groups got a card
+            reading "You're in 0 groups · 0 Groups · 0 Members" stacked directly
+            on top of the "No groups yet" empty state. */}
+        {groups.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08 }}
+            className="glass-strong relative mt-6 overflow-hidden rounded-3xl p-4 shadow-soft sm:p-5"
+          >
+            {/* Decorative blobs sit outside the box on purpose — the section's
+                overflow-hidden is what keeps them from widening the page. */}
+            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-brand-gradient opacity-20 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-20 left-10 h-40 w-40 rounded-full bg-cyan-500/20 blur-3xl" />
+            <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow"><Sparkles size={20} /></span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-content">Your groups</p>
+                  <p className="text-xs text-content-muted">You&apos;re in {groups.length} {groups.length === 1 ? 'group' : 'groups'}.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:flex sm:shrink-0 sm:gap-3">
+                <Stat icon={Layers} value={groups.length} label="Groups" />
+                <Stat icon={Users} value={totalMembers} label="Members" />
               </div>
             </div>
-            <div className="flex gap-3">
-              <Stat icon={Layers} value={groups.length} label="Groups" />
-              <Stat icon={Users} value={totalMembers} label="Members" />
-            </div>
-          </div>
-        </motion.section>
+          </motion.section>
+        )}
 
         {groups.length === 0 ? (
           <div className="mt-6 rounded-3xl border border-dashed border-border">
@@ -86,7 +94,7 @@ export default function GroupsPage() {
             />
           </div>
         ) : (
-          <motion.div variants={container} initial="hidden" animate="show" className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <motion.div variants={container} initial="hidden" animate="show" className="mt-6 grid gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 2xl:grid-cols-4">
             {groups.map((group) => (
               <GroupCard key={group._id} group={group} onOpen={() => openGroup(group)} />
             ))}
@@ -99,10 +107,12 @@ export default function GroupsPage() {
 
 function Stat({ icon: Icon, value, label }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-2xl bg-surface/60 px-4 py-2.5">
-      <Icon size={18} className="text-brand-500" />
-      <div className="leading-tight">
-        <p className="text-lg font-bold text-content">{value}</p>
+    // border + a min width so the two chips read as a matched pair instead of
+    // two differently-sized blobs sized by their label text.
+    <div className="neu-raised-sm flex min-w-0 items-center gap-2.5 rounded-2xl bg-surface px-3 py-2.5 sm:min-w-[7.5rem] sm:px-4">
+      <Icon size={18} className="shrink-0 text-brand-500" />
+      <div className="min-w-0 leading-tight">
+        <p className="text-lg font-bold tabular-nums text-content">{value}</p>
         <p className="text-[11px] font-medium text-content-muted">{label}</p>
       </div>
     </div>
@@ -125,7 +135,9 @@ function GroupCard({ group, onOpen }) {
       <div className={cn('relative h-24 bg-gradient-to-br', gradientFor(group.name || group._id))}>
         <div className="absolute inset-0 bg-mesh-dark opacity-40" />
         {group.unreadCount > 0 && (
-          <span className="absolute right-3 top-3 grid min-w-[22px] place-items-center rounded-full bg-white/25 px-2 py-0.5 text-[11px] font-bold text-white backdrop-blur-sm">
+          // Navy scrim, not white/25: over the lighter cover gradients (e.g.
+          // to-cyan-500) a translucent white pill left white text at ~2.7:1.
+          <span className="absolute right-3 top-3 grid min-w-[22px] place-items-center rounded-full bg-navy-900/40 px-2 py-0.5 text-[11px] font-bold text-white backdrop-blur-sm">
             {group.unreadCount > 99 ? '99+' : group.unreadCount} new
           </span>
         )}

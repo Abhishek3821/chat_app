@@ -28,7 +28,7 @@ const API = `${BASE}/api`;
 
 const baseUri = process.env.MONGO_URI || '';
 if (!baseUri) { console.error('MONGO_URI missing in server/.env'); process.exit(1); }
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_e2e$2');
+const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_push$2');
 if (TEST_URI === baseUri) { console.error('Could not derive isolated test DB.'); process.exit(1); }
 
 const vapid = webpush.generateVAPIDKeys();

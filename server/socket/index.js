@@ -12,6 +12,9 @@ import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callSe
 // id used in a Mongo query MUST be validated here — otherwise a client could send
 // `{ chatId: { $ne: null } }` and turn a scoped update into a whole-collection one.
 const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
+// Live-caption transcript is capped per meeting: it's appended to on every final
+// caption, so an unbounded array on a hot document would grow all meeting long.
+const MAX_TRANSCRIPT_LINES = 500;
 
 let ioRef = null;
 let usingAdapter = false; // true once the Redis adapter is attached (multi-instance)
@@ -200,8 +203,15 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     });
 
     // ── Read receipts ─────────────────────────────────────────────
+    // `socket.to(...)` excludes the sending socket, which is right for the other
+    // participants but wrong for the reader's OWN other devices: reading on your
+    // phone left the same messages showing unread on your laptop. Peers get it via
+    // the chat room; every device of ours gets it via the per-user room. A device
+    // that is in both receives one of each, and applying a read twice is a no-op.
     socket.on('message-read', ({ chatId, messageIds } = {}) => {
-      if (inChat(chatId)) socket.to(`chat:${chatId}`).emit('message-read', { chatId, messageIds, userId });
+      if (!inChat(chatId)) return;
+      socket.to(`chat:${chatId}`).emit('message-read', { chatId, messageIds, userId });
+      socket.to(`user:${userId}`).emit('message-read', { chatId, messageIds, userId });
     });
 
     // ── Live reactions (also persisted via REST) ──────────────────
@@ -421,7 +431,9 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       if (!isId(meetingId)) return typeof cb === 'function' && cb({ ok: false, error: 'Invalid meeting.' });
       let meeting;
       try {
-        meeting = await Meeting.findById(meetingId).select('status host settings participants');
+        // polls/questions ride along on this existing fetch (rather than a second
+        // query) so a late joiner receives the poll + Q&A state already in flight.
+        meeting = await Meeting.findById(meetingId).select('status host settings participants polls questions');
       } catch {
         meeting = null;
       }
@@ -496,7 +508,9 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         name: socket.data.name,
         avatar: socket.data.avatar,
       });
-      if (typeof cb === 'function') cb({ ok: true, peers, isHost });
+      if (typeof cb === 'function') {
+        cb({ ok: true, peers, isHost, polls: meeting?.polls || [], questions: meeting?.questions || [] });
+      }
     });
 
     // Relay an opaque SDP/ICE payload to ONE specific socket, only if the sender
@@ -540,6 +554,167 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.on('meeting:hand', ({ meetingId, up } = {}) => {
       if (!inRoom(meetingId)) return;
       socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, userId, name: socket.data.name, up: !!up });
+    });
+
+    // ── Live captions ──────────────────────────────────────────────
+    // Each participant transcribes their OWN microphone locally (Web Speech API)
+    // and broadcasts the text. Deliberately a plain relay with no server state:
+    // there is no STT cost, it scales with the room, and speaker attribution is
+    // free because a caption can only ever come from the person who spoke it.
+    // Interim results are relayed but never persisted — only finals land in the
+    // transcript, and that array is capped so a long meeting can't grow the doc
+    // without bound.
+    socket.on('meeting:caption', async ({ meetingId, text, final } = {}) => {
+      const body = String(text || '').trim().slice(0, 1000);
+      if (!inRoom(meetingId) || !body) return;
+      socket.to(meetingRoom(meetingId)).emit('meeting:caption', {
+        socketId: socket.id,
+        userId,
+        name: socket.data.name,
+        text: body,
+        final: !!final,
+        at: Date.now(),
+      });
+      if (!final) return;
+      try {
+        await Meeting.updateOne({ _id: meetingId }, {
+          $push: {
+            transcript: {
+              $each: [{ user: userId, name: socket.data.name, text: body, at: new Date() }],
+              $slice: -MAX_TRANSCRIPT_LINES, // keep only the most recent N
+            },
+          },
+        });
+      } catch {
+        /* the transcript is a nice-to-have — never break live captions over it */
+      }
+    });
+
+    // ── In-meeting polls (server-authoritative) ────────────────────
+    // State lives on the Meeting doc, not in the clients: votes must be counted
+    // once per person, late joiners need the current state, and the meeting
+    // report reads it afterwards. A pure relay satisfies none of those.
+    const broadcastPolls = (meetingId, polls) => {
+      ioRef.to(meetingRoom(meetingId)).emit('meeting:polls', { polls });
+    };
+
+    socket.on('meeting:poll-create', async ({ meetingId, question, options, multi } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
+      const q = String(question || '').trim().slice(0, 300);
+      const opts = (Array.isArray(options) ? options : [])
+        .map((o) => String(o || '').trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 10);
+      if (!q || opts.length < 2) return;
+      try {
+        const m = await Meeting.findByIdAndUpdate(
+          meetingId,
+          { $push: { polls: { question: q, options: opts, multi: !!multi, createdBy: userId, votes: [] } } },
+          { new: true, select: 'polls' }
+        );
+        if (m) broadcastPolls(meetingId, m.polls);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on('meeting:poll-vote', async ({ meetingId, pollId, choices } = {}) => {
+      if (!inRoom(meetingId)) return;
+      const picks = [...new Set((Array.isArray(choices) ? choices : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n < 10))];
+      if (!picks.length) return;
+      try {
+        const m = await Meeting.findById(meetingId).select('polls');
+        const poll = m?.polls?.id(pollId);
+        if (!poll || poll.closed) return;
+        if (!poll.multi) picks.splice(1); // single-choice polls ignore extra picks
+        if (picks.some((i) => i >= poll.options.length)) return;
+        // Replace this voter's row rather than pushing another one — that's what
+        // makes a re-vote correct instead of double-counting.
+        poll.votes = poll.votes.filter((v) => String(v.user) !== String(userId));
+        poll.votes.push({ user: userId, choices: picks });
+        await m.save();
+        broadcastPolls(meetingId, m.polls);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on('meeting:poll-close', async ({ meetingId, pollId } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
+      try {
+        const m = await Meeting.findById(meetingId).select('polls');
+        const poll = m?.polls?.id(pollId);
+        if (!poll) return;
+        poll.closed = true;
+        await m.save();
+        broadcastPolls(meetingId, m.polls);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // ── Q&A (server-authoritative, same reasoning as polls) ────────
+    const broadcastQuestions = (meetingId, questions) => {
+      ioRef.to(meetingRoom(meetingId)).emit('meeting:questions', { questions });
+    };
+
+    socket.on('meeting:qa-ask', async ({ meetingId, text, anonymous } = {}) => {
+      if (!inRoom(meetingId)) return;
+      const body = String(text || '').trim().slice(0, 500);
+      if (!body) return;
+      try {
+        const m = await Meeting.findByIdAndUpdate(
+          meetingId,
+          {
+            $push: {
+              questions: {
+                text: body,
+                askedBy: userId,
+                // Snapshot the name so the list doesn't need a populate; omitted
+                // entirely when anonymous so it can't leak through the payload.
+                askedByName: anonymous ? undefined : socket.data.name,
+                anonymous: !!anonymous,
+                upvotes: [],
+              },
+            },
+          },
+          { new: true, select: 'questions' }
+        );
+        if (m) broadcastQuestions(meetingId, m.questions);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on('meeting:qa-upvote', async ({ meetingId, questionId } = {}) => {
+      if (!inRoom(meetingId)) return;
+      try {
+        const m = await Meeting.findById(meetingId).select('questions');
+        const q = m?.questions?.id(questionId);
+        if (!q) return;
+        // Toggle, and store voter ids so one person can't inflate the count.
+        const had = q.upvotes.some((u) => String(u) === String(userId));
+        q.upvotes = had ? q.upvotes.filter((u) => String(u) !== String(userId)) : [...q.upvotes, userId];
+        await m.save();
+        broadcastQuestions(meetingId, m.questions);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on('meeting:qa-answer', async ({ meetingId, questionId, answerText } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
+      try {
+        const m = await Meeting.findById(meetingId).select('questions');
+        const q = m?.questions?.id(questionId);
+        if (!q) return;
+        q.answered = true;
+        if (answerText) q.answerText = String(answerText).trim().slice(0, 2000);
+        await m.save();
+        broadcastQuestions(meetingId, m.questions);
+      } catch {
+        /* ignore */
+      }
     });
 
     // ── Host moderation (host socket only) ──

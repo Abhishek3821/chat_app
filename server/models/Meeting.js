@@ -30,6 +30,47 @@ const attendeeSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * In-meeting poll. Tallies are stored as one row per voter rather than a counter
+ * so the "one vote per person" rule is enforceable server-side — a relayed
+ * counter could be incremented twice by a client, or forged outright.
+ */
+const pollSchema = new mongoose.Schema(
+  {
+    question: { type: String, required: true, trim: true, maxlength: 300 },
+    options: [{ type: String, trim: true, maxlength: 120 }],
+    multi: { type: Boolean, default: false },
+    closed: { type: Boolean, default: false },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // { user, choices: [optionIndex] } — replacing a voter's row is how a re-vote
+    // works, which keeps the tally correct without a separate dedupe pass.
+    votes: [
+      {
+        _id: false,
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        choices: [{ type: Number }],
+      },
+    ],
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
+/** Audience question (Q&A). Upvoters are stored as ids for the same reason. */
+const questionSchema = new mongoose.Schema(
+  {
+    text: { type: String, required: true, trim: true, maxlength: 500 },
+    askedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    askedByName: { type: String },
+    anonymous: { type: Boolean, default: false },
+    upvotes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    answered: { type: Boolean, default: false },
+    answerText: { type: String, trim: true, maxlength: 2000 },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
+
 const meetingSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 120 },
@@ -70,6 +111,20 @@ const meetingSchema = new mongoose.Schema(
     startedAt: { type: Date, default: null },
     endedAt: { type: Date },
     attendees: [attendeeSchema],
+    polls: [pollSchema],
+    questions: [questionSchema],
+    // Rolling transcript of live captions, kept so the meeting report can include
+    // what was said. Capped in the socket handler — an unbounded array on a hot
+    // document would grow without limit over a long meeting.
+    transcript: [
+      {
+        _id: false,
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        name: { type: String },
+        text: { type: String, maxlength: 1000 },
+        at: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

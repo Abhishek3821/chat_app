@@ -19,7 +19,7 @@ import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { useApiKeys } from '@/store/useApiKeys';
 import api, { DEMO_MODE } from '@/lib/api';
-import { formatRelative, cn } from '@/lib/utils';
+import { formatRelative, cn, PAGE_SHELL } from '@/lib/utils';
 
 const ORIGIN = (import.meta.env.VITE_API_URL || 'https://chat-app-zqj9.onrender.com').replace(/\/api\/?$/, '').replace(/\/+$/, '');
 
@@ -117,16 +117,18 @@ function WebhooksCard() {
           <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this URL now — treat it like a password.</p>
           <div className="mt-2 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{fresh.url}</code>
-            <Button size="sm" variant="subtle" onClick={() => copy(fresh.url)}><Copy size={14} /> Copy</Button>
+            <Button size="sm" variant="subtle" onClick={() => copy(fresh.url)} className="h-11 shrink-0 sm:h-9"><Copy size={14} /> Copy</Button>
           </div>
           <pre className="scrollbar-thin mt-2 overflow-x-auto rounded-xl bg-navy-950 p-3 text-[11px] leading-relaxed text-cyan-100">{`curl -X POST ${fresh.url} \\\n  -H "Content-Type: application/json" \\\n  -d '{"text":"Deploy finished ✅"}'`}</pre>
           <button onClick={() => setFresh(null)} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Done</button>
         </div>
       )}
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+      {/* minmax(0,1fr), not 1fr: a long group name in the <select> would otherwise
+          widen its track past the card (auto is a 1fr track's default minimum). */}
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
         <Field label="Group">
-          <select value={chatId} onChange={(e) => setChatId(e.target.value)} className="ring-brand h-11 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-content">
+          <select value={chatId} onChange={(e) => setChatId(e.target.value)} className="ring-brand h-11 w-full rounded-xl neu-inset bg-surface-2 px-3 text-base text-content sm:text-sm">
             <option value="">Choose a group…</option>
             {groups.map((g) => <option key={g._id} value={g._id}>{g.name || 'Group'}</option>)}
           </select>
@@ -140,15 +142,15 @@ function WebhooksCard() {
       {hooks.length > 0 && (
         <div className="mt-4 space-y-2">
           {hooks.map((h) => (
-            <div key={h.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500"><Webhook size={18} /></span>
+            <div key={h.id} className="neu-raised-sm flex items-center gap-3 rounded-2xl bg-surface p-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><Webhook size={18} /></span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-content">{h.label} <span className="text-content-muted">→ {h.chatName}</span></p>
                 <p className="truncate text-xs text-content-muted"><code>{ORIGIN}{h.url}</code></p>
                 <p className="text-[11px] text-content-muted">{h.lastUsedAt ? `Last used ${formatRelative(h.lastUsedAt)}` : 'Never used'}</p>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => copy(`${ORIGIN}${h.url}`)} className="shrink-0"><Copy size={14} /></Button>
-              <Button size="sm" variant="ghost" onClick={() => remove(h.id)} className="shrink-0 text-red-500 hover:bg-red-500/10"><Trash2 size={15} /></Button>
+              <Button size="sm" variant="ghost" onClick={() => copy(`${ORIGIN}${h.url}`)} className="h-11 w-11 shrink-0 px-0 sm:h-9 sm:w-9"><Copy size={14} /></Button>
+              <Button size="sm" variant="ghost" onClick={() => remove(h.id)} className="h-11 w-11 shrink-0 px-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9 sm:w-9"><Trash2 size={15} /></Button>
             </div>
           ))}
         </div>
@@ -193,13 +195,13 @@ export default function DevelopersPage() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl p-4 md:p-6">
+    <div className={PAGE_SHELL}>
       {/* Header */}
       <motion.header initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3">
-        <div className="grid h-11 w-11 place-items-center rounded-2xl bg-brand-gradient shadow-glow">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-gradient shadow-glow">
           <Code2 className="text-white" size={22} />
         </div>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-content">Developers</h1>
           <p className="text-xs text-content-muted">Build chat, calls & meetings into your own product with the ChatConnect API.</p>
         </div>
@@ -207,7 +209,7 @@ export default function DevelopersPage() {
 
       <motion.div variants={stagger} initial="initial" animate="animate" className="mt-5 space-y-5">
         {/* At-a-glance */}
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 xs:grid-cols-2 sm:grid-cols-3">
           <Card className="!p-4">
             <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-content-muted"><Terminal size={14} /> Base URL</p>
             <code className="mt-1 block truncate text-sm font-medium text-content">{API_BASE}</code>
@@ -240,7 +242,7 @@ export default function DevelopersPage() {
                 <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this key now — it won’t be shown again.</p>
                 <div className="mt-2 flex items-center gap-2">
                   <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{newKey}</code>
-                  <Button size="sm" variant="subtle" onClick={() => copy(newKey)}><Copy size={14} /> Copy</Button>
+                  <Button size="sm" variant="subtle" onClick={() => copy(newKey)} className="h-11 shrink-0 sm:h-9"><Copy size={14} /> Copy</Button>
                 </div>
                 <button onClick={() => setNewKey(null)} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Done</button>
               </div>
@@ -276,14 +278,14 @@ export default function DevelopersPage() {
             ) : (
               <div className="mt-3 space-y-2">
                 {keys.map((k) => (
-                  <div key={k.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500"><KeyRound size={18} /></span>
+                  <div key={k.id} className="neu-raised-sm flex items-center gap-3 rounded-2xl bg-surface p-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><KeyRound size={18} /></span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-content">{k.label}</p>
                       <p className="truncate text-xs text-content-muted"><code>{k.prefix}…</code> · {k.scopes.join(', ')}</p>
                       <p className="text-[11px] text-content-muted">{k.lastUsedAt ? `Last used ${formatRelative(k.lastUsedAt)}` : 'Never used'}</p>
                     </div>
-                    <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="shrink-0 text-red-500 hover:bg-red-500/10"><Trash2 size={15} /> Revoke</Button>
+                    <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="h-11 shrink-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9"><Trash2 size={15} /> Revoke</Button>
                   </div>
                 ))}
               </div>
@@ -300,7 +302,7 @@ export default function DevelopersPage() {
           <p className="mt-0.5 text-sm text-content-muted">Send your key on every request from your server (never from a browser).</p>
           <div className="mt-3 flex items-start gap-2">
             <pre className="scrollbar-thin min-w-0 flex-1 overflow-x-auto rounded-2xl bg-navy-950 p-4 text-xs leading-relaxed text-cyan-100">{curl}</pre>
-            <Button size="sm" variant="subtle" onClick={() => copy(curl)} className="shrink-0"><Copy size={14} /></Button>
+            <Button size="sm" variant="subtle" onClick={() => copy(curl)} className="h-11 w-11 shrink-0 px-0 sm:h-9 sm:w-9"><Copy size={14} /></Button>
           </div>
         </Card>
 

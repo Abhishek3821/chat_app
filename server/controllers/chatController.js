@@ -60,7 +60,15 @@ export const getChats = asyncHandler(async (req, res) => {
   // .lean(): this response is read-only (never .save()'d), so skip Mongoose
   // document hydration entirely on the single most-hit endpoint in the app.
   const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } }).sort({ updatedAt: -1 }).lean()
+    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } })
+      // `-e2ee.keys` matters: that array holds one wrapped key per member PER
+      // key version. On a 100-member group that's a few hundred blobs riding
+      // along on the app's hottest endpoint — and into the Redis cache with it.
+      // The list only needs to know THAT a chat is encrypted; the keys
+      // themselves are fetched per-chat, on demand, when you open it.
+      .select('-e2ee.keys')
+      .sort({ updatedAt: -1 })
+      .lean()
   );
 
   // Per-user chat flags (pin / archive / mute) live on the User doc — surface
@@ -68,16 +76,21 @@ export const getChats = asyncHandler(async (req, res) => {
   const pinned = new Set((req.user.pinnedChats || []).map(String));
   const archived = new Set((req.user.archivedChats || []).map(String));
   const muted = new Set((req.user.mutedChats || []).map(String));
+  // Per-chat wallpaper overrides, same idea (personal, not shared).
+  const themes = new Map((req.user.chatThemes || []).map((t) => [String(t.chat), t]));
 
   const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
   const withMeta = chats.map((chat) => {
     const id = String(chat._id);
+    const theme = themes.get(id);
     return {
       ...chat,
       unreadCount: counts.get(id) || 0,
       pinned: pinned.has(id),
       archived: archived.has(id),
       muted: muted.has(id),
+      wallpaper: theme?.wallpaper || '',
+      bubble: theme?.bubble || '',
     };
   });
 

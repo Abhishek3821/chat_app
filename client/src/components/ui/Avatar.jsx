@@ -17,7 +17,9 @@ export default function Avatar({ src, name = '', size = 'md', online, ring, clas
       )}
       <div
         className={cn(
-          'relative grid place-items-center rounded-full font-semibold text-white overflow-hidden',
+          // shadow-glow gives the disc a hairline top bevel and a tight cast,
+          // so a face sits ON the panel instead of being pasted flat onto it.
+          'relative grid place-items-center overflow-hidden rounded-full font-semibold text-white shadow-glow',
           'bg-gradient-to-br',
           gradientFor(name),
           sizes[size],
@@ -35,7 +37,8 @@ export default function Avatar({ src, name = '', size = 'md', online, ring, clas
           className={cn(
             'absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-surface',
             size === 'xs' || size === 'sm' ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5',
-            online ? 'bg-emerald-400' : 'bg-slate-400'
+            // emerald = semantic "online"; offline is a palette neutral, not slate.
+            online ? 'bg-emerald-400' : 'bg-content-muted'
           )}
         />
       )}

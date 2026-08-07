@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api, { DEMO_MODE, ensureMediaToken, clearMediaToken } from '../lib/api';
+import { resetFreshness } from '../lib/freshness';
 import { ME } from '../lib/demoData';
 import { useUI } from './useUI';
 
@@ -246,6 +247,9 @@ export const useAuth = create((set, get) => ({
     localStorage.removeItem('cc_demo_authed');
     sessionStorage.removeItem('cc_unlocked');
     clearMediaToken();
+    // Otherwise the next user to sign in on this browser could have their first
+    // page load skipped as "recently fetched" and see the previous account's list.
+    resetFreshness();
     useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null });
   },

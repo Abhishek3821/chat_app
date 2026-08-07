@@ -23,6 +23,8 @@ import catalogRoutes from './catalogRoutes.js';
 import agentRoutes from './agentRoutes.js';
 import broadcastRoutes from './broadcastRoutes.js';
 import liveLocationRoutes from './liveLocationRoutes.js';
+import e2eeRoutes from './e2eeRoutes.js';
+import searchRoutes from './searchRoutes.js';
 import { webhookRoutes, hookIngressRoutes } from './webhookRoutes.js';
 
 const router = Router();
@@ -58,6 +60,8 @@ router.use('/catalog', catalogRoutes); // WhatsApp-Business product catalog
 router.use('/agent', agentRoutes); // agent tools: labels + quick replies
 router.use('/broadcasts', broadcastRoutes); // broadcast lists (one-to-many DMs)
 router.use('/live-location', liveLocationRoutes); // real-time location sharing
+router.use('/search', searchRoutes); // one search across people/chats/messages/meetings
+router.use('/e2ee', e2eeRoutes); // end-to-end encryption key distribution
 router.use('/webhooks', webhookRoutes); // manage incoming webhooks (group members)
 router.use('/hooks', hookIngressRoutes); // PUBLIC token-authed message ingress
 router.use('/keys', keyRoutes); // manage your own API keys (JWT)

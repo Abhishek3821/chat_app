@@ -45,10 +45,33 @@ const messageSchema = new mongoose.Schema(
     sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     type: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'voice', 'document', 'location', 'poll', 'product', 'system'],
+      // 'videoNote' = Telegram-style round clip. Its own type rather than a flag
+      // on 'video' so the bubble renders circular without sniffing the mime type.
+      enum: ['text', 'image', 'video', 'videoNote', 'audio', 'voice', 'document', 'location', 'poll', 'product', 'system'],
       default: 'text',
     },
     content: { type: String, default: '' },
+
+    /**
+     * End-to-end encrypted payload. When `encrypted` is true, `content` is
+     * ALWAYS the empty string — the readable text exists only as `enc.ct`,
+     * sealed with the chat key, which the server never holds. `enc.v` records
+     * which chat-key version sealed it, so a chat can rotate its key (on a
+     * membership change) without orphaning the history sealed under the old one.
+     *
+     * Consequences the rest of the codebase depends on:
+     *  • the `content` text index can't see these — server-side search skips
+     *    encrypted chats, and the client searches them locally instead;
+     *  • push/notification previews fall back to "🔒 Encrypted message";
+     *  • business auto-replies don't run on an encrypted thread.
+     */
+    encrypted: { type: Boolean, default: false },
+    enc: {
+      ct: { type: String }, // base64 AES-256-GCM ciphertext
+      iv: { type: String }, // base64 96-bit nonce, unique per message
+      v: { type: Number }, // chat-key version this was sealed with
+    },
+
     attachments: [attachmentSchema],
     location: { lat: Number, lng: Number, label: String },
     // Live location: a 'location' message whose coordinates update in real time
@@ -110,7 +133,10 @@ messageSchema.index({ 'attachments.url': 1 });
 messageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 // getStarred: `Message.find({ starredBy: req.user._id })` — without this, a
 // large message collection means a full collection scan on every load.
-messageSchema.index({ starredBy: 1 });
+// Compound (not just `starredBy`) because the starred list is always sorted
+// newest-first: this way Mongo walks the index in order instead of loading
+// every starred message and sorting them in memory.
+messageSchema.index({ starredBy: 1, createdAt: -1 });
 
 const Message = mongoose.model('Message', messageSchema);
 export default Message;

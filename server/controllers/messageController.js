@@ -1,15 +1,28 @@
 import Message from '../models/Message.js';
 import Chat from '../models/Chat.js';
+import ScheduledMessage from '../models/ScheduledMessage.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat, emitToUser } from '../socket/index.js';
 import { enqueue } from '../utils/queue.js';
 import { notifyUser } from '../utils/notify.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
 import { invalidateChatListCache } from '../utils/chatCache.js';
+import {
+  assertValidDuration,
+  assertMayPin,
+  canPin,
+  canUnpin,
+  activePins,
+  populatedPins,
+  serializePin,
+  MAX_PINS_PER_CHAT,
+} from '../utils/pins.js';
 
 const SENDER_FIELDS = 'name username avatar';
 // Types a client may set (everything except 'system', which is server-generated).
-const USER_MESSAGE_TYPES = ['text', 'image', 'video', 'audio', 'voice', 'document', 'location'];
+// 'videoNote' is the Telegram-style round clip — a distinct type rather than a
+// flag on 'video' so the bubble can render it circular without inspecting mime.
+export const USER_MESSAGE_TYPES = ['text', 'image', 'video', 'videoNote', 'audio', 'voice', 'document', 'location'];
 const MAX_CONTENT = 10_000;
 const MAX_ATTACHMENTS = 20;
 // Editing is only allowed shortly after sending (WhatsApp-style window).
@@ -29,12 +42,187 @@ function sanitizeAttachments(attachments) {
     .map((a) => ({ url: a.url, name: a.name, size: a.size, mime: a.mime, width: a.width, height: a.height, duration: a.duration }));
 }
 
-async function assertMember(chatId, userId) {
+export async function assertMember(chatId, userId) {
   const chat = await Chat.findById(chatId);
   if (!chat) throw new ApiError(404, 'Chat not found.');
   const isMember = chat.participants.some((p) => String(p.user) === String(userId));
   if (!isMember) throw new ApiError(403, 'You are not a participant of this chat.');
   return chat;
+}
+
+/**
+ * Persist a message and run the full delivery fan-out.
+ *
+ * Extracted so the scheduled-message dispatcher shares ONE code path with the
+ * live send. Anything that lives only in the caller — realtime fan-out, unread
+ * bookkeeping, push, chat-list cache invalidation — would silently not happen
+ * for scheduled sends, and that divergence is exactly the bug this prevents.
+ *
+ * `sender` must be a { _id, name } shaped object: the request path passes
+ * `req.user`, the dispatcher passes the populated sender it looked up.
+ */
+export async function deliverMessage({
+  chat,
+  sender,
+  type = 'text',
+  content = '',
+  attachments,
+  location,
+  replyTo,
+  mentions,
+  forwardedFrom,
+  viewOnce = false,
+  enc,
+}) {
+  const chatId = String(chat._id);
+  // Disappearing messages: stamp an expiry so the TTL index self-deletes it.
+  const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
+
+  // In an encrypted chat the readable text never reaches this process — only
+  // `enc`. Force `content` empty rather than trusting the caller to have done
+  // it, so a client bug can't leak plaintext into an "encrypted" message.
+  const encrypted = Boolean(enc?.ct);
+  const storedContent = encrypted ? '' : content;
+
+  let message = await Message.create({
+    chat: chatId,
+    sender: sender._id,
+    type,
+    content: storedContent,
+    encrypted,
+    enc: encrypted ? { ct: enc.ct, iv: enc.iv, v: enc.v } : undefined,
+    attachments,
+    location,
+    replyTo: replyTo || undefined,
+    mentions,
+    forwardedFrom: forwardedFrom || undefined,
+    expiresAt,
+    viewOnce,
+    deliveredTo: [sender._id],
+    readBy: [{ user: sender._id, at: new Date() }],
+  });
+
+  chat.lastMessage = message._id;
+  await chat.save();
+
+  message = await populateInPlace(message);
+  // Every participant's chat-list preview/order/unread count just changed.
+  invalidateChatListCache(chat.participants.map((p) => p.user));
+
+  // Realtime fan-out. Deliver to every participant's PERSONAL room (not just the
+  // chat room) so online users receive it instantly even if they don't have this
+  // chat open — this is what drives delivered ticks and low-latency delivery.
+  for (const p of chat.participants) {
+    emitToUser(String(p.user), 'receive-message', { chatId, message });
+  }
+  // Notification preview. An encrypted message has no readable text here by
+  // construction, so the push says a message arrived and nothing about it.
+  const preview = encrypted ? '🔒 Encrypted message' : storedContent?.slice(0, 120) || `Sent ${type}`;
+  for (const p of chat.participants) {
+    const uid = String(p.user);
+    if (uid === String(sender._id)) continue;
+    emitToUser(uid, 'chat-updated', { chatId });
+    // Off the request path (BullMQ when Redis is set, else inline): persist the
+    // in-app notification AND fire a Web Push so recipients with no live socket
+    // still get pinged.
+    notifyUser(uid, {
+      from: sender._id,
+      type: chat.isGroup ? 'group_message' : 'message',
+      title: chat.isGroup ? chat.name || 'New group message' : sender.name,
+      body: chat.isGroup ? `${sender.name}: ${preview}` : preview,
+      tag: `chat:${chatId}`,
+      url: `/?chat=${chatId}`,
+      data: { chatId },
+    });
+  }
+
+  // WhatsApp-Business auto-reply (greeting/away) for inbound customer messages,
+  // off the request path. No-op unless the other side is a business with it on.
+  // `otherIds` is passed so the worker can consult its "no auto-replies" cache
+  // without re-loading the chat just to learn who the recipient is — the common
+  // case then costs no queries at all. Plain strings: the BullMQ payload must
+  // stay JSON-serialisable.
+  // Skipped for encrypted threads: an auto-reply is a server-composed message,
+  // and the server has no chat key to seal one with. Sending it in the clear
+  // into an encrypted conversation would be worse than not sending it.
+  if (!chat.isGroup && !chat.e2ee?.enabled) {
+    enqueue('automsg.maybe', {
+      chatId,
+      senderId: String(sender._id),
+      otherIds: chat.participants.map((p) => String(p.user)).filter((id) => id !== String(sender._id)),
+    });
+  }
+
+  return message;
+}
+
+/** Ciphertext envelope from an encrypted chat. Shape-checked only — there is
+ *  nothing here the server could validate semantically, and it must not try. */
+const MAX_CIPHERTEXT = 20_000; // base64 of a MAX_CONTENT message + GCM overhead
+function sanitizeEnc(enc) {
+  if (enc === undefined || enc === null) return undefined;
+  const { ct, iv, v } = enc;
+  const ok =
+    typeof ct === 'string' && ct.length > 0 && ct.length <= MAX_CIPHERTEXT &&
+    typeof iv === 'string' && iv.length > 0 && iv.length <= 64 &&
+    Number.isInteger(v) && v > 0;
+  if (!ok) throw new ApiError(400, 'Malformed encrypted payload.');
+  return { ct, iv, v };
+}
+
+/** Shared validation for a client-supplied message body (live or scheduled). */
+export function validateOutgoing({ type = 'text', content = '', attachments, location, viewOnce, enc }) {
+  if (!USER_MESSAGE_TYPES.includes(type)) throw new ApiError(400, 'Invalid message type.');
+  if (typeof content !== 'string' || content.length > MAX_CONTENT) {
+    throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
+  }
+  const safeEnc = sanitizeEnc(enc);
+  const safeAttachments = sanitizeAttachments(attachments);
+  // An encrypted message carries its text in `enc`, so an empty `content` is
+  // exactly what it should look like — it is not an empty message.
+  if (!content && !safeEnc && (!safeAttachments || safeAttachments.length === 0) && !location) {
+    throw new ApiError(400, 'Message cannot be empty.');
+  }
+  return {
+    type,
+    content,
+    enc: safeEnc,
+    attachments: safeAttachments,
+    // View-once only applies to media.
+    viewOnce: Boolean(viewOnce) && (type === 'image' || type === 'video'),
+  };
+}
+
+/**
+ * Reconcile what the client sent with the chat's encryption state.
+ *
+ * Both directions are errors worth failing loudly on rather than papering over:
+ * plaintext into an encrypted chat would silently downgrade the conversation,
+ * and ciphertext into a plaintext one would render as an unreadable blob for
+ * everyone. A stale key version is its own case — the client needs to be told
+ * to re-fetch keys, not just "400".
+ */
+function assertEncryptionMatches(chat, safe) {
+  const chatEncrypted = Boolean(chat.e2ee?.enabled);
+  if (chatEncrypted && !safe.enc) {
+    throw new ApiError(409, 'This chat is end-to-end encrypted — the message must be encrypted before sending.');
+  }
+  if (!chatEncrypted && safe.enc) {
+    throw new ApiError(409, 'This chat is not encrypted.');
+  }
+  if (chatEncrypted && safe.enc.v !== chat.e2ee.version) {
+    throw new ApiError(409, `Stale encryption key (v${safe.enc.v}); this chat is on v${chat.e2ee.version}. Re-fetch the chat keys and retry.`);
+  }
+}
+
+/** Group "only admins may post" gate — shared by the live and scheduled paths. */
+export function assertMayPost(chat, userId) {
+  if (chat.isGroup && chat.messagingPolicy === 'admins') {
+    const me = chat.participants.find((p) => String(p.user) === String(userId));
+    if (!me || !groupCan(me.role, PERMISSIONS.GROUP_MANAGE)) {
+      throw new ApiError(403, 'Only admins can send messages in this group.');
+    }
+  }
 }
 
 /**
@@ -83,13 +271,28 @@ function populateInPlace(doc) {
 
 // GET /api/messages/:chatId?before=&limit=
 export const getMessages = asyncHandler(async (req, res) => {
-  await assertIsMember(req.params.chatId, req.user._id);
+  // Needs the chat document (not just a membership yes/no) because the pinned
+  // set rides along on this response — see below.
+  const chat = await assertMember(req.params.chatId, req.user._id);
   const limit = Math.min(Number(req.query.limit) || 40, 100);
   const filter = { chat: req.params.chatId, deletedFor: { $ne: req.user._id } };
   if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
 
   const messages = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit).lean());
-  res.json({ success: true, messages: messages.reverse() });
+
+  /* Pins come with the FIRST page only. Two reasons they belong on this
+     response at all rather than a second request: the banner has to be there
+     the moment the conversation paints, and a pinned message is frequently
+     older than the loaded window, so the client cannot derive it from
+     `messages`. Capped at MAX_PINS_PER_CHAT, so it's a bounded add. Paging
+     backwards (`before`) skips them — the banner is already up by then. */
+  const pins = req.query.before ? undefined : await populatedPins(chat, req.user._id);
+
+  res.json({
+    success: true,
+    messages: messages.reverse(),
+    ...(pins ? { pins, canPin: canPin(chat, req.user._id) } : {}),
+  });
 });
 
 // POST /api/messages  — send a message (persist + realtime broadcast)
@@ -97,79 +300,22 @@ export const sendMessage = asyncHandler(async (req, res) => {
   const { chatId, content = '', type = 'text', replyTo, location, mentions, forwardedFrom } = req.body;
   const chat = await assertMember(chatId, req.user._id);
 
-  if (chat.isGroup && chat.messagingPolicy === 'admins') {
-    const me = chat.participants.find((p) => String(p.user) === String(req.user._id));
-    if (!me || !groupCan(me.role, PERMISSIONS.GROUP_MANAGE)) throw new ApiError(403, 'Only admins can send messages in this group.');
-  }
+  assertMayPost(chat, req.user._id);
 
   // Validate client-supplied fields (don't trust type/attachments/content blindly).
-  if (!USER_MESSAGE_TYPES.includes(type)) throw new ApiError(400, 'Invalid message type.');
-  if (typeof content !== 'string' || content.length > MAX_CONTENT) {
-    throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
-  }
-  const attachments = sanitizeAttachments(req.body.attachments);
+  const safe = validateOutgoing({ ...req.body, type, content });
+  assertEncryptionMatches(chat, safe);
   const safeMentions = Array.isArray(mentions) ? mentions.slice(0, 100) : undefined;
 
-  if (!content && (!attachments || attachments.length === 0) && !location) {
-    throw new ApiError(400, 'Message cannot be empty.');
-  }
-
-  // Disappearing messages: stamp an expiry so the TTL index self-deletes it.
-  const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
-  // View-once only applies to media.
-  const viewOnce = Boolean(req.body.viewOnce) && (type === 'image' || type === 'video');
-
-  let message = await Message.create({
-    chat: chatId,
-    sender: req.user._id,
-    type,
-    content,
-    attachments,
+  const message = await deliverMessage({
+    chat,
+    sender: req.user,
+    ...safe,
     location,
-    replyTo: replyTo || undefined,
+    replyTo,
     mentions: safeMentions,
-    forwardedFrom: forwardedFrom || undefined,
-    expiresAt,
-    viewOnce,
-    deliveredTo: [req.user._id],
-    readBy: [{ user: req.user._id, at: new Date() }],
+    forwardedFrom,
   });
-
-  chat.lastMessage = message._id;
-  await chat.save();
-
-  message = await populateInPlace(message);
-  // Every participant's chat-list preview/order/unread count just changed.
-  invalidateChatListCache(chat.participants.map((p) => p.user));
-
-  // Realtime fan-out. Deliver to every participant's PERSONAL room (not just the
-  // chat room) so online users receive it instantly even if they don't have this
-  // chat open — this is what drives delivered ticks and low-latency delivery.
-  for (const p of chat.participants) {
-    emitToUser(String(p.user), 'receive-message', { chatId, message });
-  }
-  const preview = content?.slice(0, 120) || `Sent ${type}`;
-  for (const p of chat.participants) {
-    const uid = String(p.user);
-    if (uid === String(req.user._id)) continue;
-    emitToUser(uid, 'chat-updated', { chatId });
-    // Off the request path (BullMQ when Redis is set, else inline): persist the
-    // in-app notification AND fire a Web Push so recipients with no live socket
-    // still get pinged.
-    notifyUser(uid, {
-      from: req.user._id,
-      type: chat.isGroup ? 'group_message' : 'message',
-      title: chat.isGroup ? chat.name || 'New group message' : req.user.name,
-      body: chat.isGroup ? `${req.user.name}: ${preview}` : preview,
-      tag: `chat:${chatId}`,
-      url: `/?chat=${chatId}`,
-      data: { chatId },
-    });
-  }
-
-  // WhatsApp-Business auto-reply (greeting/away) for inbound customer messages,
-  // off the request path. No-op unless the other side is a business with it on.
-  if (!chat.isGroup) enqueue('automsg.maybe', { chatId, senderId: String(req.user._id) });
 
   res.status(201).json({ success: true, message });
 });
@@ -186,7 +332,14 @@ export const editMessage = asyncHandler(async (req, res) => {
 
   // Bound the edit like a send — otherwise an edit could balloon a message far
   // past the send-time cap (limited only by the global body size).
-  if (req.body.content !== undefined) {
+  if (message.encrypted) {
+    // An encrypted message is edited by replacing its ciphertext; there is no
+    // plaintext here to patch. Anything else would downgrade it mid-thread.
+    const enc = sanitizeEnc(req.body.enc);
+    if (!enc) throw new ApiError(409, 'This message is encrypted — send the replacement as an encrypted payload.');
+    message.enc = enc;
+    message.content = '';
+  } else if (req.body.content !== undefined) {
     if (typeof req.body.content !== 'string' || req.body.content.length > MAX_CONTENT) {
       throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
     }
@@ -266,9 +419,42 @@ export const toggleStar = asyncHandler(async (req, res) => {
 });
 
 // GET /api/messages/starred
+/**
+ * GET /api/messages/starred?before=&limit=
+ *
+ * The starred list is a real screen now (it used to be fetched only to count
+ * the rows in a toast), so it is paginated like any other feed and carries
+ * enough chat context to render + navigate each row without an N+1 lookup.
+ *
+ * Locked chats are excluded: those conversations are hidden behind the PIN, and
+ * a star shouldn't be a side door into their contents.
+ */
 export const getStarred = asyncHandler(async (req, res) => {
-  const messages = await populateMessage(Message.find({ starredBy: req.user._id }).sort({ createdAt: -1 }).limit(100).lean());
-  res.json({ success: true, messages });
+  const limit = Math.min(Number(req.query.limit) || 40, 100);
+  const locked = (req.user.lockedChats || []).map(String);
+  const filter = {
+    starredBy: req.user._id,
+    deletedFor: { $ne: req.user._id },
+    isDeleted: false,
+  };
+  if (locked.length) filter.chat = { $nin: locked };
+  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+
+  const messages = await populateMessage(
+    Message.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(limit + 1) // one extra row = "is there another page?" without a count()
+      .lean()
+  ).then((rows) =>
+    Message.populate(rows, {
+      path: 'chat',
+      select: 'name isGroup avatar participants e2ee.enabled',
+      populate: { path: 'participants.user', select: 'name username avatar' },
+    })
+  );
+
+  const hasMore = messages.length > limit;
+  res.json({ success: true, messages: hasMore ? messages.slice(0, limit) : messages, hasMore });
 });
 
 // POST /api/messages/read  { chatId }
@@ -287,19 +473,79 @@ export const markRead = asyncHandler(async (req, res) => {
   res.json({ success: true });
 });
 
-// GET /api/messages/:chatId/search?q=
+/**
+ * GET /api/messages/:chatId/search?q=&before=&limit=
+ *
+ * Searches the WHOLE conversation. The client used to filter only the page of
+ * messages it happened to have in memory, so anything above the current scroll
+ * position simply didn't exist as far as search was concerned.
+ *
+ * The regex rides the `{chat:1, createdAt:-1}` index for the chat scope, so the
+ * scan is bounded to one conversation and ordered — no collection-wide sort.
+ * Encrypted chats return nothing on purpose: the server holds ciphertext, and
+ * the client searches those against its own decrypted cache instead.
+ */
 export const searchMessages = asyncHandler(async (req, res) => {
-  await assertIsMember(req.params.chatId, req.user._id);
-  const q = (req.query.q || '').trim();
-  if (!q) return res.json({ success: true, messages: [] });
+  const chat = await assertMemberFields(req.params.chatId, req.user._id, 'e2ee.enabled');
+  const q = (req.query.q || '').trim().slice(0, 128);
+  if (!q) return res.json({ success: true, messages: [], hasMore: false, encrypted: false });
+  if (chat.e2ee?.enabled) {
+    // Tell the client why it got nothing, so it can fall back to local search
+    // rather than reporting "no results" for a chat full of matches.
+    return res.json({ success: true, messages: [], hasMore: false, encrypted: true });
+  }
+
+  const limit = Math.min(Number(req.query.limit) || 30, 100);
   const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  const messages = await populateMessage(
-    Message.find({ chat: req.params.chatId, content: rx, isDeleted: false, deletedFor: { $ne: req.user._id } })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean()
-  );
-  res.json({ success: true, messages });
+  const filter = {
+    chat: req.params.chatId,
+    content: rx,
+    isDeleted: false,
+    deletedFor: { $ne: req.user._id },
+  };
+  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+
+  const rows = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit + 1).lean());
+  const hasMore = rows.length > limit;
+  res.json({ success: true, messages: hasMore ? rows.slice(0, limit) : rows, hasMore, encrypted: false });
+});
+
+/**
+ * GET /api/messages/:chatId/context/:messageId?radius=
+ *
+ * The window of messages around one message — what "jump to this result" needs
+ * when the hit is older than anything currently loaded. Without it, tapping a
+ * search result from six months ago has nowhere to land.
+ *
+ * Two bounded queries either side of the anchor rather than a skip/limit walk,
+ * so cost doesn't grow with how far back the message is.
+ */
+export const getMessageContext = asyncHandler(async (req, res) => {
+  await assertIsMember(req.params.chatId, req.user._id);
+  const radius = Math.min(Number(req.query.radius) || 20, 50);
+
+  const anchor = await Message.findOne({ _id: req.params.messageId, chat: req.params.chatId }).lean();
+  if (!anchor) throw new ApiError(404, 'Message not found in this chat.');
+
+  const base = { chat: req.params.chatId, deletedFor: { $ne: req.user._id } };
+  const [before, after] = await Promise.all([
+    populateMessage(
+      Message.find({ ...base, createdAt: { $lt: anchor.createdAt } }).sort({ createdAt: -1 }).limit(radius).lean()
+    ),
+    populateMessage(
+      Message.find({ ...base, createdAt: { $gt: anchor.createdAt } }).sort({ createdAt: 1 }).limit(radius).lean()
+    ),
+  ]);
+  const [anchorPopulated] = await populateMessage(Message.find({ _id: anchor._id }).lean());
+
+  res.json({
+    success: true,
+    messages: [...before.reverse(), anchorPopulated, ...after],
+    // False when there's older history above this window, so the client knows
+    // it is looking at a slice and not the top of the conversation.
+    atStart: before.length < radius,
+    atEnd: after.length < radius,
+  });
 });
 
 // POST /api/messages/:id/viewed  — consume a view-once message.
@@ -402,12 +648,173 @@ export const votePoll = asyncHandler(async (req, res) => {
 });
 
 // POST /api/messages/:id/pin  (toggle at chat level)
-export const togglePin = asyncHandler(async (req, res) => {
+/**
+ * POST /api/messages/:id/pin  { hours: 1 | 6 | 12 | 24 }
+ *
+ * Pins a message for everyone in the chat until it expires. In a GROUP this is
+ * admins-only (a pin is a broadcast, so it's a moderation action — see
+ * utils/pins.js); in a direct chat either person can.
+ *
+ * Re-pinning an already-pinned message resets its timer rather than erroring,
+ * which is what "pin for 24h" means when you meant "keep it up longer".
+ */
+export const pinMessage = asyncHandler(async (req, res) => {
+  const hours = assertValidDuration(req.body.hours);
+  const message = await Message.findById(req.params.id).select('chat isDeleted');
+  if (!message) throw new ApiError(404, 'Message not found.');
+  if (message.isDeleted) throw new ApiError(400, 'That message was deleted.');
+
+  const chat = await assertMember(message.chat, req.user._id);
+  assertMayPin(chat, req.user._id);
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + hours * 60 * 60 * 1000);
+  const pin = { message: message._id, pinnedBy: req.user._id, pinnedAt: now, expiresAt, durationHours: hours };
+
+  // Start from only the LIVE pins: this is also where lapsed ones get dropped
+  // for a chat nobody has swept yet.
+  const live = activePins(chat, now.getTime()).filter((p) => String(p.message) !== String(message._id));
+  live.unshift(pin);
+  // Oldest-first eviction past the cap (see MAX_PINS_PER_CHAT).
+  const evicted = live.slice(MAX_PINS_PER_CHAT);
+  chat.pins = live.slice(0, MAX_PINS_PER_CHAT);
+  await chat.save();
+
+  emitToChat(String(chat._id), 'message-pinned', {
+    chatId: String(chat._id),
+    messageId: String(message._id),
+    pinned: true,
+    pin: serializePin(pin),
+  });
+  // Tell clients about anything the cap pushed off, or their banner keeps a pin
+  // the server no longer has.
+  for (const gone of evicted) {
+    emitToChat(String(chat._id), 'message-pinned', {
+      chatId: String(chat._id),
+      messageId: String(gone.message),
+      pinned: false,
+      reason: 'evicted',
+    });
+  }
+
+  res.json({ success: true, pinned: true, pin: serializePin(pin), evicted: evicted.map((p) => String(p.message)) });
+});
+
+/**
+ * DELETE /api/messages/:id/pin — unpin early.
+ * Whoever pinned it can always remove it; group admins can remove anyone's.
+ */
+export const unpinMessage = asyncHandler(async (req, res) => {
   const message = await Message.findById(req.params.id).select('chat');
   if (!message) throw new ApiError(404, 'Message not found.');
-  const chat = await assertMemberFields(message.chat, req.user._id, 'pinnedMessages');
-  const pinned = chat.pinnedMessages.some((m) => String(m) === String(message._id));
-  await Chat.updateOne({ _id: chat._id }, pinned ? { $pull: { pinnedMessages: message._id } } : { $addToSet: { pinnedMessages: message._id } });
-  emitToChat(String(chat._id), 'message-pinned', { chatId: String(chat._id), messageId: String(message._id), pinned: !pinned });
-  res.json({ success: true, pinned: !pinned });
+  const chat = await assertMember(message.chat, req.user._id);
+
+  const pin = (chat.pins || []).find((p) => String(p.message) === String(message._id));
+  if (!pin) return res.json({ success: true, pinned: false });
+  if (!canUnpin(chat, pin, req.user._id)) {
+    throw new ApiError(403, 'Only a group admin (or whoever pinned it) can unpin this message.');
+  }
+
+  await Chat.updateOne({ _id: chat._id }, { $pull: { pins: { message: message._id } } });
+  emitToChat(String(chat._id), 'message-pinned', {
+    chatId: String(chat._id),
+    messageId: String(message._id),
+    pinned: false,
+    reason: 'unpinned',
+  });
+  res.json({ success: true, pinned: false });
+});
+
+/** GET /api/messages/:chatId/pins — the live pins with their messages. */
+export const getPins = asyncHandler(async (req, res) => {
+  const chat = await assertMember(req.params.chatId, req.user._id);
+  res.json({
+    success: true,
+    pins: await populatedPins(chat, req.user._id),
+    canPin: canPin(chat, req.user._id),
+  });
+});
+
+/* ── Scheduled messages ───────────────────────────────────────────────────────
+   Pending rows live in their own collection (see models/ScheduledMessage.js) and
+   only become real Messages at dispatch, through the same deliverMessage() the
+   live send uses. utils/scheduledDispatcher.js drives the sending. */
+
+// Refuse a schedule so near-term that the dispatcher's tick would fire it late
+// anyway — it reads as broken to the user.
+const MIN_SCHEDULE_LEAD_MS = 10_000;
+const MAX_PENDING_PER_CHAT = 50;
+
+// POST /api/messages/schedule
+export const scheduleMessage = asyncHandler(async (req, res) => {
+  const { chatId, content = '', type = 'text', replyTo, location, mentions, sendAt } = req.body;
+  const chat = await assertMember(chatId, req.user._id);
+  assertMayPost(chat, req.user._id);
+
+  // An encrypted chat cannot hold a scheduled message: the dispatcher sends it
+  // later, from the server, which has no chat key — so it would arrive as
+  // plaintext in a conversation the user believes is sealed. Refusing is the
+  // only honest option until the client can pre-seal a future payload.
+  if (chat.e2ee?.enabled) {
+    throw new ApiError(409, 'Scheduling is not available in an end-to-end encrypted chat — the server would have to send it unencrypted.');
+  }
+
+  const when = new Date(sendAt);
+  if (Number.isNaN(when.getTime())) throw new ApiError(400, 'sendAt must be a valid date.');
+  if (when.getTime() - Date.now() < MIN_SCHEDULE_LEAD_MS) {
+    throw new ApiError(400, 'Pick a time at least a few seconds from now.');
+  }
+
+  // Same validation as a live send, so a scheduled message can never carry a
+  // payload the live path would have rejected.
+  const safe = validateOutgoing({ ...req.body, type, content });
+
+  const pending = await ScheduledMessage.countDocuments({ chat: chatId, sender: req.user._id, status: 'pending' });
+  if (pending >= MAX_PENDING_PER_CHAT) {
+    throw new ApiError(400, `You can have at most ${MAX_PENDING_PER_CHAT} scheduled messages per chat.`);
+  }
+
+  const row = await ScheduledMessage.create({
+    chat: chatId,
+    sender: req.user._id,
+    type: safe.type,
+    content: safe.content,
+    attachments: safe.attachments,
+    location,
+    replyTo: replyTo || undefined,
+    mentions: Array.isArray(mentions) ? mentions.slice(0, 100) : undefined,
+    sendAt: when,
+  });
+
+  // Keep the author's other devices in step.
+  emitToUser(String(req.user._id), 'scheduled-message', { id: String(row._id), chatId: String(chatId), status: 'pending' });
+  res.status(201).json({ success: true, scheduled: row });
+});
+
+// GET /api/messages/scheduled/:chatId — my own pending items for this chat
+export const listScheduled = asyncHandler(async (req, res) => {
+  await assertMember(req.params.chatId, req.user._id);
+  const scheduled = await ScheduledMessage.find({
+    chat: req.params.chatId,
+    sender: req.user._id,
+    status: { $in: ['pending', 'failed'] },
+  })
+    .sort({ sendAt: 1 })
+    .lean();
+  res.json({ success: true, scheduled });
+});
+
+// DELETE /api/messages/scheduled/:id
+export const cancelScheduled = asyncHandler(async (req, res) => {
+  // Scoped to the owner AND to a still-cancellable state in the query itself: a
+  // row the dispatcher has already claimed ('sending') must not be yanked out
+  // from under it, which a read-then-write check could race with.
+  const row = await ScheduledMessage.findOneAndUpdate(
+    { _id: req.params.id, sender: req.user._id, status: 'pending' },
+    { $set: { status: 'cancelled' } },
+    { new: true }
+  );
+  if (!row) throw new ApiError(404, 'That scheduled message is no longer pending.');
+  emitToUser(String(req.user._id), 'scheduled-message', { id: String(row._id), chatId: String(row.chat), status: 'cancelled' });
+  res.json({ success: true });
 });

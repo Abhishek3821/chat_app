@@ -3,6 +3,11 @@ import toast from 'react-hot-toast';
 import api, { DEMO_MODE } from '../lib/api';
 import { CHATS, MESSAGES } from '../lib/demoData';
 import { useAuth } from './useAuth';
+import { useE2EE } from './useE2EE';
+
+/** Decrypt any encrypted messages in a batch before they enter the store, so
+ *  every consumer (bubbles, search, previews) sees ordinary `content`. */
+const hydrate = (chatId, messages) => useE2EE.getState().hydrate(chatId, messages);
 
 // Safety net for "typing…" that never stops (peer disconnected mid-keystroke,
 // their typing-stop was lost). Each typing flag auto-expires unless renewed.
@@ -60,7 +65,8 @@ export const useChat = create((set, get) => ({
       await get().loadChats();
       if (activeChatId) {
         const { data } = await api.get(`/messages/${activeChatId}`);
-        set((s) => ({ messagesByChat: { ...s.messagesByChat, [activeChatId]: data.messages } }));
+        const messages = await hydrate(activeChatId, data.messages);
+        set((s) => ({ messagesByChat: { ...s.messagesByChat, [activeChatId]: messages } }));
       }
     } catch {
       /* transient — the next reconnect retries */
@@ -81,9 +87,120 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
-      set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: data.messages } }));
+      // Decrypt before the messages land in the store — everything downstream
+      // (bubbles, previews, in-memory search) then works on plain text and
+      // needs no knowledge of encryption at all.
+      const messages = await hydrate(chatId, data.messages);
+      set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
+      // Pins ride along on the first page, so the banner is up as the
+      // conversation paints. Their messages need decrypting too.
+      if (data.pins) {
+        const pinned = await hydrate(chatId, data.pins.map((p) => p.message));
+        get().setPins(
+          chatId,
+          data.pins.map((p, i) => ({ ...p, message: pinned[i] })),
+          data.canPin
+        );
+      }
+      // If someone joined this encrypted group after the key was sealed, mint a
+      // version they can read. Deliberately not awaited: housekeeping must not
+      // hold up painting the conversation.
+      const chat = get().chats.find((c) => c._id === chatId);
+      if (chat?.e2ee?.enabled) useE2EE.getState().ensureMembersKeyed(chatId);
     } finally {
       set({ loadingMessages: false });
+    }
+  },
+
+  /**
+   * Replace the loaded window with the messages AROUND one message — how a
+   * search result older than the current page is opened. `anchorId` is handed
+   * to the list so it can scroll to and highlight the hit.
+   */
+  loadMessageContext: async (chatId, messageId) => {
+    if (DEMO_MODE) return null;
+    set({ loadingMessages: true });
+    try {
+      const { data } = await api.get(`/messages/${chatId}/context/${messageId}`);
+      const messages = await hydrate(chatId, data.messages);
+      set((s) => ({
+        messagesByChat: { ...s.messagesByChat, [chatId]: messages },
+        // A context window is a SLICE of history, so the list must not assume
+        // the top of it is the start of the conversation.
+        windowedChats: { ...s.windowedChats, [chatId]: !data.atStart || !data.atEnd },
+      }));
+      return messages;
+    } catch {
+      return null;
+    } finally {
+      set({ loadingMessages: false });
+    }
+  },
+
+  /** Chats currently showing a context slice rather than the live tail. */
+  windowedChats: {},
+
+  /** The message the list should scroll to and flash — set by "jump to result"
+   *  from either search. Cleared by the list once it has done so. */
+  jumpTarget: null, // { chatId, messageId }
+  clearJumpTarget: () => set({ jumpTarget: null }),
+
+  /**
+   * Open a chat at a specific message, loading the surrounding history if that
+   * message isn't in the current window. This is what makes a search hit from
+   * six months ago actually openable.
+   */
+  jumpToMessage: async (chatId, messageId) => {
+    await get().setActiveChat(chatId);
+    const loaded = (get().messagesByChat[chatId] || []).some((m) => m._id === messageId);
+    if (!loaded) await get().loadMessageContext(chatId, messageId);
+    set({ jumpTarget: { chatId, messageId } });
+  },
+
+  /** Back to the newest messages after jumping into history. */
+  resetMessageWindow: async (chatId) => {
+    if (DEMO_MODE || !get().windowedChats[chatId]) return;
+    set({ loadingMessages: true });
+    try {
+      const { data } = await api.get(`/messages/${chatId}`);
+      const messages = await hydrate(chatId, data.messages);
+      set((s) => ({
+        messagesByChat: { ...s.messagesByChat, [chatId]: messages },
+        windowedChats: { ...s.windowedChats, [chatId]: false },
+      }));
+    } finally {
+      set({ loadingMessages: false });
+    }
+  },
+
+  /**
+   * Search one conversation's ENTIRE history.
+   *
+   * The server does it for ordinary chats (indexed, paginated, covers messages
+   * that were never loaded here). For an encrypted chat it can't — it holds
+   * ciphertext — so it says so and we search the decrypted cache locally
+   * instead. That's a real limitation, not a silent one: the caller gets
+   * `scope: 'local'` and the UI says the search only covers loaded messages.
+   */
+  searchInChat: async (chatId, query) => {
+    const q = (query || '').trim();
+    if (!q) return { messages: [], scope: 'none', hasMore: false };
+
+    const localHits = () =>
+      (get().messagesByChat[chatId] || [])
+        .filter((m) => !m.isDeleted && (m.content || '').toLowerCase().includes(q.toLowerCase()))
+        .slice(-50)
+        .reverse();
+
+    if (DEMO_MODE) return { messages: localHits(), scope: 'local', hasMore: false };
+
+    try {
+      const { data } = await api.get(`/messages/${chatId}/search`, { params: { q } });
+      if (data.encrypted) return { messages: localHits(), scope: 'local', hasMore: false };
+      const messages = await hydrate(chatId, data.messages || []);
+      return { messages, scope: 'server', hasMore: Boolean(data.hasMore) };
+    } catch {
+      return { messages: localHits(), scope: 'local', hasMore: false };
     }
   },
 
@@ -108,10 +225,70 @@ export const useChat = create((set, get) => ({
       };
     }),
 
-  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce }) => {
+  /**
+   * A message that arrived over the socket. Goes through decryption first —
+   * `appendMessage` is synchronous and used by optimistic/demo paths, so the
+   * async step lives here rather than being forced onto every caller.
+   */
+  ingestMessage: async (chatId, message) => {
+    const hydrated = message?.encrypted ? await useE2EE.getState().hydrateOne(chatId, message) : message;
+    get().appendMessage(chatId, hydrated);
+  },
+
+  /** Encryption was switched on/off — or rekeyed — for a chat, possibly by
+   *  someone else. Drop the cached key AND re-run decryption over whatever is
+   *  loaded: a member who just received their first key copy is staring at a
+   *  list of "🔒 could not decrypt" placeholders that are now readable. */
+  applyChatE2EE: async (chatId, e2ee) => {
+    useE2EE.getState().invalidateChat(chatId);
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, e2ee: { ...(c.e2ee || {}), ...e2ee } } : c)) }));
+
+    const loaded = get().messagesByChat[chatId];
+    if (!loaded?.some((m) => m.encrypted)) return;
+    const rehydrated = await hydrate(chatId, loaded);
+    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: rehydrated } }));
+  },
+
+  /** Re-run decryption for a chat after the identity was unlocked on this
+   *  device (the messages were fetched while it was still locked). */
+  rehydrateChat: async (chatId) => {
+    const loaded = get().messagesByChat[chatId];
+    if (!loaded?.some((m) => m.encrypted)) return;
+    const rehydrated = await hydrate(chatId, loaded);
+    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: rehydrated } }));
+  },
+
+  /** A wallpaper change made on another of my devices. */
+  applyChatTheme: (chatId, wallpaper, bubble) =>
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, wallpaper, bubble } : c)) })),
+
+  /** Set (or clear) this chat's wallpaper. Personal to me — optimistic + persisted. */
+  setChatTheme: async (chatId, wallpaper = '', bubble = '') => {
+    const prev = get().chats.find((c) => c._id === chatId);
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, wallpaper, bubble } : c)) }));
+    if (DEMO_MODE) return;
+    try {
+      await api.put(`/users/me/chats/${chatId}/theme`, { wallpaper, bubble });
+    } catch {
+      set((s) => ({
+        chats: s.chats.map((c) =>
+          c._id === chatId ? { ...c, wallpaper: prev?.wallpaper || '', bubble: prev?.bubble || '' } : c
+        ),
+      }));
+      toast.error('Could not save the wallpaper.');
+    }
+  },
+
+  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce, retriedAfterRekey = false }) => {
     const me = useAuth.getState().user;
+    const clientId = `tmp-${Date.now()}-${tmpSeq++}`;
     const optimistic = {
-      _id: `tmp-${Date.now()}-${tmpSeq++}`,
+      _id: clientId,
+      // Stable identity that survives the swap to the saved message below.
+      // MessageList keys off this, so the bubble is NOT unmounted/remounted when
+      // `_id` changes from the temp id to the real one — a remount replayed the
+      // entry animation and made every sent message visibly blink.
+      clientId,
       sender: me,
       content,
       type,
@@ -128,7 +305,29 @@ export const useChat = create((set, get) => ({
     if (DEMO_MODE) return optimistic;
 
     try {
-      const { data } = await api.post('/messages', { chatId, content, type, attachments, location, viewOnce, replyTo: replyTo?._id });
+      // Encrypted chat → seal the text here and send ciphertext only. The
+      // optimistic bubble above already shows the plaintext locally, and
+      // `rememberPlain` below keeps it readable when the saved copy echoes
+      // back, so the sender never watches their own message decrypt.
+      let encPayload;
+      let outgoingContent = content;
+      const chat = get().chats.find((c) => c._id === chatId);
+      if (chat?.e2ee?.enabled) {
+        encPayload = await useE2EE.getState().encryptForChat(chatId, content || '');
+        outgoingContent = '';
+      }
+
+      const { data } = await api.post('/messages', {
+        chatId,
+        content: outgoingContent,
+        enc: encPayload,
+        type,
+        attachments,
+        location,
+        viewOnce,
+        replyTo: replyTo?._id,
+      });
+      if (encPayload) useE2EE.getState().rememberPlain(data.message._id, content || '');
       set((s) => {
         // The saved message may ALSO have arrived via the socket echo before this
         // response resolved — drop that copy first, then swap the optimistic one,
@@ -139,19 +338,38 @@ export const useChat = create((set, get) => ({
         return {
           messagesByChat: {
             ...s.messagesByChat,
-            [chatId]: list.map((m) => (m._id === optimistic._id ? data.message : m)),
+            // Carry `clientId` across so the React key stays stable through the swap.
+            [chatId]: list.map((m) => (m._id === optimistic._id ? { ...data.message, clientId } : m)),
           },
         };
       });
       return data.message;
-    } catch {
-      // mark failed
+    } catch (err) {
+      // The chat's key rotated while this message was being composed (someone
+      // joined the group on another device). Drop the stale cached key, pick up
+      // the new version and send once more before giving up — otherwise a
+      // perfectly valid message fails for a reason the user can do nothing about.
+      const status = err?.response?.status;
+      const staleKey = status === 409 && /encryption key/i.test(err.response?.data?.message || '');
+      if (staleKey && !retriedAfterRekey) {
+        useE2EE.getState().invalidateChat(chatId);
+        set((s) => ({
+          messagesByChat: {
+            ...s.messagesByChat,
+            [chatId]: (s.messagesByChat[chatId] || []).filter((m) => m._id !== optimistic._id),
+          },
+        }));
+        return get().sendMessage({ chatId, content, type, replyTo, attachments, location, viewOnce, retriedAfterRekey: true });
+      }
+
       set((s) => ({
         messagesByChat: {
           ...s.messagesByChat,
           [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === optimistic._id ? { ...m, status: 'failed' } : m)),
         },
       }));
+      const message = err?.response?.data?.message;
+      if (message) toast.error(message);
     }
   },
 
@@ -271,6 +489,90 @@ export const useChat = create((set, get) => ({
   toggleArchive: (chatId) => get()._toggleChatFlag(chatId, 'archived', 'archive'),
   toggleMute: (chatId) => get()._toggleChatFlag(chatId, 'muted', 'mute'),
 
+  /* ── Scheduled messages ───────────────────────────────────────────────
+     Pending rows live server-side in their own collection and only become real
+     messages at dispatch, so they are kept OUT of `messagesByChat` — putting
+     them there would make them show up in history, search and unread counts. */
+  scheduledByChat: {}, // { [chatId]: ScheduledMessage[] }
+
+  loadScheduled: async (chatId) => {
+    if (!chatId || DEMO_MODE) return;
+    try {
+      const { data } = await api.get(`/messages/scheduled/${chatId}`);
+      set((s) => ({ scheduledByChat: { ...s.scheduledByChat, [chatId]: data.scheduled || [] } }));
+    } catch {
+      /* a failed load just leaves the previous list — no need to shout */
+    }
+  },
+
+  scheduleMessage: async ({ chatId, sendAt, content = '', type = 'text', attachments, replyTo }) => {
+    try {
+      const { data } = await api.post('/messages/schedule', {
+        chatId,
+        sendAt,
+        content,
+        type,
+        attachments,
+        replyTo: replyTo?._id || replyTo,
+      });
+      set((s) => ({
+        scheduledByChat: {
+          ...s.scheduledByChat,
+          [chatId]: [...(s.scheduledByChat[chatId] || []), data.scheduled].sort(
+            (a, b) => new Date(a.sendAt) - new Date(b.sendAt)
+          ),
+        },
+      }));
+      return data.scheduled;
+    } catch (err) {
+      // Re-throw the SERVER's message. Letting the raw axios error through gave
+      // the user "Request failed with status code 409" instead of the actual
+      // reason ("Pick a time at least a few seconds from now", "…not available
+      // in an encrypted chat"), which is most of why this felt broken.
+      throw new Error(err?.response?.data?.message || 'Could not schedule that message.');
+    }
+  },
+
+  cancelScheduled: async (chatId, id) => {
+    try {
+      await api.delete(`/messages/scheduled/${id}`);
+    } catch (err) {
+      throw new Error(err?.response?.data?.message || 'Could not cancel that message.');
+    }
+    set((s) => ({
+      scheduledByChat: {
+        ...s.scheduledByChat,
+        [chatId]: (s.scheduledByChat[chatId] || []).filter((r) => String(r._id) !== String(id)),
+      },
+    }));
+  },
+
+  /** Socket 'scheduled-message' — the row was sent/cancelled/failed, possibly by
+   *  another of my devices or by the server's dispatcher. */
+  applyScheduledUpdate: ({ id, chatId, status, error }) => {
+    if (!chatId) return;
+    set((s) => {
+      const list = s.scheduledByChat[chatId] || [];
+      // 'sent' and 'cancelled' leave the pending list; 'failed' stays, annotated,
+      // so the author can see it didn't go out.
+      const next =
+        status === 'failed'
+          ? list.map((r) => (String(r._id) === String(id) ? { ...r, status, error } : r))
+          : list.filter((r) => String(r._id) !== String(id));
+      return { scheduledByChat: { ...s.scheduledByChat, [chatId]: next } };
+    });
+  },
+
+  /** A pin/archive/mute made on ANOTHER of my devices (socket 'chat-flag').
+   *  Deliberately takes the absolute value rather than toggling: the device that
+   *  issued the change also receives this echo, and re-toggling there would undo
+   *  the very action the user just took. Setting the value is idempotent. */
+  applyChatFlag: (chatId, action, value) => {
+    const flag = { pin: 'pinned', archive: 'archived', mute: 'muted' }[action];
+    if (!flag) return;
+    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, [flag]: !!value } : c)) }));
+  },
+
   addChat: (chat) => set((s) => (s.chats.some((c) => c._id === chat._id) ? {} : { chats: [chat, ...s.chats] })),
 
   /** Apply a chat update that arrived over the socket (group rename/avatar/
@@ -293,14 +595,26 @@ export const useChat = create((set, get) => ({
       },
     })),
 
-  /** Apply a pin/unpin that another participant made. */
-  applyPinned: (chatId, messageId, pinned) =>
+  /**
+   * A pin/unpin from the socket — another participant, another of my devices, or
+   * the server's expiry sweeper. On a pin we may not hold the message (it can be
+   * older than the loaded window), so the banner is filled in from a fetch.
+   */
+  applyPinned: async (chatId, messageId, pinned, pin) => {
+    if (!pinned) return get().expirePin(chatId, messageId);
+
+    const known = (get().messagesByChat[chatId] || []).find((m) => m._id === messageId);
+    if (!known || !pin) return get().loadPins(chatId); // need the message body → refetch
     set((s) => ({
-      messagesByChat: {
-        ...s.messagesByChat,
-        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === messageId ? { ...m, pinned } : m)),
+      pinsByChat: {
+        ...s.pinsByChat,
+        [chatId]: [
+          { ...pin, message: known },
+          ...(s.pinsByChat[chatId] || []).filter((p) => p.messageId !== messageId),
+        ],
       },
-    })),
+    }));
+  },
 
   /** Create a group chat with the given members (real API or demo). Returns the chat. */
   createGroup: async ({ name, description = '', members = [] }) => {
@@ -383,7 +697,16 @@ export const useChat = create((set, get) => ({
     }));
     if (!DEMO_MODE) {
       try {
-        await api.patch(`/messages/${messageId}`, { content });
+        // Same rule as sending: in an encrypted chat the replacement travels as
+        // ciphertext, and the server refuses a plaintext edit outright.
+        const chat = get().chats.find((c) => c._id === chatId);
+        if (chat?.e2ee?.enabled) {
+          const enc = await useE2EE.getState().encryptForChat(chatId, content);
+          await api.patch(`/messages/${messageId}`, { enc });
+          useE2EE.getState().rememberPlain(messageId, content);
+        } else {
+          await api.patch(`/messages/${messageId}`, { content });
+        }
       } catch (err) {
         // Server refused (e.g. past the 5-minute edit window) — undo the optimistic edit.
         if (original) {
@@ -433,14 +756,17 @@ export const useChat = create((set, get) => ({
     }
   },
 
-  /** Apply an edit that arrived over the socket. */
-  applyEditedMessage: (chatId, message) =>
+  /** Apply an edit that arrived over the socket (decrypting it first if the
+   *  chat is encrypted — an edited ciphertext is a new ciphertext). */
+  applyEditedMessage: async (chatId, message) => {
+    const next = message?.encrypted ? await useE2EE.getState().hydrateOne(chatId, message) : message;
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,
-        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === message._id ? { ...m, ...message } : m)),
+        [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === next._id ? { ...m, ...next } : m)),
       },
-    })),
+    }));
+  },
 
   /** Apply a delete that arrived over the socket (scope 'everyone' → tombstone). */
   applyDeletedMessage: (chatId, messageId, scope = 'everyone') =>
@@ -473,24 +799,78 @@ export const useChat = create((set, get) => ({
     }
   },
 
-  /** Pin / unpin a message — optimistic local toggle + API. */
-  togglePinMessage: async (chatId, messageId) => {
+  /* ── Pinned messages ──────────────────────────────────────────────────
+     Chat-wide and time-limited: the pinner picks 1 / 6 / 12 / 24 hours, and in a
+     group only admins may pin (the server is the authority on that — `canPin`
+     below is just so the UI doesn't offer an action that will be refused).
+
+     Pins live in their own slice rather than as a flag on each message, because
+     a pinned message is very often older than the loaded window — there is no
+     message object in `messagesByChat` to hang the flag on. */
+  pinsByChat: {}, // { [chatId]: Pin[] }  Pin = { messageId, expiresAt, durationHours, pinnedBy, pinnedAt, message }
+  canPinByChat: {}, // { [chatId]: boolean }
+
+  setPins: (chatId, pins, canPin) =>
     set((s) => ({
-      messagesByChat: {
-        ...s.messagesByChat,
-        [chatId]: (s.messagesByChat[chatId] || []).map((m) =>
-          m._id === messageId ? { ...m, pinned: !m.pinned } : m
-        ),
-      },
-    }));
-    if (!DEMO_MODE) {
-      try {
-        await api.post(`/messages/${messageId}/pin`);
-      } catch {
-        /* noop */
-      }
+      pinsByChat: { ...s.pinsByChat, [chatId]: pins || [] },
+      canPinByChat: canPin === undefined ? s.canPinByChat : { ...s.canPinByChat, [chatId]: canPin },
+    })),
+
+  loadPins: async (chatId) => {
+    if (DEMO_MODE || !chatId) return;
+    try {
+      const { data } = await api.get(`/messages/${chatId}/pins`);
+      get().setPins(chatId, data.pins, data.canPin);
+    } catch {
+      /* leave whatever is shown */
     }
   },
+
+  /** Pin for `hours`. Re-pinning an already-pinned message extends its timer. */
+  pinMessage: async (chatId, messageId, hours) => {
+    if (DEMO_MODE) return toast('Pinning is available in the full app.');
+    try {
+      const { data } = await api.post(`/messages/${messageId}/pin`, { hours });
+      const message = (get().messagesByChat[chatId] || []).find((m) => m._id === messageId);
+      set((s) => {
+        const existing = (s.pinsByChat[chatId] || []).filter(
+          // Drop the previous entry for this message (a re-pin) and anything the
+          // server's cap pushed out, so the banner matches the server exactly.
+          (p) => p.messageId !== messageId && !(data.evicted || []).includes(p.messageId)
+        );
+        return { pinsByChat: { ...s.pinsByChat, [chatId]: [{ ...data.pin, message }, ...existing] } };
+      });
+      toast.success(`Pinned for ${hours} ${hours === 1 ? 'hour' : 'hours'} 📌`);
+      return data.pin;
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Could not pin this message.');
+      return null;
+    }
+  },
+
+  unpinMessage: async (chatId, messageId) => {
+    const previous = get().pinsByChat[chatId] || [];
+    set((s) => ({
+      pinsByChat: { ...s.pinsByChat, [chatId]: previous.filter((p) => p.messageId !== messageId) },
+    }));
+    if (DEMO_MODE) return;
+    try {
+      await api.delete(`/messages/${messageId}/pin`);
+    } catch (err) {
+      set((s) => ({ pinsByChat: { ...s.pinsByChat, [chatId]: previous } })); // put it back
+      toast.error(err?.response?.data?.message || 'Could not unpin this message.');
+    }
+  },
+
+  /** Drop a pin locally once its clock runs out, without waiting for the
+   *  server's sweep — the banner should vanish on time. */
+  expirePin: (chatId, messageId) =>
+    set((s) => ({
+      pinsByChat: {
+        ...s.pinsByChat,
+        [chatId]: (s.pinsByChat[chatId] || []).filter((p) => p.messageId !== messageId),
+      },
+    })),
 
   /** Create a poll message in a chat. */
   createPoll: async ({ chatId, question, options, multi = false }) => {

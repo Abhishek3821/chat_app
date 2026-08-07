@@ -20,7 +20,8 @@ export function registerFanoutJobs() {
   });
 
   // WhatsApp-Business greeting/away auto-reply for inbound customer messages.
-  registerJob('automsg.maybe', async ({ chatId, senderId }) => {
-    await maybeAutoReply({ chatId, senderId });
+  // `otherIds` lets the worker short-circuit on its cache without loading the chat.
+  registerJob('automsg.maybe', async ({ chatId, senderId, otherIds }) => {
+    await maybeAutoReply({ chatId, senderId, otherIds });
   });
 }

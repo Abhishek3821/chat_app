@@ -10,7 +10,7 @@ import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
 import { useBroadcasts } from '@/store/useBroadcasts';
 import { useContacts } from '@/store/useContacts';
-import { cn } from '@/lib/utils';
+import { cn, PAGE_SHELL } from '@/lib/utils';
 
 export default function BroadcastsPage() {
   const { lists, load, create, remove, send } = useBroadcasts();
@@ -22,7 +22,7 @@ export default function BroadcastsPage() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="mx-auto max-w-3xl p-4 md:p-6">
+      <div className={PAGE_SHELL}>
         <motion.header initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow"><Megaphone size={22} /></span>
@@ -42,7 +42,7 @@ export default function BroadcastsPage() {
           <div className="mt-6 grid gap-3">
             {lists.map((l) => (
               <div key={l._id} className="glass flex items-center gap-3 rounded-2xl p-4 shadow-soft">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-500/10 text-brand-500"><Megaphone size={19} /></span>
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><Megaphone size={19} /></span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold text-content">{l.name}</p>
                   <p className="text-xs text-content-muted">{l.recipientCount} {l.recipientCount === 1 ? 'recipient' : 'recipients'}</p>

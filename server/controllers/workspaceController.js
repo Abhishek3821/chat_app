@@ -4,6 +4,7 @@ import Chat from '../models/Chat.js';
 import { createWorkspaceForUser } from '../utils/workspaceService.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
+import { invalidateAutoReplyCache } from '../utils/autoReply.js';
 
 const MEMBER_FIELDS = 'name username avatar isOnline lastSeen workspaceRole accountStatus createdAt';
 
@@ -69,6 +70,7 @@ export const updateWorkspace = asyncHandler(async (req, res) => {
   }
 
   // WhatsApp-Business auto-replies (greeting on first contact, away out-of-hours).
+  let autoRepliesChanged = false;
   const ar = req.body.autoReplies;
   if (ar && typeof ar === 'object') {
     ws.autoReplies = ws.autoReplies || {};
@@ -86,9 +88,13 @@ export const updateWorkspace = asyncHandler(async (req, res) => {
       if (ar.away.endHour !== undefined && Number.isFinite(Number(ar.away.endHour))) ws.autoReplies.away.endHour = clampHour(ar.away.endHour);
     }
     ws.markModified('autoReplies');
+    autoRepliesChanged = true;
   }
 
   await ws.save();
+  // The send path caches "this recipient has no auto-replies"; without this,
+  // switching them on wouldn't take effect until that cache expired.
+  if (autoRepliesChanged) invalidateAutoReplyCache(ws._id).catch(() => {});
   res.json({ success: true, workspace: publicWorkspace(ws, { includeInvite: true }) });
 });
 

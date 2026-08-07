@@ -42,7 +42,9 @@ function strengthOf(pw) {
   return score; // 0..4
 }
 const strengthLabels = ['Too short', 'Weak', 'Okay', 'Good', 'Strong'];
-const strengthColors = ['bg-red-500', 'bg-red-500', 'bg-amber-500', 'bg-cyan-500', 'bg-emerald-500'];
+// The "Good" step needs a per-theme shade: cyan-500 (#3C8C86) only reaches
+// ~2.4:1 against the dark-mode empty track, which flattens the meter.
+const strengthColors = ['bg-red-500', 'bg-red-500', 'bg-amber-500', 'bg-cyan-600 dark:bg-cyan-400', 'bg-emerald-500'];
 
 /** Downscale the chosen photo to a small square JPEG data-URL (kept well under
  *  the server's 400KB avatar cap) so signup stays a single lightweight request. */
@@ -203,7 +205,7 @@ export default function Signup() {
   const fieldError = (key) => (touched[key] ? errors[key] : undefined);
 
   return (
-    <motion.div {...pageMotion} className="flex min-h-screen w-full">
+    <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase
         eyebrow="Join ChatConnect"
         headline={
@@ -231,7 +233,7 @@ export default function Signup() {
 
         {inviteCode && (
           <motion.div variants={rise} className="mt-4 flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-3 py-2.5 text-sm text-content">
-            <Building2 size={16} className="shrink-0 text-brand-500" />
+            <Building2 size={16} className="shrink-0 text-brand-500 dark:text-brand-300" />
             You’re joining a workspace by invite — you’ll be able to chat with everyone in it.
           </motion.div>
         )}
@@ -239,7 +241,8 @@ export default function Signup() {
         {!inviteCode && (
           <motion.div variants={rise} className="mt-5">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-muted">I'm signing up for</p>
-            <div className="grid grid-cols-2 gap-2">
+            {/* Two columns leave ~80px of text width at 320px — stack until xs. */}
+            <div className="grid grid-cols-1 gap-2 xs:grid-cols-2">
               {[
                 { id: 'personal', label: 'Personal use', desc: 'Chat & call friends and family', icon: Heart },
                 { id: 'workspace', label: 'Workspace / Team', desc: 'For your company or organization', icon: Building2 },
@@ -281,7 +284,7 @@ export default function Signup() {
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
-                className="ring-brand group relative grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-border bg-surface-2 transition-transform hover:scale-105"
+                className="ring-brand group relative grid h-16 w-16 place-items-center overflow-hidden rounded-full neu-raised bg-surface transition-transform hover:scale-105"
                 aria-label="Add profile photo"
               >
                 {avatar ? (
@@ -295,13 +298,13 @@ export default function Signup() {
                   type="button"
                   onClick={() => setAvatar(null)}
                   aria-label="Remove photo"
-                  className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-red-500 text-white shadow transition-transform hover:scale-110"
+                  className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full bg-red-500 text-white shadow transition-transform hover:scale-110"
                 >
                   <X size={12} />
                 </button>
               )}
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-content">Profile photo</p>
               <p className="text-xs text-content-muted">Optional — you can add one later.</p>
             </div>
@@ -342,8 +345,11 @@ export default function Signup() {
               label="Email address"
               hint={fieldError('email') || (emailStep !== 'verified' ? 'Click Verify — we’ll email you a 6-digit code.' : undefined)}
             >
-              <div className="flex items-stretch gap-2">
-                <div className="relative flex-1">
+              {/* An <input>'s intrinsic min-width (default size=20) stops flex-1
+                  from shrinking, so this row overflowed 320px — hence min-w-0,
+                  plus a stacked layout until there's room for the button. */}
+              <div className="flex flex-col gap-2 xs:flex-row xs:items-stretch">
+                <div className="relative min-w-0 flex-1">
                   <Input
                     icon={Mail}
                     type="email"
@@ -382,7 +388,7 @@ export default function Signup() {
             {/* Code entry appears after the email is sent, until verified */}
             {emailStep === 'sent' && (
               <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="mt-2 space-y-2">
-                <div className="flex items-stretch gap-2">
+                <div className="flex flex-col gap-2 xs:flex-row xs:items-stretch">
                   <input
                     value={emailCode}
                     onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -390,7 +396,7 @@ export default function Signup() {
                     autoComplete="one-time-code"
                     placeholder="Enter the 6-digit code"
                     aria-label="Email verification code"
-                    className="ring-brand w-full flex-1 rounded-xl border border-border bg-surface-2 px-4 py-3 text-center text-base font-bold tracking-[0.35em] text-content placeholder:text-sm placeholder:font-normal placeholder:tracking-normal placeholder:text-content-muted"
+                    className="ring-brand w-full min-w-0 flex-1 rounded-xl neu-inset bg-surface-2 px-4 py-3 text-center text-base font-bold tracking-[0.35em] text-content placeholder:text-sm placeholder:font-normal placeholder:tracking-normal placeholder:text-content-muted"
                   />
                   <Button type="button" variant="primary" onClick={confirmCode} disabled={emailBusy || emailCode.length !== 6} className="shrink-0">
                     {emailBusy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
@@ -430,7 +436,7 @@ export default function Signup() {
                   type={showPw ? 'text' : 'password'}
                   autoComplete="new-password"
                   placeholder="Create a password (8+ characters)"
-                  className={cn('pr-11', fieldError('password') && 'border-red-500/70 focus-visible:ring-red-500/40')}
+                  className={cn('pr-12', fieldError('password') && 'border-red-500/70 focus-visible:ring-red-500/40')}
                   value={form.password}
                   onChange={set('password')}
                   onBlur={blur('password')}
@@ -439,7 +445,7 @@ export default function Signup() {
                   type="button"
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
-                  className="ring-brand absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-content-muted transition-colors hover:text-content"
+                  className="ring-brand absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-content-muted transition-colors hover:text-content sm:right-1.5 sm:h-10 sm:w-10"
                 >
                   {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -507,7 +513,7 @@ export default function Signup() {
         </form>
 
         <motion.p variants={rise} className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-content-muted">
-          <Check size={13} className="text-emerald-500" />
+          <Check size={13} className="shrink-0 text-emerald-600 dark:text-emerald-300" />
           By continuing you agree to our Terms &amp; Privacy Policy.
         </motion.p>
 

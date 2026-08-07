@@ -70,9 +70,10 @@ export const createStatus = asyncHandler(async (req, res) => {
 
 // GET /api/status  — my status + contacts' statuses, grouped by user
 export const getStatusFeed = asyncHandler(async (req, res) => {
-  const me = await User.findById(req.user._id).select('contacts');
+  // `protect` already loaded the full user document, contacts included — re-reading
+  // it here was a second round trip on every status-feed load for nothing.
   const myId = String(req.user._id);
-  const audience = [req.user._id, ...me.contacts];
+  const audience = [req.user._id, ...(req.user.contacts || [])];
   const statuses = await Status.find({ user: { $in: audience } })
     .sort({ createdAt: -1 })
     .populate('user', USER_FIELDS)
@@ -84,6 +85,9 @@ export const getStatusFeed = asyncHandler(async (req, res) => {
   // implied by them being in `audience`, so their privacy.allow/except govern.
   const grouped = {};
   for (const s of statuses) {
+    // A status whose owner no longer exists populates to null. Skip it — reading
+    // `s.user._id` here would throw and 500 the ENTIRE feed over one stale row.
+    if (!s.user?._id) continue;
     const isMine = String(s.user._id) === myId;
     // For a contact's status, evaluate its per-status audience against me. We
     // pass a single-element "contacts" proxy since contact-ship already holds.

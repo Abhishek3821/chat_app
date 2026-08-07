@@ -2,6 +2,32 @@ import User from '../models/User.js';
 import Chat from '../models/Chat.js';
 import Workspace, { generateInviteCode, slugifyName } from '../models/Workspace.js';
 import { ApiError } from './asyncHandler.js';
+import { cacheGetJSON, cacheSetJSON } from './cache.js';
+import { memoGet, memoSet } from './memo.js';
+
+/**
+ * A workspace's `type` ('personal' | 'team') decided at creation and never
+ * changed afterwards, yet several read paths (user search, profile) fetched the
+ * whole document on every request just to branch on it. Cached for an hour;
+ * falls straight through to Mongo when Redis is off.
+ */
+export async function getWorkspaceType(workspaceId) {
+  if (!workspaceId) return null;
+  const key = `ws:type:${workspaceId}`;
+  const local = memoGet(key);
+  if (local) return local;
+  const hit = await cacheGetJSON(key);
+  if (hit) {
+    memoSet(key, hit.type, 3600);
+    return hit.type;
+  }
+  const ws = await Workspace.findById(workspaceId).select('type').lean();
+  if (!ws) return null;
+  const type = ws.type || 'team';
+  memoSet(key, type, 3600); // effective with Redis off, which is the default
+  await cacheSetJSON(key, { type }, 3600);
+  return type;
+}
 
 /** Reserve a slug that isn't taken yet (adds a short suffix on collision). */
 async function uniqueSlug(base) {

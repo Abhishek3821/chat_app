@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { formatDistanceToNowStrict } from 'date-fns';
 import { Plus, X, Send, Eye, ChevronLeft, ChevronRight, Camera } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
-import { cn } from '@/lib/utils';
+import Button from '@/components/ui/Button';
+import PageHeader from '@/components/ui/PageHeader';
+import { cn, formatRelative, PAGE_SHELL } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useStatus } from '@/store/useStatus';
 import { useAuth } from '@/store/useAuth';
 
 const STORY_DURATION = 4000; // ms per item
 
-const relTime = (date) => formatDistanceToNowStrict(new Date(date), { addSuffix: false });
+// Relative labels come from the shared safe helper. This page used to call
+// date-fns directly on `new Date(value)`, which THROWS "Invalid time value" on a
+// missing/unparseable date and took the whole screen down via the error boundary.
+// formatRelative() returns '' instead (see safeDate in lib/utils).
 
 /* ─────────────────────────────────────────────────────────────
    Full-screen story viewer (inline)
@@ -123,15 +127,15 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
         exit={{ scale: 0.92, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 260, damping: 26 }}
         onClick={(e) => e.stopPropagation()}
-        className="relative flex h-full max-h-[100dvh] w-full max-w-md flex-col overflow-hidden sm:my-4 sm:h-[92vh] sm:rounded-3xl"
+        className="relative flex h-full max-h-[100dvh] w-full max-w-md flex-col overflow-hidden sm:my-4 sm:h-[92dvh] sm:rounded-3xl"
       >
         {/* Content background */}
         <div className="absolute inset-0" style={{ background: item.background }} />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/50 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/50 to-transparent" />
 
-        {/* Progress bars */}
-        <div className="relative z-20 flex gap-1.5 px-3 pt-3">
+        {/* Progress bars — full-bleed on phones, so clear the notch/status bar. */}
+        <div className="relative z-20 flex gap-1 px-3 pt-[calc(0.75rem+env(safe-area-inset-top))] xs:gap-1.5 sm:pt-3">
           {items.map((it, i) => (
             <div key={it._id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/30">
               <div
@@ -151,12 +155,12 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
             <p className="truncate text-sm font-semibold text-white drop-shadow">
               {entry.isMe ? 'My status' : entry.user.name}
             </p>
-            <p className="text-[11px] text-white/70 drop-shadow">{relTime(item.createdAt)} ago</p>
+            <p className="text-[11px] text-white/70 drop-shadow">{formatRelative(item.createdAt)}</p>
           </div>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid h-9 w-9 place-items-center rounded-full text-white/90 transition-colors hover:bg-white/15"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white/90 transition-colors hover:bg-white/15 sm:h-10 sm:w-10"
           >
             <X size={20} />
           </button>
@@ -176,7 +180,7 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
 
         {/* Centered content — hold anywhere to pause */}
         <div
-          className="relative z-[5] flex flex-1 items-center justify-center px-8"
+          className="relative z-[5] flex flex-1 items-center justify-center px-6 sm:px-8"
           onPointerDown={() => setPaused(true)}
           onPointerUp={() => setPaused(false)}
           onPointerLeave={() => setPaused(false)}
@@ -195,8 +199,9 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
           </AnimatePresence>
         </div>
 
-        {/* Footer: viewers (own status) or reply bar */}
-        <div className="relative z-20 px-4 pb-4">
+        {/* Footer: viewers (own status) or reply bar. Full-bleed on phones — clear
+            the iOS home indicator so the reply field stays tappable. */}
+        <div className="relative z-20 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pb-4">
           {entry.isMe ? (
             <div className="flex items-center justify-center gap-2 text-white/85">
               <Eye size={16} />
@@ -223,8 +228,8 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
                 onChange={(e) => setReply(e.target.value)}
                 onFocus={() => setPaused(true)}
                 onBlur={() => setPaused(false)}
-                placeholder={`Reply to ${entry.user.name.split(' ')[0]}…`}
-                className="h-11 flex-1 rounded-full border border-white/25 bg-white/10 px-4 text-sm text-white placeholder:text-white/60 backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-white/40"
+                placeholder={`Reply to ${String(entry.user.name ?? '').split(' ')[0] || 'them'}…`}
+                className="h-11 min-w-0 flex-1 rounded-full border border-white/25 bg-white/10 px-4 text-base text-white placeholder:text-white/60 backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-white/40 sm:text-sm"
               />
               <button
                 type="submit"
@@ -264,7 +269,7 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
 /* ─────────────────────────────────────────────────────────────
    Status card in the grid/strip
    ───────────────────────────────────────────────────────────── */
-function StatusCard({ entry, onOpen }) {
+function StatusCard({ entry, onOpen, className }) {
   const preview = entry.items[0];
   const seen = entry.seenAll;
   return (
@@ -273,7 +278,13 @@ function StatusCard({ entry, onOpen }) {
       whileTap={{ scale: 0.98 }}
       transition={{ type: 'spring', stiffness: 320, damping: 22 }}
       onClick={onOpen}
-      className="relative h-52 w-36 shrink-0 overflow-hidden rounded-3xl text-left shadow-soft"
+      // w-32 at base: two of these tiles side by side (add + my status) overflow a
+      // 320px viewport at w-36. `className` lets the Recent grid stretch them to
+      // their cell instead (w-full) — same tile, two layouts.
+      className={cn(
+        'relative h-48 w-32 shrink-0 overflow-hidden rounded-3xl text-left shadow-soft xs:h-52 xs:w-36',
+        className
+      )}
       style={{ background: preview.background }}
     >
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/10" />
@@ -302,9 +313,34 @@ function StatusCard({ entry, onOpen }) {
         <p className="truncate text-sm font-semibold text-white drop-shadow">
           {entry.isMe ? 'My status' : entry.user.name}
         </p>
-        <p className="text-[11px] text-white/80 drop-shadow">{relTime(preview.createdAt)} ago</p>
+        <p className="text-[11px] text-white/80 drop-shadow">{formatRelative(preview.createdAt)}</p>
       </div>
     </motion.button>
+  );
+}
+
+/** Uppercase section label + optional count — the same rhythm every section on
+ *  this page now uses (they were three slightly different <p> tags before). */
+function SectionLabel({ children, count }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <p className="text-xs font-bold uppercase tracking-wider text-content-muted">{children}</p>
+      {count > 0 && (
+        <span className="rounded-full bg-content/10 px-2 py-0.5 text-[10px] font-bold tabular-nums text-content-muted">
+          {count}
+        </span>
+      )}
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function Metric({ value, label }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-2xl font-bold leading-none tabular-nums text-content">{value}</p>
+      <p className="mt-1 text-[11px] font-medium text-content-muted">{label}</p>
+    </div>
   );
 }
 
@@ -337,99 +373,111 @@ export default function StatusPage() {
     }
   };
 
-  return (
-    <div className="mx-auto max-w-6xl p-4 md:p-6">
-      {/* Header */}
-      <motion.header
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-      >
-        <h1 className="text-2xl font-bold tracking-tight text-content">Status</h1>
-        <p className="text-xs text-content-muted">Share a moment — disappears in 24 hours.</p>
-      </motion.header>
+  const myCount = myEntry?.items?.length || 0;
 
-      {/* My status + add tile */}
-      <motion.div
+  return (
+    <div className={PAGE_SHELL}>
+      <PageHeader
+        icon={Camera}
+        title="Status"
+        subtitle="Share a moment — disappears in 24 hours."
+        actions={
+          <Button onClick={() => openModal('newStatus')}>
+            <Plus size={17} />
+            <span className="hidden sm:inline">Add status</span>
+          </Button>
+        }
+      />
+
+      {/* ── Your status ── */}
+      <motion.section
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.06 }}
-        className="mt-6 flex items-stretch gap-4"
+        className="mt-6"
       >
-        {/* Add status — dashed gradient border tile */}
-        <motion.button
-          whileHover={{ scale: 1.03, y: -3 }}
-          whileTap={{ scale: 0.98 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 22 }}
-          onClick={() => openModal('newStatus')}
-          className="group relative h-52 w-36 shrink-0 overflow-hidden rounded-3xl"
-        >
-          {/* Soft gradient glow behind the dashed frame */}
-          <span className="absolute inset-0 rounded-3xl bg-brand-gradient-soft" aria-hidden />
-          <span className="relative flex h-full w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-brand-500/50 transition-colors group-hover:border-brand-500">
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient shadow-glow transition-transform group-hover:scale-110">
-              <Plus className="text-white" size={24} strokeWidth={2.5} />
-            </span>
-            <span className="text-sm font-semibold text-content">Add status</span>
-          </span>
-        </motion.button>
-
-        {/* My status card (if posted) else a prompt */}
-        {hasMyStatus ? (
-          <StatusCard entry={myEntry} onOpen={() => openViewer(myEntry)} />
-        ) : (
-          <button
+        <SectionLabel>Your status</SectionLabel>
+        <div className="mt-3 flex items-stretch gap-3 xs:gap-4">
+          {/* Add status — dashed accent frame */}
+          <motion.button
+            whileHover={{ scale: 1.03, y: -3 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 22 }}
             onClick={() => openModal('newStatus')}
-            className="glass flex h-52 w-36 shrink-0 flex-col items-center justify-center gap-3 rounded-3xl text-center shadow-soft"
+            className="group relative h-48 w-32 shrink-0 overflow-hidden rounded-3xl xs:h-52 xs:w-36"
           >
-            <Avatar src={me?.avatar} name={me?.name} size="lg" />
-            <div>
-              <p className="text-sm font-semibold text-content">My status</p>
-              <p className="mt-0.5 text-[11px] text-content-muted">Tap to share</p>
-            </div>
-          </button>
-        )}
+            <span className="absolute inset-0 rounded-3xl bg-brand-gradient-soft" aria-hidden />
+            <span className="relative flex h-full w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-brand-500/50 transition-colors group-hover:border-brand-500">
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient shadow-glow transition-transform group-hover:scale-110">
+                <Plus className="text-white" size={24} strokeWidth={2.5} />
+              </span>
+              <span className="text-sm font-semibold text-content">Add status</span>
+            </span>
+          </motion.button>
 
-        {/* Recent updates strip (fills remaining width on larger screens) */}
-        <div className="hidden min-w-0 flex-1 md:block">
-          <p className="mb-2 text-xs font-bold uppercase tracking-wider text-content-muted">
-            Recent updates
-          </p>
-          <div className="no-scrollbar flex gap-4 overflow-x-auto pb-2">
-            {recent.length > 0 ? (
-              recent.map((entry) => (
-                <StatusCard key={entry.user._id} entry={entry} onOpen={() => openViewer(entry)} />
-              ))
-            ) : (
-              <div className="glass grid h-52 w-full place-items-center rounded-3xl text-sm text-content-muted">
-                No new updates
+          {/* My status card (if posted) else a matching prompt tile */}
+          {hasMyStatus ? (
+            <StatusCard entry={myEntry} onOpen={() => openViewer(myEntry)} />
+          ) : (
+            <button
+              onClick={() => openModal('newStatus')}
+              className="glass flex h-48 w-32 shrink-0 flex-col items-center justify-center gap-3 rounded-3xl text-center shadow-soft transition-colors hover:border-brand-500/40 xs:h-52 xs:w-36"
+            >
+              <Avatar src={me?.avatar} name={me?.name} size="lg" />
+              <div>
+                <p className="text-sm font-semibold text-content">My status</p>
+                <p className="mt-0.5 text-[11px] text-content-muted">Tap to share</p>
               </div>
-            )}
+            </button>
+          )}
+
+          {/* Live summary instead of the old full-width "No new updates" box —
+              that box was an empty state sitting directly above the page's other
+              empty state, so a quiet Status screen rendered both at once. */}
+          <div className="glass hidden min-w-0 flex-1 flex-col justify-center gap-3 rounded-3xl p-5 shadow-soft sm:flex">
+            <div className="flex items-center gap-2 text-content-muted">
+              <Eye size={16} className="text-brand-500" />
+              <p className="text-xs font-bold uppercase tracking-wider">At a glance</p>
+            </div>
+            <div className="flex flex-wrap gap-6">
+              <Metric value={myCount} label={myCount === 1 ? 'Update by you' : 'Updates by you'} />
+              <Metric value={recent.length} label="Unseen" />
+              <Metric value={viewed.length} label="Viewed" />
+            </div>
+            <p className="text-xs text-content-muted">
+              {hasMyStatus
+                ? 'Your status disappears 24 hours after you post it.'
+                : 'Post a status and your contacts will see it for the next 24 hours.'}
+            </p>
           </div>
         </div>
-      </motion.div>
+      </motion.section>
 
-      {/* Recent updates — mobile (below the tiles) */}
+      {/* ── Recent updates — one responsive grid (was a desktop strip plus a
+             separate mobile-only strip rendering the same list twice). ── */}
       {recent.length > 0 && (
-        <section className="mt-8 md:hidden">
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-content-muted">
-            Recent updates
-          </p>
-          <div className="no-scrollbar flex gap-4 overflow-x-auto pb-2">
+        <section className="mt-8">
+          <SectionLabel count={recent.length}>Recent updates</SectionLabel>
+          <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-3 xs:grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] xs:gap-4">
             {recent.map((entry) => (
-              <StatusCard key={entry.user._id} entry={entry} onOpen={() => openViewer(entry)} />
+              <StatusCard
+                key={entry.user._id}
+                entry={entry}
+                onOpen={() => openViewer(entry)}
+                className="w-full xs:w-full"
+              />
             ))}
           </div>
         </section>
       )}
 
-      {/* Viewed updates */}
+      {/* ── Viewed updates ── */}
       {viewed.length > 0 && (
         <section className="mt-8">
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-content-muted">
-            Viewed updates
-          </p>
-          <div className="space-y-2.5">
+          <SectionLabel count={viewed.length}>Viewed updates</SectionLabel>
+          {/* Rows are self-contained cards, so they column up rather than stretching
+              to the full 1536px ceiling on a wide monitor. */}
+          <div className="mt-3 grid gap-2.5 lg:grid-cols-2 2xl:grid-cols-3">
             {viewed.map((entry) => {
               const preview = entry.items[0];
               return (
@@ -447,7 +495,7 @@ export default function StatusPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-semibold text-content">{entry.user.name}</p>
-                    <p className="truncate text-xs text-content-muted">{relTime(preview.createdAt)} ago</p>
+                    <p className="truncate text-xs text-content-muted">{formatRelative(preview.createdAt)}</p>
                   </div>
                   <div
                     className="h-10 w-8 shrink-0 rounded-lg"
@@ -461,19 +509,24 @@ export default function StatusPage() {
         </section>
       )}
 
-      {/* Empty overall state */}
+      {/* The page's ONLY empty state — reached when no contact has posted. */}
       {recent.length === 0 && viewed.length === 0 && (
-        <div className="mt-10">
-          <div className="glass mx-auto grid max-w-md place-items-center gap-4 rounded-3xl p-10 text-center shadow-soft">
-            <span className="grid h-16 w-16 place-items-center rounded-3xl bg-brand-gradient shadow-glow">
-              <Camera className="text-white" size={28} />
+        <div className="mt-8">
+          <div className="glass mx-auto grid max-w-md place-items-center gap-4 rounded-3xl p-6 text-center shadow-soft xs:p-8">
+            <span className="grid h-14 w-14 place-items-center rounded-3xl bg-brand-gradient shadow-glow">
+              <Camera className="text-white" size={26} />
             </span>
             <div>
-              <h3 className="text-lg font-bold text-content">No updates yet</h3>
+              <h3 className="text-base font-bold text-content">No updates from your contacts</h3>
               <p className="mt-1 text-sm text-content-muted">
-                When your contacts share a status, it will show up here.
+                When someone shares a status, it will show up here for 24 hours.
               </p>
             </div>
+            {!hasMyStatus && (
+              <Button size="sm" onClick={() => openModal('newStatus')}>
+                <Plus size={16} /> Share the first one
+              </Button>
+            )}
           </div>
         </div>
       )}

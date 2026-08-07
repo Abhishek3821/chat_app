@@ -221,31 +221,34 @@ function CallSession({ call }) {
             <RemoteAudio key={r.id} stream={r.stream} sinkId={sinkId} />
           ))}
         </div>
+        {/* Sits ABOVE the 68px mobile bottom nav (+ home indicator) instead of on
+            top of its right-hand tabs; drops back to the corner from md: up where
+            the nav is hidden. max-w keeps the pill inside a 320px screen. */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="fixed bottom-4 right-4 z-[120] flex items-center gap-3 rounded-2xl bg-navy-900/95 p-2.5 pr-3 shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl"
+          className="fixed bottom-[calc(68px+env(safe-area-inset-bottom)+0.5rem)] right-3 z-[120] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-2xl bg-navy-900/95 p-2.5 pr-3 shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl md:bottom-4 md:right-4 md:gap-3"
         >
-          <button onClick={restoreCall} className="flex items-center gap-3" title="Return to call">
-            <div className="relative">
+          <button onClick={restoreCall} className="flex min-w-0 items-center gap-2.5 md:gap-3" title="Return to call">
+            <div className="relative shrink-0">
               <Avatar src={peer.avatar} name={peer.name} size="sm" />
               <span className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full bg-emerald-500 ring-2 ring-navy-900">
                 {isVideo ? <Video size={9} className="text-white" /> : <Phone size={9} className="text-white" />}
               </span>
             </div>
-            <div className="text-left">
-              <p className="max-w-[120px] truncate text-sm font-semibold text-white">{peer.name || 'Call'}</p>
+            <div className="min-w-0 text-left">
+              <p className="max-w-[80px] truncate text-sm font-semibold text-white xs:max-w-[120px]">{peer.name || 'Call'}</p>
               <p className="text-xs text-emerald-400">{connected ? <CallTimer /> : statusText}</p>
             </div>
           </button>
-          <div className="flex items-center gap-1.5">
-            <button onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'} className={cn('grid h-9 w-9 place-items-center rounded-full', muted ? 'bg-white text-navy-900' : 'bg-white/15 text-white hover:bg-white/25')}>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'} className={cn('grid h-11 w-11 place-items-center rounded-full sm:h-9 sm:w-9', muted ? 'bg-white text-navy-900' : 'bg-white/15 text-white hover:bg-white/25')}>
               {muted ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
-            <button onClick={restoreCall} title="Expand" className="grid h-9 w-9 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25">
+            <button onClick={restoreCall} title="Expand" className="grid h-11 w-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:h-9 sm:w-9">
               <Maximize2 size={15} />
             </button>
-            <button onClick={hangUp} title="End call" className="grid h-9 w-9 place-items-center rounded-full bg-red-500 text-white hover:bg-red-600">
+            <button onClick={hangUp} title="End call" className="grid h-11 w-11 place-items-center rounded-full bg-red-500 text-white hover:bg-red-600 sm:h-9 sm:w-9">
               <PhoneOff size={16} />
             </button>
           </div>
@@ -271,20 +274,20 @@ function CallSession({ call }) {
 
       <div className="relative flex h-full flex-col">
         {/* Top bar */}
-        <div className="flex items-center justify-between p-5 text-white">
-          <div>
-            <p className="text-sm font-medium text-white/70">
+        <div className="flex items-center justify-between gap-3 p-4 text-white sm:p-5">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-white/70">
               {isVideo ? 'Video call' : 'Voice call'}
               {nRemote >= 1 && connected ? ` · You + ${nRemote}` : ''}
             </p>
-            <p className="text-lg font-bold">{peer.name || 'Unknown'}</p>
+            <p className="truncate text-lg font-bold">{peer.name || 'Unknown'}</p>
           </div>
           {!incoming && (
-            <div className="flex items-center gap-2">
-              <button onClick={minimizeCall} title="Minimize" className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20">
+            <div className="flex shrink-0 items-center gap-2">
+              <button onClick={minimizeCall} title="Minimize" className="grid h-11 w-11 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20 sm:h-10 sm:w-10">
                 <Minimize2 size={18} />
               </button>
-              <button onClick={toggleFullscreen} title={isFs ? 'Exit fullscreen' : 'Fullscreen'} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20">
+              <button onClick={toggleFullscreen} title={isFs ? 'Exit fullscreen' : 'Fullscreen'} className="grid h-11 w-11 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20 sm:h-10 sm:w-10">
                 {isFs ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
             </div>
@@ -293,16 +296,18 @@ function CallSession({ call }) {
 
         {/* Reconnecting banner — shown while a dropped leg attempts ICE restart */}
         {status === 'reconnecting' && !incoming && (
-          <div className="mx-auto mb-2 flex items-center gap-2 rounded-full bg-amber-500/15 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+          <div className="mx-auto mb-2 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full bg-amber-500/15 px-4 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" />
             <span className="font-medium">Reconnecting…</span>
           </div>
         )}
 
-        {/* Presenting banner (Google-Meet style) */}
+        {/* Presenting banner (Google-Meet style). Wraps on phones: label +
+            "Stop presenting" on one rounded-full row is wider than 320px, and the
+            overlay clips (no page scroll) so the button became unreachable. */}
         {sharingScreen && !incoming && (
-          <div className="mx-auto mb-2 flex items-center gap-3 rounded-full bg-emerald-500/15 px-4 py-2 text-sm text-emerald-200 ring-1 ring-emerald-500/30">
-            <MonitorUp size={16} />
+          <div className="mx-3 mb-2 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 px-4 py-2 text-xs text-emerald-200 ring-1 ring-emerald-500/30 sm:mx-auto sm:gap-3 sm:rounded-full sm:text-sm">
+            <MonitorUp size={16} className="shrink-0" />
             <span className="font-medium">You’re presenting your screen</span>
             <button onClick={toggleScreenShare} className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-emerald-600">
               Stop presenting
@@ -310,9 +315,9 @@ function CallSession({ call }) {
           </div>
         )}
         {!sharingScreen && presenterRemote && !incoming && (
-          <div className="mx-auto mb-2 flex items-center gap-2 rounded-full bg-cyan-500/15 px-4 py-2 text-sm text-cyan-200 ring-1 ring-cyan-500/30">
-            <Presentation size={16} />
-            <span className="font-medium">{presenterName} is presenting</span>
+          <div className="mx-3 mb-2 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-cyan-500/15 px-4 py-2 text-xs text-cyan-200 ring-1 ring-cyan-500/30 sm:mx-auto sm:rounded-full sm:text-sm">
+            <Presentation size={16} className="shrink-0" />
+            <span className="min-w-0 break-words font-medium">{presenterName} is presenting</span>
           </div>
         )}
 
@@ -327,9 +332,9 @@ function CallSession({ call }) {
             </div>
           ) : nRemote === 0 ? (
             isVideo && selfPreview && !camOff && !incoming ? (
-              <div className="relative">
-                <StreamVideo stream={selfPreview} mirror={!sharingScreen} className="h-full max-h-[72vh] w-full max-w-4xl rounded-3xl border border-white/10 object-cover" />
-                <span className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-navy-950/60 px-3 py-1 text-xs text-white/80 backdrop-blur">
+              <div className="relative min-w-0">
+                <StreamVideo stream={selfPreview} mirror={!sharingScreen} className="h-full max-h-[72vh] w-full max-w-full rounded-3xl border border-white/10 object-cover sm:max-w-4xl 2xl:max-w-6xl" />
+                <span className="absolute bottom-4 left-1/2 max-w-[92%] -translate-x-1/2 truncate rounded-full bg-navy-950/60 px-3 py-1 text-xs text-white/80 backdrop-blur">
                   {connected ? 'You (waiting for the other person…)' : sharingScreen ? 'Presenting your screen' : 'Your camera'}
                 </span>
               </div>
@@ -342,10 +347,10 @@ function CallSession({ call }) {
                       <span className="absolute inset-0 animate-pulse-ring rounded-full bg-cyan-500/30" style={{ animationDelay: '0.6s' }} />
                     </>
                   )}
-                  <Avatar src={peer.avatar} name={peer.name} size="2xl" className="relative scale-[1.6]" />
+                  <Avatar src={peer.avatar} name={peer.name} size="2xl" className="relative scale-[1.35] sm:scale-[1.6]" />
                 </div>
-                <div className="mt-6 text-center text-white">
-                  <h2 className="text-2xl font-bold">{peer.name || 'Unknown'}</h2>
+                <div className="mt-6 px-4 text-center text-white">
+                  <h2 className="break-words text-xl font-bold sm:text-2xl">{peer.name || 'Unknown'}</h2>
                   <motion.p key={connected ? 'live' : statusText} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1 text-white/70">{connected ? <CallTimer /> : statusText}</motion.p>
                 </div>
               </div>
@@ -484,13 +489,16 @@ function CallSession({ call }) {
                 icon={AudioLines}
                 label={noiseCancel ? 'Noise cancel: On' : 'Noise cancel: Off'}
               />
-              {isVideo && (
+              {/* Presenting is gated on the CAPABILITY, not on the viewport: it
+                  was `hidden sm:grid`, which both hid it from the Android
+                  browsers that do support getDisplayMedia and would have shown
+                  it on a small desktop window that doesn't. */}
+              {isVideo && typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
                 <CtrlBtn
                   active={!sharingScreen}
                   onClick={toggleScreenShare}
                   icon={sharingScreen ? MonitorX : MonitorUp}
                   label={sharingScreen ? 'Stop presenting' : 'Present screen'}
-                  className="hidden sm:grid"
                 />
               )}
               {connected && (
@@ -507,11 +515,14 @@ function CallSession({ call }) {
                   onClick={() => setPortrait((v) => !v)}
                   icon={portrait ? RectangleVertical : RectangleHorizontal}
                   label={portrait ? 'Portrait tiles (tap for landscape)' : 'Landscape tiles (tap for portrait)'}
-                  className="hidden sm:grid"
                 />
               )}
-              {isVideo && <CtrlBtn active={!showAdd} onClick={() => setShowAdd((v) => !v)} icon={UserPlus} label="Add people" className="hidden sm:grid" />}
-              <CtrlBtn onClick={openChat} icon={MessageSquare} label="Chat" className="hidden sm:grid" />
+              {/* Add people and Chat used to vanish below `sm`, so on a phone —
+                  the device most calls happen on — there was no way to reach
+                  either during a call. The bar is already `flex-wrap`, so they
+                  simply take a second row instead of being dropped. */}
+              {isVideo && <CtrlBtn active={!showAdd} onClick={() => setShowAdd((v) => !v)} icon={UserPlus} label="Add people" />}
+              <CtrlBtn onClick={openChat} icon={MessageSquare} label="Chat" />
               <button onClick={hangUp} title="End call" className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-lg transition-transform hover:scale-105 active:scale-95">
                 <PhoneOff size={22} />
               </button>

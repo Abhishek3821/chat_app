@@ -59,3 +59,18 @@ jobs:
       - name: upload-validation suite (11 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/upload-validation.mjs
+      - name: meeting-invites suite (15 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-invites.mjs
+      - name: feature-coverage suite (81 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/feature-coverage.mjs
+      - name: search / E2EE / wallpaper suite (69 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/search-e2ee-wallpaper.mjs
+      # Shares a test database with the suite above, so it must not run in
+      # parallel with it (the free Atlas tier caps the cluster at 500
+      # collections, and one database per suite is what exhausted it).
+      - name: pinned-messages suite (43 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/pinned-messages.mjs

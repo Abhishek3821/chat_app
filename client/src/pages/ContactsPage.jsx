@@ -15,15 +15,22 @@ import {
   Users,
   Clock,
   Loader2,
+  QrCode as QrCodeIcon,
+  ScanLine,
 } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import EmptyState from '@/components/ui/EmptyState';
-import { cn, formatLastSeen } from '@/lib/utils';
+import PageHeader from '@/components/ui/PageHeader';
+import InviteQrModal from '@/components/InviteQrModal';
+import ScanQrModal from '@/components/ScanQrModal';
+import { cn, formatLastSeen, PAGE_SHELL } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
+import { useAuth } from '@/store/useAuth';
 import { useContacts } from '@/store/useContacts';
+import { inviteUrlForUser } from '@/lib/invite';
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04, delayChildren: 0.05 } } };
 const rise = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 26 } } };
@@ -34,7 +41,11 @@ export default function ContactsPage() {
   const { contacts, favorites, incoming, outgoing, results, searching, load, search, clearResults, sendRequest, respond, toggleFavorite, startChat } =
     useContacts();
 
+  const me = useAuth((s) => s.user);
+
   const [query, setQuery] = useState('');
+  const [qrOpen, setQrOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
 
   useEffect(() => {
     load();
@@ -99,17 +110,33 @@ export default function ContactsPage() {
 
   return (
     <div className="scrollbar-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl p-4 md:p-6">
-        <motion.header
-          initial={{ opacity: 0, y: -12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl"><span className="gradient-text">Contacts</span></h1>
-            <p className="mt-1 text-sm text-content-muted">{contacts.length} connections · search anyone by email, username or phone to connect</p>
-          </div>
-        </motion.header>
+      <div className={PAGE_SHELL}>
+        <PageHeader
+          icon={Users}
+          title="Contacts"
+          subtitle={`${contacts.length} ${contacts.length === 1 ? 'connection' : 'connections'} · search anyone by email, username or phone`}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => setQrOpen(true)}>
+                <QrCodeIcon size={16} />
+                <span className="hidden xs:inline">My QR</span>
+              </Button>
+              <Button variant="outline" onClick={() => setScanOpen(true)}>
+                <ScanLine size={16} />
+                <span className="hidden xs:inline">Scan</span>
+              </Button>
+            </>
+          }
+        />
+
+        <InviteQrModal
+          open={qrOpen}
+          onClose={() => setQrOpen(false)}
+          title="My QR code"
+          description={me?.username ? `Anyone who scans this opens a chat with @${me.username}.` : 'Set a username to share your QR code.'}
+          url={inviteUrlForUser(me?.username)}
+        />
+        <ScanQrModal open={scanOpen} onClose={() => setScanOpen(false)} />
 
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="mt-6">
           <Input
@@ -162,7 +189,7 @@ export default function ContactsPage() {
                   <SectionTitle icon={Sparkles} title="Contact requests">
                     <span className="ml-2 rounded-full bg-brand-gradient px-2 py-0.5 text-[11px] font-bold text-white shadow-glow">{incoming.length}</span>
                   </SectionTitle>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     <AnimatePresence mode="popLayout">
                       {incoming.map((req) => (
                         <motion.div key={req._id} layout initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9, x: 40 }} className="glass flex items-center gap-3 rounded-2xl p-3.5 shadow-soft">
@@ -217,8 +244,12 @@ export default function ContactsPage() {
                 <motion.div variants={container} initial="hidden" animate="show" className="mt-3">
                   {grouped.map(([letter, users]) => (
                     <div key={letter} className="mb-4">
-                      <div className="sticky top-0 z-10 -mx-1 mb-1 bg-[rgb(var(--app-bg))]/80 px-1 py-1 backdrop-blur">
-                        <span className="inline-grid h-7 w-7 place-items-center rounded-lg bg-brand-500/10 text-xs font-bold text-brand-600 dark:text-brand-300">{letter}</span>
+                      {/* Sticky index row: the letter plus a rule + count, so a
+                          long A-Z list always shows where you are while scrolling. */}
+                      <div className="sticky top-0 z-10 -mx-1 mb-1.5 flex items-center gap-2.5 bg-[rgb(var(--app-bg))]/85 px-1 py-1.5 backdrop-blur">
+                        <span className="inline-grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-500/10 text-xs font-bold text-brand-600 dark:text-brand-300">{letter}</span>
+                        <span className="h-px flex-1 bg-border" />
+                        <span className="text-[11px] font-semibold tabular-nums text-content-muted/70">{users.length}</span>
                       </div>
                       <div className="space-y-2">
                         {users.map((user) => (

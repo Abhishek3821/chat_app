@@ -2,26 +2,173 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─────────────────────────────────────────────────────────────
-   ChatConnect — "Clean Minimal" design language
-   Flat, quiet surfaces. No decorative background, no heavy glass —
-   just solid panels separated by hairline borders and generous
-   whitespace. One accent colour carries emphasis.
+/* -------------------------------------------------------------
+   ChatConnect - "Deep Teal" design language
+   Soft-UI (neumorphic) surfaces: every panel, bubble and control is
+   the same colour family as what it sits on and gets its shape from
+   a matched shadow pair - dark cast bottom-right, light bloom
+   top-left - under one overhead light. Three states carry the whole
+   interface: raised (`.neu-raised*`), recessed (`.neu-inset*`) and
+   pressed (`.neu-press:active`). Accent fills are moulded rather
+   than flat, with a specular sheen over a two-stop ramp.
+   The recipes live ONCE in @layer components, derived from the
+   --neu-* vars below, so both themes and all six accent presets
+   re-derive them instead of hard-coding shadows per component.
+
+   Brand palette (all four land on exact ramp steps, no approximation):
+     #0C2C47   12 44 71      deep navy  -> brand-900 / dark surface / light ink
+     #2D5652   45 86 82      deep teal  -> brand-600 / primary action
+     #97D3CD   151 211 205   mint       -> brand-300 / dark-mode accent
+     #E4F2EA   228 242 234   pale mint  -> brand-50  / light canvas + dark ink
 
    Light & dark are driven by CSS variables so every component
    automatically adapts. Values are "R G B" for Tailwind's
-   rgb(var(--x) / <alpha>) syntax.
-   ───────────────────────────────────────────────────────────── */
+   rgb(var(--x) / <alpha-value>) syntax.
+   ------------------------------------------------------------- */
 :root {
-  --surface: 255 255 255; /* panels / cards */
-  --surface-2: 245 246 248; /* inputs / recessed rows */
-  --border: 229 231 235; /* gray-200 hairlines */
-  --content: 17 24 39; /* gray-900 ink */
-  --content-muted: 107 114 128; /* gray-500 */
-  --app-bg: 250 250 251; /* near-white canvas, no colour */
+  --surface: 255 255 255; /* white panels lift off the mint canvas */
+  --surface-2: 240 248 244; /* inputs / recessed rows - a breath of mint */
+  --border: 205 227 219; /* mint-tinted hairline (between #97D3CD and #E4F2EA) */
+  --content: 12 44 71; /* #0C2C47 navy ink - 14.1:1 on white */
+  --content-muted: 90 122 124; /* desaturated teal-slate - 4.7:1 on white */
+  --app-bg: 228 242 234; /* #E4F2EA pale-mint canvas */
 
-  /* Single accent (default: Indigo). Runtime-swappable via the
-     Appearance → Accent picker. Every `brand-*` class resolves here. */
+  /* Single accent (default: Teal - the brand palette). Runtime-swappable via
+     the Appearance -> Accent picker. Every `brand-*` class resolves here. */
+  --brand-50: 228 242 234; /* #E4F2EA */
+  --brand-100: 208 235 227;
+  --brand-200: 179 224 217;
+  --brand-300: 151 211 205; /* #97D3CD */
+  --brand-400: 108 170 164;
+  --brand-500: 66 125 119;
+  --brand-600: 45 86 82; /* #2D5652 - primary action fill */
+  --brand-700: 34 71 71;
+  --brand-800: 22 57 62;
+  --brand-900: 12 44 71; /* #0C2C47 */
+  /* Kept for compatibility with existing gradient tokens, but flattened
+     to the single accent so the UI reads solid, not gradient. */
+  --grad-from: 45 86 82;
+  --grad-via: 45 86 82;
+  --grad-to: 45 86 82;
+
+  /* Logo mark gradient. Points INTO the brand scale (var(), not literals) so
+     the accent picker recolors the mark too, and flips with the theme so it
+     never sinks into its own background: the deep step on the light canvas,
+     the pale step on the dark navy. */
+  --logo-from: var(--brand-600);
+  --logo-to: var(--brand-500);
+
+  /* Fill behind `bg-brand-gradient` — active nav pills, badges, primary chips,
+     selected states (~47 call sites, nearly all paired with `text-white`).
+     Two rules govern it:
+       1. It must FOLLOW THE ACCENT. This was a literal `45 86 82` until now,
+          which pinned every one of those call sites to teal no matter what the
+          Appearance → Accent picker said (the picker only re-points --brand-*),
+          so a violet accent gave violet buttons next to a teal nav pill.
+          `var(--brand-600)` re-resolves per [data-accent] block instead.
+       2. It must flip with the theme, because dark mode makes --surface the
+          same #0C2C47 as brand-900: at brand-600 the pill was only 1.75:1
+          against its own panel and effectively disappeared. Light mode keeps
+          brand-600 (8.1:1 with white at the teal default). */
+  --accent-fill: var(--brand-600);
+
+  /* Chart / data-viz ink. Deliberately NOT --brand-*: the accent picker
+     re-points that scale at runtime, and it is the same scale in both themes,
+     so a series drawn from it would vanish on one surface or the other
+     (brand-600 teal reads 1.8:1 on the dark navy; mint reads 1.7:1 on white).
+     --chart-* flips with the theme instead, so each mode gets the ramp step
+     that sits in the readable mid-luminance band for its own surface. */
+  --chart-1: 45 118 112; /* #2D7670 cyan-600 - 5.33:1 on the white card */
+
+  /* Bottom stop of every accent fill. `bg-brand-gradient` ramps
+     --accent-fill -> --accent-fill-2, which is what gives a button or a sent
+     bubble its moulded look instead of reading as a flat sticker. Always one
+     ramp step DEEPER than --accent-fill, never lighter: white sits on these
+     surfaces, so the far end of the gradient must gain contrast, not lose it. */
+  --accent-fill-2: var(--brand-700);
+  /* Specular sheen laid over accent fills (the top highlight of the gloss).
+     Deliberately weak: it lightens the fill exactly where white text sits, so
+     it trades contrast for depth. 0.14 costs brand-600 ~1.5:1 of its 8.1:1. */
+  --gloss-a: 0.14;
+
+  /* ── Soft-UI depth ────────────────────────────────────────────────
+     Neumorphism needs three things per theme, so they live in vars and every
+     recipe in @layer components derives from them:
+       --neu-hi / --neu-lo  the light source (top-left) and its cast shadow
+                            (bottom-right). Navy-tinted, never grey.
+       --neu-fill-*-a       the faint top-lighter/bottom-darker wash that makes
+                            a panel look extruded. Kept as TRANSLUCENT overlays
+                            rather than opaque colour stops so `.glass`/`.card`
+                            still compose with whatever `bg-*` a call site sets.
+       --neu-edge           the 1px inner bevel along a raised top edge. */
+  --neu-hi: 255 255 255;
+  --neu-hi-a: 0.9;
+  --neu-lo: 12 44 71; /* navy #0C2C47, so shadows stay in-palette */
+  --neu-lo-a: 0.16;
+  --neu-lo-a-strong: 0.2;
+  --neu-fill-hi-a: 0.6;
+  --neu-fill-lo-a: 0.035;
+  --neu-edge: 255 255 255;
+  --neu-edge-a: 0.9;
+
+  /* Conversation canvas: a wide soft light from the top-left plus an accent
+     bloom bottom-right, so bubbles sit in a lit room instead of on a flat slab. */
+  --canvas-glow-a: 0.55;
+  --canvas-tint-a: 0.07;
+}
+
+.dark {
+  --surface: 12 44 71; /* #0C2C47 navy panels */
+  --surface-2: 18 56 87; /* recessed rows / inputs */
+  --border: 30 72 105; /* visible hairline against the navy */
+  --content: 228 242 234; /* #E4F2EA pale-mint ink - 12.3:1 on the navy */
+  --content-muted: 141 176 178; /* muted mint - 6.0:1 */
+  --app-bg: 7 26 43; /* deeper than the panels so surfaces lift */
+
+  --logo-from: var(--brand-300); /* the pale step reads on the navy */
+  --logo-to: var(--brand-400);
+
+  /* One step lighter than light mode's brand-600. This is a deliberately tight
+     window: white text wants the fill dark, the navy panel wants it light.
+     brand-500 is the step that satisfies both — 4.75:1 under white text (AA for
+     the small nav labels and badge digits it carries) while lifting to ~3:1
+     against the panel, with shadow-glow adding the rest of the separation. */
+  --accent-fill: var(--brand-500);
+
+  /* One step up the same teal so the mark lifts off the navy: cyan-600 would
+     fall to 2.7:1 here, and mint/cyan-400 overshoot the band (too light to
+     sit under the pale-mint ink without glaring). */
+  --chart-1: 60 140 134; /* #3C8C86 cyan-500 - 3.60:1 on the navy panel */
+
+  /* Deeper end of the accent gradient, one step below the dark --accent-fill. */
+  --accent-fill-2: var(--brand-600);
+  /* Weaker than light mode's: --accent-fill is already only 4.75:1 under white
+     here, so the sheen has less contrast to spend before it breaks AA. */
+  --gloss-a: 0.09;
+
+  /* On the navy, the light source has to be a pale blue at low opacity (white
+     at light-mode strength reads as a milky haze), and the cast shadow goes
+     near-black and much stronger — that separation is all a dark soft-UI has. */
+  --neu-hi: 129 179 209;
+  --neu-hi-a: 0.1;
+  --neu-lo: 2 10 18;
+  --neu-lo-a: 0.55;
+  --neu-lo-a-strong: 0.68;
+  --neu-fill-hi-a: 0.06;
+  --neu-fill-lo-a: 0.18;
+  --neu-edge: 158 205 228;
+  --neu-edge-a: 0.14;
+
+  --canvas-glow-a: 0.1;
+  --canvas-tint-a: 0.14;
+}
+
+/* -- Accent presets ---------------------------------------------
+   Applied via <html data-accent="..."> (see useUI + App.jsx). Teal (the
+   brand palette) is the :root default; the rest override the brand scale
+   + grad stops. Indigo is kept as an explicit preset so users who had
+   already picked it don't get silently re-themed. */
+:root[data-accent='indigo'] {
   --brand-50: 238 242 255;
   --brand-100: 224 231 255;
   --brand-200: 199 210 254;
@@ -32,25 +179,10 @@
   --brand-700: 67 56 202;
   --brand-800: 55 48 163;
   --brand-900: 49 46 129;
-  /* Kept for compatibility with existing gradient tokens, but flattened
-     to the single accent so the UI reads solid, not gradient. */
   --grad-from: 99 102 241;
   --grad-via: 99 102 241;
   --grad-to: 99 102 241;
 }
-
-.dark {
-  --surface: 24 24 27; /* zinc-900 */
-  --surface-2: 32 33 38;
-  --border: 39 39 46; /* visible hairline in dark */
-  --content: 244 244 245;
-  --content-muted: 161 161 170;
-  --app-bg: 15 15 17; /* neutral near-black, no colour */
-}
-
-/* ── Accent presets ───────────────────────────────────────────────
-   Applied via <html data-accent="…"> (see useUI + App.jsx). Indigo is
-   the :root default; the rest override the brand scale + grad stops. */
 :root[data-accent='violet'] {
   --brand-50: 245 243 255;
   --brand-100: 237 233 254;
@@ -127,6 +259,34 @@
   --grad-to: 245 158 11;
 }
 
+/* -- Accent fill corrections ------------------------------------
+   --accent-fill defaults to brand-600 (light) / brand-500 (dark), which is the
+   readable step for the teal/indigo/violet ramps. The warmer + brighter ramps
+   peak higher up, so those two steps fall under 4.5:1 with the white text every
+   `bg-brand-gradient` surface carries (amber-600 is 3.2:1, cyan-600 3.7:1,
+   emerald-600 3.8:1, rose-500 3.7:1). Each one drops to the next step down,
+   which clears AA while still lifting off its own panel.
+   Written as separate light/dark rules; the `.dark[...]` ones come second, so
+   at equal specificity they win on the dark surfaces.
+   --accent-fill-2 tracks each correction one step further down the ramp, so the
+   gloss gradient keeps gaining contrast toward its bottom edge at every accent. */
+:root[data-accent='cyan'],
+:root[data-accent='emerald'],
+:root[data-accent='amber'] {
+  --accent-fill: var(--brand-700);
+  --accent-fill-2: var(--brand-800);
+}
+.dark[data-accent='cyan'],
+.dark[data-accent='emerald'],
+.dark[data-accent='rose'] {
+  --accent-fill: var(--brand-600);
+  --accent-fill-2: var(--brand-700);
+}
+.dark[data-accent='amber'] {
+  --accent-fill: var(--brand-700);
+  --accent-fill-2: var(--brand-800);
+}
+
 @layer base {
   * {
     @apply border-border;
@@ -143,38 +303,213 @@
   ::selection {
     @apply bg-brand-500/25;
   }
+  /* Respect the OS "reduce motion" setting across every animation/transition. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
-  /* Flat surfaces — solid fill + hairline border. The old glass/frost
-     helpers now resolve to the same quiet panel so every screen that
-     referenced them stays consistent without per-file edits. */
+  /* ── Soft-UI primitives ─────────────────────────────────────────
+     Three states, one light source (top-left), used everywhere:
+       .neu-raised   extruded out of its background  — panels, bubbles, chips
+       .neu-inset    pressed into it                 — inputs, media wells
+       .neu-press    raised at rest, inset while held — anything clickable
+     The fill is a translucent wash (see --neu-fill-*-a), never an opaque
+     stop, so these compose on top of whatever `bg-*` the call site sets. */
+  .neu-fill {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+  }
+  .neu-raised,
+  .neu-raised-sm,
+  .neu-raised-lg {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+  }
+  .neu-raised-sm {
+    box-shadow:
+      3px 3px 8px -3px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -2px -2px 6px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  .neu-raised {
+    box-shadow:
+      6px 6px 14px -5px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -4px -4px 12px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  .neu-raised-lg {
+    box-shadow:
+      14px 16px 34px -12px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      -8px -8px 22px -12px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  /* Recessed well. The wash flips (darker at the top) so the surface reads as
+     dished rather than domed, matching the same overhead light. */
+  .neu-inset,
+  .neu-inset-sm {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 0%,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 100%
+    );
+  }
+  .neu-inset-sm {
+    box-shadow:
+      inset 2px 2px 5px -2px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -1px -1px 3px -1px rgb(var(--neu-hi) / var(--neu-hi-a));
+  }
+  .neu-inset {
+    box-shadow:
+      inset 4px 4px 9px -3px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -3px -3px 8px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  /* Rises to meet the cursor. `hover:` can't compose a `.neu-*` recipe (those
+     set box-shadow, not a single Tailwind-able property), so rows and nav items
+     that should lift on hover use this instead of `hover:bg-content/5`. */
+  .neu-hover {
+    transition:
+      box-shadow 0.16s ease,
+      background-color 0.16s ease;
+  }
+  .neu-hover:hover {
+    background-color: rgb(var(--surface));
+    box-shadow:
+      3px 3px 8px -3px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -2px -2px 6px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  /* Tactile click: the surface actually sinks under the finger. */
+  .neu-press {
+    transition:
+      box-shadow 0.16s ease,
+      transform 0.16s ease,
+      background-color 0.16s ease;
+  }
+  .neu-press:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 3px 3px 7px -2px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -2px -2px 5px -2px rgb(var(--neu-hi) / var(--neu-hi-a));
+  }
+  /* Overlay for anything sitting ON an accent fill (media wells, reply quotes,
+     pills inside a sent bubble) — the panel vars would be invisible there. */
+  .neu-on-accent {
+    background-color: rgb(255 255 255 / 0.14);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.28),
+      inset 0 -1px 0 rgb(var(--neu-lo) / 0.22);
+  }
+
+  /* Panel edges. A full-height rail should read as a raised slab without
+     casting a 30px shadow across the pane, so it gets a bevel + a tight lift. */
+  .neu-rail-bottom {
+    box-shadow:
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a)),
+      0 10px 20px -16px rgb(var(--neu-lo) / var(--neu-lo-a-strong));
+  }
+  .neu-rail-top {
+    box-shadow:
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a)),
+      0 -10px 20px -16px rgb(var(--neu-lo) / var(--neu-lo-a-strong));
+  }
+
+  /* Surfaces - solid fill + hairline border, now moulded rather than flat.
+     The old glass/frost helpers stay as the single hook every screen already
+     references, so the depth pass reaches all of them without per-file edits. */
   .glass {
-    background: rgb(var(--surface));
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
     border: 1px solid rgb(var(--border));
+    box-shadow:
+      4px 4px 12px -6px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -3px -3px 10px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
   }
   .glass-strong {
-    background: rgb(var(--surface));
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
     border: 1px solid rgb(var(--border));
-    box-shadow: 0 8px 30px -14px rgb(17 24 39 / 0.18);
+    box-shadow:
+      14px 16px 34px -12px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      -8px -8px 22px -12px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
   }
+  /* Full-height rails: sheen along the lit top edge only, no cast shadow —
+     a 100vh panel with a drop shadow just dirties the seam. */
   .frost {
-    background: rgb(var(--surface));
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(180deg, rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0, transparent 96px);
   }
   .card {
     @apply rounded-2xl;
-    background: rgb(var(--surface));
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
     border: 1px solid rgb(var(--border));
+    box-shadow:
+      6px 6px 14px -5px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -4px -4px 12px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
   }
   .gradient-text {
-    @apply text-brand-600 dark:text-brand-400;
+    @apply text-brand-600 dark:text-brand-300;
   }
-  /* Primary action = solid accent, quiet lift on hover. */
+  /* Primary action = moulded accent: gloss on top, deeper stop at the bottom,
+     and it presses in when held. */
   .btn-gradient {
-    @apply bg-brand-600 text-white transition-colors;
+    @apply bg-brand-gradient text-white;
+    box-shadow:
+      0 6px 14px -7px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      inset 0 -1px 0 rgb(var(--neu-lo) / 0.28);
+    transition:
+      box-shadow 0.16s ease,
+      transform 0.16s ease,
+      filter 0.16s ease;
   }
   .btn-gradient:hover {
-    @apply bg-brand-700;
+    filter: brightness(1.07);
+  }
+  .btn-gradient:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 3px 7px -2px rgb(var(--neu-lo) / 0.55),
+      inset 0 -1px 0 rgb(255 255 255 / 0.12);
+  }
+  /* Conversation canvas — a lit room for the bubbles to sit in. Lives on the
+     non-scrolling wrapper, so these gradients never repaint on scroll. */
+  .chat-canvas {
+    background-color: rgb(var(--app-bg));
+    background-image:
+      radial-gradient(1100px 520px at 18% -8%, rgb(var(--neu-hi) / var(--canvas-glow-a)), transparent 62%),
+      radial-gradient(760px 440px at 104% 108%, rgb(var(--brand-500) / var(--canvas-tint-a)), transparent 60%);
   }
   /* Focus ring used across inputs / buttons */
   .ring-brand {
@@ -222,6 +557,21 @@
   .text-shadow-glow {
     text-shadow: none;
   }
+  /* Honour iOS/Android safe areas so the mobile bottom nav and full-screen
+     call/meeting surfaces never sit under the home indicator or notch. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .inset-safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
 }
 
 /* Emoji picker (light/dark friendly, flat container) */
@@ -230,5 +580,5 @@
   --epr-category-label-bg-color: rgb(var(--surface)) !important;
   border: 1px solid rgb(var(--border)) !important;
   border-radius: 1rem !important;
-  box-shadow: 0 8px 30px -14px rgb(17 24 39 / 0.18) !important;
+  box-shadow: 0 8px 30px -14px rgb(12 44 71 / 0.22) !important;
 }

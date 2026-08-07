@@ -147,7 +147,7 @@ export default function VerifyOtp() {
   );
 
   return (
-    <motion.div {...pageMotion} className="flex min-h-screen w-full">
+    <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase
         eyebrow="One last step"
         headline={
@@ -182,7 +182,7 @@ export default function VerifyOtp() {
         ) : (
           <>
         <motion.div variants={rise} className="mb-8 flex justify-center lg:justify-start">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
             <MessageSquareLock size={26} />
           </span>
         </motion.div>
@@ -211,7 +211,11 @@ export default function VerifyOtp() {
                 onFocus={(e) => e.target.select()}
                 aria-label={`Digit ${i + 1}`}
                 className={cn(
-                  'ring-brand h-14 w-full rounded-2xl border bg-surface-2 text-center text-2xl font-bold text-content transition-all',
+                  // min-w-0 is load-bearing: as a flex item an <input> resolves
+                  // min-width:auto to its INTRINSIC width (size defaults to 20
+                  // chars, `maxLength` doesn't affect it), so without this the
+                  // six boxes refuse to shrink and overflow a 320px screen.
+                  'ring-brand h-12 w-full min-w-0 rounded-2xl border bg-surface-2 text-center text-xl font-bold text-content transition-all xs:h-14 xs:text-2xl',
                   digit ? 'border-brand-500 shadow-glow' : 'border-border hover:border-content-muted/50'
                 )}
               />

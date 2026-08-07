@@ -33,7 +33,7 @@ export function createMeetingRecorder({ getStreams, fileName = 'meeting.webm' })
         const n = Math.max(1, streams.length);
         const cols = Math.ceil(Math.sqrt(n));
         const rows = Math.ceil(n / cols);
-        c.fillStyle = '#0b1220';
+        c.fillStyle = '#061a2a'; // navy-950 — matches the meeting-room backdrop
         c.fillRect(0, 0, canvas.width, canvas.height);
         const cw = canvas.width / cols;
         const ch = canvas.height / rows;

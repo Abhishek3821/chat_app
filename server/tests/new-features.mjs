@@ -6,7 +6,7 @@
  *   - meeting:presenting broadcast within a meeting room
  *   - two-step PIN: enable → forgot (email OTP) → reset → verify with new PIN
  *
- * Boots the real server against an ISOLATED test database (chatconnect_e2e),
+ * Boots the real server against an ISOLATED test database (chatconnect_t_newfeat),
  * with email verification ON and SMTP pointed at nothing (dev OTP surfaces in
  * the API response instead) — signup → verify email → single-step login.
  *
@@ -33,7 +33,7 @@ if (!baseUri) {
   console.error('MONGO_URI missing in server/.env — cannot run tests.');
   process.exit(1);
 }
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_e2e$2');
+const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_newfeat$2');
 if (TEST_URI === baseUri) {
   console.error('Refusing to run: could not derive an isolated test database name.');
   process.exit(1);

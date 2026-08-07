@@ -12,10 +12,16 @@ import { AuthShowcase, AuthPanel, MobileBrand, rise, pageMotion } from './Login.
 
 function Requirement({ met, children }) {
   return (
-    <li className={cn('flex items-center gap-2 transition-colors', met ? 'text-emerald-500' : 'text-content-muted')}>
+    <li
+      className={cn(
+        'flex items-center gap-2 transition-colors',
+        // emerald-500 is only ~2.5:1 on the white light-mode surface.
+        met ? 'text-emerald-600 dark:text-emerald-300' : 'text-content-muted'
+      )}
+    >
       <span
         className={cn(
-          'grid h-4 w-4 place-items-center rounded-full transition-colors',
+          'grid h-4 w-4 shrink-0 place-items-center rounded-full transition-colors',
           met ? 'bg-emerald-500/15' : 'bg-content/10'
         )}
       >
@@ -66,7 +72,7 @@ export default function ResetPassword() {
   };
 
   return (
-    <motion.div {...pageMotion} className="flex min-h-screen w-full">
+    <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase
         eyebrow="Secure reset"
         headline={
@@ -83,7 +89,7 @@ export default function ResetPassword() {
         <MobileBrand />
 
         <motion.div variants={rise} className="mb-8 flex justify-center lg:justify-start">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
             <ShieldCheck size={26} />
           </span>
         </motion.div>
@@ -106,7 +112,7 @@ export default function ResetPassword() {
                   type={showPw ? 'text' : 'password'}
                   autoComplete="new-password"
                   placeholder="Enter a new password"
-                  className="pr-11"
+                  className="pr-12"
                   value={form.password}
                   onChange={set('password')}
                   autoFocus
@@ -116,7 +122,7 @@ export default function ResetPassword() {
                   type="button"
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
-                  className="ring-brand absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-content-muted transition-colors hover:text-content"
+                  className="ring-brand absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-content-muted transition-colors hover:text-content sm:right-1.5 sm:h-10 sm:w-10"
                 >
                   {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -141,7 +147,7 @@ export default function ResetPassword() {
             </Field>
           </motion.div>
 
-          <motion.ul variants={rise} className="space-y-1.5 rounded-2xl border border-border bg-surface-2/60 px-4 py-3 text-xs">
+          <motion.ul variants={rise} className="space-y-1.5 rounded-2xl neu-inset bg-surface-2/60 px-4 py-3 text-xs">
             <Requirement met={checks.length}>At least 8 characters</Requirement>
             <Requirement met={checks.mixed}>Letters and numbers (recommended)</Requirement>
             <Requirement met={checks.match}>Both passwords match</Requirement>
@@ -165,7 +171,7 @@ export default function ResetPassword() {
         <motion.div variants={rise} className="mt-6 text-center">
           <Link
             to="/login"
-            className="ring-brand inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-content-muted transition-colors hover:text-content"
+            className="ring-brand -my-3 inline-flex items-center gap-1.5 rounded-lg py-3 text-sm font-semibold text-content-muted transition-colors hover:text-content"
           >
             <ArrowLeft size={16} /> Back to sign in
           </Link>

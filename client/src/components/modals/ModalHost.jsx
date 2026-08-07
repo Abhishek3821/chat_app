@@ -8,6 +8,7 @@ import Button from '../ui/Button';
 import { Input, Field, Textarea } from '../ui/Input';
 import Switch from '../ui/Switch';
 import { Chip } from '../ui/Badge';
+import E2EESetupModal from './E2EESetupModal';
 
 // Full IANA zone list where the browser supports it, else a sensible short list.
 const TIMEZONES =
@@ -39,6 +40,11 @@ export default function ModalHost() {
       <NewStatusModal open={activeModal === 'newStatus'} onClose={closeModal} />
       <ProfileModal open={activeModal === 'profile'} onClose={closeModal} user={modalData} />
       <ForwardMessageModal open={activeModal === 'forwardMessage'} onClose={closeModal} message={modalData?.message} />
+      {/* Mounted only while open: it holds passphrase state, which should not
+          sit in a live component between uses. */}
+      {activeModal === 'e2eeSetup' && (
+        <E2EESetupModal open onClose={closeModal} chatId={modalData?.chatId} />
+      )}
     </>
   );
 }
@@ -195,24 +201,40 @@ function ScheduleMeetingModal({ open, onClose }) {
     setEmailInput('');
   };
 
+  /** The addresses to actually invite, INCLUDING one still sitting in the input.
+   *  Typing an address and pressing Schedule without first hitting Enter/"+" used
+   *  to drop it silently, which read as "invite by email doesn't work". */
+  const collectEmails = () => {
+    const pending = emailInput.trim().toLowerCase();
+    if (!pending) return { list: emails, invalid: false };
+    if (!EMAIL_RE.test(pending)) return { list: emails, invalid: true };
+    return { list: emails.includes(pending) ? emails : [...emails, pending], invalid: false };
+  };
+
   const schedule = async () => {
     if (!form.title.trim()) return toast.error('Add a meeting title');
     if (!form.date || !form.time) return toast.error('Pick a date and time');
     const startAt = new Date(`${form.date}T${form.time}`);
     if (Number.isNaN(startAt.getTime())) return toast.error('That date/time looks off');
+    const { list: inviteEmails, invalid } = collectEmails();
+    if (invalid) return toast.error('That doesn’t look like an email — fix it or clear the field.');
     setSaving(true);
     try {
-      await createMeeting({
+      const created = await createMeeting({
         title: form.title.trim(),
         startAt: startAt.toISOString(),
         type: form.type,
         recurrence: form.recurrence,
         timezone: form.timezone,
         participants: invitees,
-        inviteEmails: emails,
+        inviteEmails,
         settings,
       });
-      toast.success('Meeting scheduled 📅');
+      // Say what actually happened — a bare "scheduled" gave no clue whether the
+      // email invitations went out. The count is the server's, so it reflects
+      // validation/de-duplication rather than what was typed.
+      const n = created?.invitesQueued ?? 0;
+      toast.success(n ? `Meeting scheduled 📅 — emailing ${n} ${n === 1 ? 'invite' : 'invites'}` : 'Meeting scheduled 📅');
       onClose();
     } catch (err) {
       toast.error(err.message || 'Could not schedule the meeting');
@@ -241,7 +263,7 @@ function ScheduleMeetingModal({ open, onClose }) {
             <select
               value={form.timezone}
               onChange={set('timezone')}
-              className="ring-brand h-11 w-full appearance-none rounded-xl border border-border bg-surface-2 pl-10 pr-3 text-sm text-content"
+              className="ring-brand h-11 w-full appearance-none rounded-xl neu-inset bg-surface-2 pl-10 pr-3 text-sm text-content"
             >
               {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>))}
             </select>
@@ -262,7 +284,7 @@ function ScheduleMeetingModal({ open, onClose }) {
         </Field>
 
         {/* Host controls — enforced for participants who join. */}
-        <div className="rounded-2xl border border-border bg-surface-2/40 px-3.5 py-1">
+        <div className="rounded-2xl neu-inset bg-surface-2/40 px-3.5 py-1">
           <ToggleLine label="Let participants join anytime" hint="Off = they wait until you (the host) join." checked={settings.joinAnytime} onChange={setToggle('joinAnytime')} />
           <ToggleLine label="Ask to join" hint="People you didn't invite must knock and be admitted by you." checked={settings.askToJoin} onChange={setToggle('askToJoin')} />
           <ToggleLine label="Mute participants on entry" hint="Everyone but you joins muted." checked={settings.muteOnEntry} onChange={setToggle('muteOnEntry')} />
@@ -412,13 +434,17 @@ function EditProfileModal({ open, onClose }) {
   );
 }
 
+/** Text-status backdrops, drawn from the brand palette
+ *  (#0C2C47 / #2D5652 / #97D3CD / #E4F2EA) rather than the old rainbow set.
+ *  Each one starts dark so the white status text stays legible, and they're
+ *  ordered light-to-deep so the picker reads as a considered range. */
 const BACKGROUNDS = [
-  'linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4)',
-  'linear-gradient(135deg,#f59e0b,#ec4899)',
-  'linear-gradient(135deg,#10b981,#06b6d4)',
-  'linear-gradient(135deg,#f97316,#ef4444)',
-  'linear-gradient(135deg,#8b5cf6,#ec4899)',
-  'linear-gradient(135deg,#0ea5e9,#6366f1)',
+  'linear-gradient(135deg,#0c2c47,#2d5652)',
+  'linear-gradient(135deg,#2d5652,#74beb8)',
+  'linear-gradient(135deg,#123857,#3d6a80)',
+  'linear-gradient(135deg,#224747,#97d3cd)',
+  'linear-gradient(135deg,#061a2a,#2d7670)',
+  'linear-gradient(135deg,#3d6a80,#97d3cd)',
 ];
 
 function NewStatusModal({ open, onClose }) {
@@ -531,7 +557,7 @@ function ForwardMessageModal({ open, onClose, message }) {
 
   return (
     <Modal open={open} onClose={onClose} title="Forward message" subtitle="Choose chats to forward to">
-      {preview && <p className="mb-3 truncate rounded-xl bg-content/5 px-3 py-2 text-sm text-content-muted">“{preview}”</p>}
+      {preview && <p className="neu-inset-sm mb-3 truncate rounded-xl bg-surface-2 px-3 py-2 text-sm text-content-muted">“{preview}”</p>}
       <Input icon={Search} placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} className="mb-3" />
       <div className="max-h-72 space-y-0.5 overflow-y-auto pb-2">
         {list.map(({ chat, d }) => (

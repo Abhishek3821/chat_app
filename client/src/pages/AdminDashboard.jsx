@@ -30,10 +30,9 @@ import {
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
-import { cn } from '@/lib/utils';
+import { cn, formatDate, PAGE_SHELL } from '@/lib/utils';
 import api, { DEMO_MODE } from '@/lib/api';
 import { ADMIN_STATS, ADMIN_USERS, ADMIN_REPORTS } from '@/lib/demoData';
-import { format } from 'date-fns';
 
 /* Motion presets */
 const rise = {
@@ -42,8 +41,14 @@ const rise = {
 };
 const stagger = { animate: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } };
 
-/* Brand chart palette */
-const C = { indigo: '#6366F1', violet: '#8B5CF6', cyan: '#06B6D4' };
+/* Brand chart palette. Series ink is --chart-1 (index.css), which steps per
+   theme - a fixed hex either sinks into the navy panel or bleaches out on the
+   white one. Both cards plot a single series, so they share the one slot
+   instead of inventing hues the four cool brand colours can't keep apart. */
+const C = {
+  series: 'rgb(var(--chart-1))',
+  surface: 'rgb(var(--surface))', /* marks are ringed with the surface, not #fff */
+};
 
 /* Format large numbers → 12.8K / 1.2M */
 function compact(n) {
@@ -70,13 +75,13 @@ function StatCard({ label, value, icon: Icon, trend, muted }) {
       transition={{ type: 'spring', stiffness: 400, damping: 26 }}
       className="glass group rounded-3xl p-5 shadow-soft transition-shadow hover:shadow-soft-lg"
     >
-      <div className="flex items-start justify-between">
-        <span className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
+      <div className="flex items-start justify-between gap-2">
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-gradient text-white shadow-glow">
           <Icon size={22} />
         </span>
         <span
           className={cn(
-            'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold',
+            'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold',
             muted ? 'bg-content/5 text-content-muted' : 'bg-emerald-500/10 text-emerald-500'
           )}
         >
@@ -84,7 +89,9 @@ function StatCard({ label, value, icon: Icon, trend, muted }) {
           {trend}
         </span>
       </div>
-      <p className="mt-4 font-display text-3xl font-extrabold tracking-tight text-content">{compact(value)}</p>
+      {/* tabular-nums keeps the six tiles' figures optically aligned when the
+          row goes to a single 6-across KPI strip at 2xl. */}
+      <p className="mt-4 font-display text-3xl font-extrabold tabular-nums tracking-tight text-content">{compact(value)}</p>
       <p className="mt-0.5 text-sm text-content-muted">{label}</p>
       {!muted && <p className="mt-1 text-[11px] font-medium text-content-muted">this week</p>}
     </motion.div>
@@ -113,14 +120,19 @@ const axisProps = {
 
 function ChartCard({ title, subtitle, children }) {
   return (
-    <motion.div variants={rise} className="glass rounded-3xl p-5 shadow-soft">
+    // min-w-0 is load-bearing: as a grid item this card defaults to
+    // min-width:auto, and the SVG recharts renders would then pin the column at
+    // its widest observed size so the chart never shrinks back down.
+    <motion.div variants={rise} className="glass min-w-0 rounded-3xl p-5 shadow-soft">
       <div className="mb-4 flex items-center justify-between">
-        <div>
+        <div className="min-w-0">
           <h3 className="font-display text-base font-bold text-content">{title}</h3>
           {subtitle && <p className="text-xs text-content-muted">{subtitle}</p>}
         </div>
       </div>
-      <div className="h-[260px] w-full">{children}</div>
+      {/* Chart height tracks the viewport: 200px is all a phone can spare, a
+          monitor can carry 340px without the plot looking stunted. */}
+      <div className="h-[200px] w-full xs:h-[230px] sm:h-[260px] xl:h-[300px] 2xl:h-[340px]">{children}</div>
     </motion.div>
   );
 }
@@ -222,14 +234,16 @@ function UserManagement() {
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3 text-sm text-content-muted">{u.email}</td>
+                {/* Capped + break-all: an unbroken address would otherwise set
+                    the column's min-content width and stretch the whole table. */}
+                <td className="max-w-[220px] break-all px-3 py-3 text-sm text-content-muted">{u.email}</td>
                 <td className="px-3 py-3">
                   <StatusBadge status={u.accountStatus} />
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-sm text-content-muted">
-                  {format(new Date(u.createdAt), 'd MMM yyyy')}
+                  {formatDate(u.createdAt, 'd MMM yyyy')}
                 </td>
-                <td className="px-3 py-3">
+                <td className="whitespace-nowrap px-3 py-3">
                   <div className="flex justify-end gap-2">
                     {u.accountStatus === 'active' ? (
                       <>
@@ -339,13 +353,13 @@ function Reports() {
                     className="border-t border-border transition-colors hover:bg-content/[0.03]"
                   >
                     <td className="px-3 py-3">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <Avatar src={r.reporter?.avatar} name={r.reporter?.name} size="xs" />
-                        <span className="text-sm font-medium text-content">{r.reporter?.name}</span>
+                        <span className="min-w-0 truncate text-sm font-medium text-content">{r.reporter?.name}</span>
                       </div>
                     </td>
                     <td className="px-3 py-3">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <Avatar src={r.targetUser?.avatar} name={r.targetUser?.name} size="xs" />
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-content">{r.targetUser?.name}</p>
@@ -353,13 +367,13 @@ function Reports() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3">
-                      <span className="text-sm text-content-muted">{r.reason}</span>
+                    <td className="max-w-[260px] px-3 py-3">
+                      <span className="break-words text-sm text-content-muted">{r.reason}</span>
                     </td>
                     <td className="px-3 py-3">
                       <StatusBadge status={r.status} />
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="whitespace-nowrap px-3 py-3">
                       <div className="flex justify-end gap-2">
                         <Button
                           variant="subtle"
@@ -409,11 +423,14 @@ export default function AdminDashboard() {
         variants={stagger}
         initial="initial"
         animate="animate"
-        className="mx-auto max-w-6xl space-y-6 p-4 md:p-6"
+        // AppLayout already centres the page at max-w-screen-2xl; this steps the
+        // reading width up so the wide tables and charts use a monitor instead
+        // of leaving ~380px of dead space either side.
+        className={cn(PAGE_SHELL, 'space-y-6')}
       >
         {/* Header */}
         <motion.div variants={rise} className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h1 className="font-display text-2xl font-extrabold tracking-tight text-content sm:text-3xl">
               <span className="gradient-text">Admin Dashboard</span>
             </h1>
@@ -430,8 +447,9 @@ export default function AdminDashboard() {
           </span>
         </motion.div>
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Stat cards — 1 → 2 → 3 → 6, so the six tiles land as 6×1 / 3×2 / 2×3
+            and never leave an orphan row. xs picks up the bigger phones. */}
+        <div className="grid grid-cols-1 gap-4 xs:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           {STAT_CARDS.map((s) => (
             <StatCard
               key={s.key}
@@ -450,20 +468,26 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={stats?.userGrowth || []} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                 <defs>
+                  {/* One hue fading to the surface - the wash is depth, not a
+                      second series, so every stop is the same teal. */}
                   <linearGradient id="userGrowthFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={C.indigo} stopOpacity={0.45} />
-                    <stop offset="60%" stopColor={C.violet} stopOpacity={0.18} />
-                    <stop offset="100%" stopColor={C.cyan} stopOpacity={0.02} />
+                    <stop offset="0%" stopColor={C.series} stopOpacity={0.45} />
+                    <stop offset="60%" stopColor={C.series} stopOpacity={0.18} />
+                    <stop offset="100%" stopColor={C.series} stopOpacity={0.02} />
                   </linearGradient>
                   <linearGradient id="userGrowthStroke" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={C.indigo} />
-                    <stop offset="100%" stopColor={C.violet} />
+                    <stop offset="0%" stopColor={C.series} />
+                    <stop offset="100%" stopColor={C.series} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
-                <XAxis dataKey="_id" {...axisProps} />
+                {/* Live _id is a `YYYY-MM-DD` string (~62px at 11px), and seven
+                    of them do not fit a 240px-wide phone plot. minTickGap lets
+                    recharts thin the labels down instead of overlapping them,
+                    while a wide monitor still shows all seven. */}
+                <XAxis dataKey="_id" {...axisProps} minTickGap={24} tickMargin={6} interval="preserveStartEnd" />
                 <YAxis {...axisProps} width={40} />
-                <RTooltip content={<ChartTooltip suffix="users" />} cursor={{ stroke: C.indigo, strokeWidth: 1, strokeOpacity: 0.3 }} />
+                <RTooltip content={<ChartTooltip suffix="users" />} cursor={{ stroke: C.series, strokeWidth: 1, strokeOpacity: 0.3 }} />
                 <Area
                   type="monotone"
                   dataKey="count"
@@ -471,7 +495,7 @@ export default function AdminDashboard() {
                   strokeWidth={2.5}
                   fill="url(#userGrowthFill)"
                   dot={false}
-                  activeDot={{ r: 5, fill: C.violet, stroke: '#fff', strokeWidth: 2 }}
+                  activeDot={{ r: 5, fill: C.series, stroke: C.surface, strokeWidth: 2 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -481,13 +505,15 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={stats?.messageVolume || []} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
                 <defs>
+                  {/* Same teal top to bottom; the foot only softens to 0.9 so the
+                      bar keeps ≥3:1 on both surfaces. */}
                   <linearGradient id="msgBar" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={C.violet} />
-                    <stop offset="100%" stopColor={C.cyan} />
+                    <stop offset="0%" stopColor={C.series} />
+                    <stop offset="100%" stopColor={C.series} stopOpacity={0.9} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" vertical={false} />
-                <XAxis dataKey="_id" {...axisProps} />
+                <XAxis dataKey="_id" {...axisProps} minTickGap={24} tickMargin={6} interval="preserveStartEnd" />
                 <YAxis {...axisProps} width={44} tickFormatter={(v) => compact(v)} />
                 <RTooltip content={<ChartTooltip suffix="messages" />} cursor={{ fill: 'rgb(var(--content-muted))', fillOpacity: 0.08 }} />
                 <Bar dataKey="count" fill="url(#msgBar)" radius={[8, 8, 0, 0]} maxBarSize={38} />

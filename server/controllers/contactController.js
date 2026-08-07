@@ -80,6 +80,13 @@ export const getRequests = asyncHandler(async (req, res) => {
 // PATCH /api/contacts/request/:id  { action: 'accept'|'reject' }
 export const respondRequest = asyncHandler(async (req, res) => {
   const { action } = req.body;
+  // Require an explicit, valid action. This used to treat ANY other value —
+  // including a missing one or a client sending `{ status: 'accepted' }` — as
+  // "reject", which silently destroyed the request: rejection is terminal, so the
+  // next attempt hits the "already handled" 400 and the contact is lost for good.
+  if (action !== 'accept' && action !== 'reject') {
+    throw new ApiError(400, "Set action to 'accept' or 'reject'.");
+  }
   const request = await ContactRequest.findById(req.params.id);
   if (!request || String(request.to) !== String(req.user._id)) throw new ApiError(404, 'Request not found.');
   if (request.status !== 'pending') throw new ApiError(400, 'This request has already been handled.');

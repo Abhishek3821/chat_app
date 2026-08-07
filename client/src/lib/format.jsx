@@ -26,7 +26,7 @@ function parseInline(text, keyPrefix, mine) {
     else if (tok.startsWith('~')) nodes.push(<del key={key}>{tok.slice(1, -1)}</del>);
     else if (tok.startsWith('`'))
       nodes.push(
-        <code key={key} className={cn('rounded px-1 py-0.5 font-mono text-[0.85em]', mine ? 'bg-white/20' : 'bg-content/10')}>
+        <code key={key} className={cn('rounded px-1 py-0.5 font-mono text-[0.85em]', mine ? 'neu-on-accent' : 'neu-inset-sm bg-surface-2')}>
           {tok.slice(1, -1)}
         </code>
       );

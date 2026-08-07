@@ -56,7 +56,7 @@ export function AuthShowcase({
   ],
 }) {
   return (
-    <div className="relative hidden overflow-hidden bg-brand-gradient lg:flex lg:w-[52%] lg:flex-col">
+    <div className="relative hidden overflow-hidden bg-brand-gradient lg:flex lg:w-1/2 lg:flex-col xl:w-[52%] 2xl:w-[54%]">
       {/* Mesh + decorative blurred blobs */}
       <div className="absolute inset-0 bg-mesh-dark opacity-70" />
       <div className="absolute -left-24 -top-24 h-80 w-80 rounded-full bg-cyan-400/30 blur-3xl" />
@@ -98,10 +98,18 @@ export function AuthShowcase({
       </motion.div>
 
       {/* Content */}
-      <div className="relative z-10 flex h-full flex-col justify-between p-12">
-        <LogoFull className="[&_span]:text-white [&_.gradient-text]:!bg-none [&_.gradient-text]:!text-cyan-200" markSize={38} />
+      <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-12 2xl:p-16">
+        {/* This panel is dark in both themes, so pin the mark's gradient to its
+            dark-mode steps — the light-theme --logo-from is brand-600, which is
+            exactly this panel's own background (an invisible logo). Pointed at
+            the brand scale rather than literal mint, so the accent still
+            reaches the mark here. */}
+        <LogoFull
+          className="[--logo-from:var(--brand-300)] [--logo-to:var(--brand-400)] [&_span]:text-white [&_.gradient-text]:!bg-none [&_.gradient-text]:!text-cyan-200"
+          markSize={38}
+        />
 
-        <motion.div variants={stagger} initial="initial" animate="animate" className="max-w-md">
+        <motion.div variants={stagger} initial="initial" animate="animate" className="max-w-md xl:max-w-lg 2xl:max-w-2xl">
           <motion.span
             variants={rise}
             className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-medium text-white/90 backdrop-blur-md"
@@ -110,11 +118,11 @@ export function AuthShowcase({
           </motion.span>
           <motion.h1
             variants={rise}
-            className="mt-5 font-display text-4xl font-extrabold leading-[1.1] tracking-tight text-white xl:text-5xl"
+            className="mt-5 font-display text-4xl font-extrabold leading-[1.1] tracking-tight text-white xl:text-5xl 2xl:text-6xl"
           >
             {headline}
           </motion.h1>
-          <motion.p variants={rise} className="mt-4 text-base leading-relaxed text-white/80">
+          <motion.p variants={rise} className="mt-4 text-base leading-relaxed text-white/80 2xl:text-lg">
             {sub}
           </motion.p>
 
@@ -133,7 +141,8 @@ export function AuthShowcase({
           </motion.ul>
         </motion.div>
 
-        <p className="text-xs text-white/50">© {new Date().getFullYear()} ChatConnect. Crafted for real connection.</p>
+        {/* /50 lands at ~3.3:1 on the teal panel — too low for 12px copy. */}
+        <p className="text-xs text-white/70">© {new Date().getFullYear()} ChatConnect. Crafted for real connection.</p>
       </div>
     </div>
   );
@@ -142,14 +151,16 @@ export function AuthShowcase({
 /* Shared right-hand shell -------------------------------------------------- */
 export function AuthPanel({ children }) {
   return (
-    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[rgb(var(--app-bg))] px-5 py-10 sm:px-8">
+    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[rgb(var(--app-bg))] px-4 py-8 xs:px-5 xs:py-10 sm:px-8 2xl:px-12">
       {/* Soft ambient glow on mobile / light-mode balance */}
       <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-brand-500/10 blur-3xl" />
+      {/* p-8 + the panel gutter left only ~216px of usable card width at 320px,
+          which crushed the OTP boxes and the inline "Verify" rows. Step it up. */}
       <motion.div
         variants={stagger}
         initial="initial"
         animate="animate"
-        className="glass-strong relative w-full max-w-md rounded-3xl p-8 shadow-soft-lg sm:p-10"
+        className="glass-strong relative w-full max-w-md rounded-3xl p-5 shadow-soft-lg xs:p-7 sm:p-10 2xl:max-w-lg 2xl:p-12"
       >
         {children}
       </motion.div>
@@ -160,7 +171,7 @@ export function AuthPanel({ children }) {
 /* Compact logo for mobile top of the form panel ---------------------------- */
 export function MobileBrand() {
   return (
-    <motion.div variants={rise} className="mb-8 flex justify-center lg:hidden">
+    <motion.div variants={rise} className="mb-6 flex justify-center xs:mb-8 lg:hidden">
       <LogoFull markSize={34} />
     </motion.div>
   );
@@ -201,7 +212,7 @@ export default function Login() {
   const busy = submitting || loading;
 
   return (
-    <motion.div {...pageMotion} className="flex min-h-screen w-full">
+    <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase />
 
       <AuthPanel>
@@ -237,7 +248,7 @@ export default function Login() {
                   type={showPw ? 'text' : 'password'}
                   autoComplete="current-password"
                   placeholder="Enter your password"
-                  className="pr-11"
+                  className="pr-12"
                   value={form.password}
                   onChange={set('password')}
                   required
@@ -246,7 +257,7 @@ export default function Login() {
                   type="button"
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
-                  className="ring-brand absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1 text-content-muted transition-colors hover:text-content"
+                  className="ring-brand absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-content-muted transition-colors hover:text-content sm:right-1.5 sm:h-10 sm:w-10"
                 >
                   {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -254,19 +265,20 @@ export default function Login() {
             </Field>
           </motion.div>
 
-          <motion.div variants={rise} className="flex items-center justify-between">
-            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-content-muted">
+          {/* py-3/-my-3 grows both hit areas to 44px without changing the row height. */}
+          <motion.div variants={rise} className="flex items-center justify-between gap-3">
+            <label className="-my-3 flex cursor-pointer select-none items-center gap-2 py-3 text-sm text-content-muted">
               <input
                 type="checkbox"
                 checked={form.remember}
                 onChange={set('remember')}
-                className="ring-brand h-4 w-4 rounded border-border bg-surface-2 text-brand-500 accent-brand-500"
+                className="ring-brand h-4 w-4 shrink-0 rounded border-border bg-surface-2 text-brand-500 accent-brand-500"
               />
               Remember me
             </label>
             <Link
               to="/forgot-password"
-              className="text-sm font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300"
+              className="ring-brand -my-3 shrink-0 rounded-lg py-3 text-sm font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300"
             >
               Forgot password?
             </Link>
@@ -290,9 +302,9 @@ export default function Login() {
         {DEMO_MODE && (
           <motion.p
             variants={rise}
-            className="mt-5 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface-2/60 px-3 py-2.5 text-center text-xs text-content-muted"
+            className="mt-5 flex items-center justify-center gap-1.5 rounded-xl neu-inset bg-surface-2/60 px-3 py-2.5 text-center text-xs text-content-muted"
           >
-            <Sparkles size={13} className="text-brand-500" />
+            <Sparkles size={13} className="shrink-0 text-brand-500 dark:text-brand-300" />
             Explore instantly — any email &amp; password works in demo mode.
           </motion.p>
         )}

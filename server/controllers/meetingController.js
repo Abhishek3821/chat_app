@@ -4,7 +4,7 @@ import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
-import { sendEmail } from '../utils/sendEmail.js';
+import { sendEmail, classifySendError } from '../utils/sendEmail.js';
 import { buildMeetingICS } from '../utils/ics.js';
 import { livekitEnabled, livekitUrl, createLivekitToken } from '../utils/livekit.js';
 import { verifyToken } from '../utils/token.js';
@@ -37,10 +37,12 @@ function sanitizeSettings(s) {
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-/** Fire-and-forget email invitations (never blocks or fails the request). */
+/** Fire-and-forget email invitations (never blocks or fails the request).
+ *  Returns how many valid, unique addresses were queued, so the caller can tell
+ *  the host what to expect instead of implying every typed address was mailed. */
 function sendMeetingInvites({ meeting, hostName, emails }) {
   const unique = [...new Set(emails.filter((e) => EMAIL_RE.test(e)))].slice(0, 50);
-  if (!unique.length) return;
+  if (!unique.length) return 0;
   let when = '';
   try {
     when = new Date(meeting.startAt).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: meeting.timezone || 'UTC' });
@@ -78,7 +80,26 @@ function sendMeetingInvites({ meeting, hostName, emails }) {
   } catch {
     attachments = undefined;
   }
-  unique.forEach((to) => sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text, attachments }).catch(() => {}));
+  // Deliberately not awaited — a slow relay must not hold up the 201. But the
+  // outcome IS logged: swallowing errors here meant a host saw "scheduled" while
+  // every invitation silently failed (e.g. the host blocks outbound SMTP), with
+  // nothing in the logs to explain it.
+  unique.forEach((to) => {
+    sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text, attachments })
+      .then((r) => {
+        if (r?.logged) {
+          console.warn(`✉️  meeting invite for ${to} was NOT sent — no mailer configured (set BREVO_API_KEY or EMAIL_HOST/USER/PASS).`);
+        } else {
+          console.log(`✉️  meeting invite sent to ${to} (${meeting.roomCode})`);
+        }
+      })
+      .catch((err) => {
+        // classifySendError → 'auth' | 'connection' | 'other'; the category is what
+        // tells an operator whether to fix credentials or a blocked SMTP port.
+        console.error(`✉️  meeting invite to ${to} FAILED [${classifySendError(err)}]: ${err?.message || err}`);
+      });
+  });
+  return unique.length;
 }
 
 /** Create a meeting with a unique room code (retries on the rare collision). */
@@ -144,13 +165,14 @@ export const createMeeting = asyncHandler(async (req, res) => {
 
   // Email invitations (in-workspace invitees + any raw email addresses) — the
   // shareable link is included so anyone can join. Best-effort, off the response.
-  sendMeetingInvites({
+  const invitesQueued = sendMeetingInvites({
     meeting,
     hostName: req.user.name,
     emails: [...invited.map((u) => u.email), ...inviteEmails.map((e) => String(e).trim().toLowerCase())],
   });
 
-  res.status(201).json({ success: true, meeting });
+  // invitesQueued = valid, de-duplicated addresses actually handed to the mailer.
+  res.status(201).json({ success: true, meeting, invitesQueued });
 });
 
 // GET /api/meetings/code/:code — summary for anyone holding the link (before join).

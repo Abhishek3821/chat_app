@@ -1,7 +1,7 @@
 /**
  * ChatConnect end-to-end test suite.
  *
- * Boots the real server against an ISOLATED test database (chatconnect_e2e),
+ * Boots the real server against an ISOLATED test database (chatconnect_t_e2e),
  * then drives two real users (A, B) + one seeded admin through:
  *   auth (signup/login/JWT/role security), admin authorization, contacts,
  *   real-time chat both directions, typing, presence, and the full WebRTC
@@ -32,7 +32,7 @@ if (!baseUri) {
   console.error('MONGO_URI missing in server/.env — cannot run E2E tests.');
   process.exit(1);
 }
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_e2e$2');
+const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_e2e$2');
 if (TEST_URI === baseUri) {
   console.error('Refusing to run: could not derive an isolated test database name.');
   process.exit(1);

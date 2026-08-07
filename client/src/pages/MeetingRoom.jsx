@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
+import MeetingPollsPanel from '@/components/meeting/MeetingPollsPanel';
+import CaptionOverlay from '@/components/meeting/CaptionOverlay';
 import { useSocket } from '@/hooks/useSocket';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
+import { useLiveCaptions } from '@/hooks/useLiveCaptions';
 import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
 import api from '@/lib/api';
 import { useMeetings } from '@/store/useMeetings';
@@ -39,12 +42,14 @@ function VideoTile({ stream, name, avatar, muted = false, mirror = false, label,
         ))}
       </div>
       {label && (
-        <span className="absolute bottom-2 left-2 rounded-lg bg-black/50 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">{label}</span>
+        <span className="absolute bottom-2 left-2 max-w-[85%] truncate rounded-lg bg-black/50 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">{label}</span>
       )}
       {hostControls && (
-        <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button onClick={hostControls.onMute} title="Ask to mute" className="grid h-8 w-8 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80"><MicOffIcon size={14} /></button>
-          <button onClick={hostControls.onRemove} title="Remove from meeting" className="grid h-8 w-8 place-items-center rounded-full bg-red-500/80 text-white hover:bg-red-600"><UserX size={14} /></button>
+        // Hover-only would make these unreachable on touch devices (no hover),
+        // so they stay visible on phones and only hide behind hover from sm: up.
+        <div className="absolute right-2 top-2 flex gap-1 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+          <button onClick={hostControls.onMute} title="Ask to mute" className="grid h-10 w-10 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 sm:h-8 sm:w-8"><MicOffIcon size={14} /></button>
+          <button onClick={hostControls.onRemove} title="Remove from meeting" className="grid h-10 w-10 place-items-center rounded-full bg-red-500/80 text-white hover:bg-red-600 sm:h-8 sm:w-8"><UserX size={14} /></button>
         </div>
       )}
     </div>
@@ -167,9 +172,19 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
     chatMessages, reactions, raisedHands, handRaised,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
     knocks = [], admitGuest,
+    polls = [], questions = [], createPoll, votePoll, closePoll, askQuestion, upvoteQuestion, answerQuestion,
   } = room;
   const [portrait, setPortrait] = useState(false); // tile orientation option
   const [showChat, setShowChat] = useState(false);
+  const [showPolls, setShowPolls] = useState(false);
+  // `muted` is passed so a muted mic never broadcasts captions of what you say.
+  const captions = useLiveCaptions(meeting._id, { myName: me?.name || 'You', muted });
+  // Captions can fail for reasons only the browser knows (mic busy, no network,
+  // permission blocked). The hook has always reported them; nothing rendered it,
+  // so a failure looked like "the button does nothing".
+  useEffect(() => {
+    if (captions.error) toast.error(captions.error, { id: 'caption-error' });
+  }, [captions.error]);
   const [chatInput, setChatInput] = useState('');
   const [showReactions, setShowReactions] = useState(false);
   const [seenChatCount, setSeenChatCount] = useState(0);
@@ -249,7 +264,11 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   // <video> with h-full/w-full can't resolve a percentage height against an
   // "auto" parent) — it used to collapse to the video's raw stream resolution,
   // making tiles inconsistent sizes across devices. Always give it one.
-  const tileAspect = portrait ? 'aspect-[3/4] max-h-full' : 'aspect-video';
+  // Grid cells now carry the definite height (auto-rows-fr on a fixed-height grid),
+  // so a tile fills its cell rather than dictating its own height — that is what
+  // keeps every participant on one screen. Portrait keeps a 3:4 shape, derived from
+  // the cell's height so it still cannot overflow.
+  const tileAspect = portrait ? 'h-full w-auto aspect-[3/4] max-w-full' : 'h-full w-full';
 
   // Spotlight: whoever is presenting a screen (you or a remote peer) fills the
   // stage (object-contain so nothing is cropped) with everyone else in a strip.
@@ -260,7 +279,9 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   const presenterName = presenterIsMe ? 'You' : presenterRemote?.user?.name || 'Guest';
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-navy-950 text-white">
+    // `relative` anchors the absolutely-positioned knock prompts + chat drawer
+    // to the room rather than to the page's initial containing block.
+    <div className="relative flex h-[100dvh] flex-col bg-navy-950 text-white">
       {/* Host admission prompts — someone knocked and wants to join (Google-Meet style). */}
       {isHost && knocks.length > 0 && (
         <div className="absolute left-1/2 top-16 z-40 flex w-[min(92vw,380px)] -translate-x-1/2 flex-col gap-2">
@@ -274,14 +295,14 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
               <button
                 onClick={() => admitGuest?.(k, false)}
                 title="Deny"
-                className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-red-500/80 hover:text-white"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-red-500/80 hover:text-white sm:h-9 sm:w-9"
               >
                 <X size={16} />
               </button>
               <button
                 onClick={() => admitGuest?.(k, true)}
                 title="Admit"
-                className="grid h-9 w-9 place-items-center rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-emerald-500 text-white hover:bg-emerald-600 sm:h-9 sm:w-9"
               >
                 <Check size={16} />
               </button>
@@ -289,8 +310,11 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           ))}
         </div>
       )}
-      <header className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-        <div className="min-w-0">
+      {/* shrink-0 (like the footer): header + banners + footer keep their natural
+          height and the stage takes exactly the rest, so the room is always one
+          screen tall and never scrolls. */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold sm:text-base">{meeting.title}</p>
           <button onClick={copyId} title="Copy meeting ID" className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white/90">
             <Users size={12} /> {total} in call
@@ -305,49 +329,99 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           {isHost && (
             <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> <span className="hidden sm:inline">Mute all</span></Button>
           )}
-          <button onClick={() => setShowChat((v) => !v)} className={cn('relative grid h-9 w-9 place-items-center rounded-xl transition-colors', showChat ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20')} title="Meeting chat">
+          <button onClick={() => setShowChat((v) => !v)} className={cn('relative grid h-11 w-11 place-items-center rounded-xl transition-colors sm:h-9 sm:w-9', showChat ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20')} title="Meeting chat">
             <MessageSquare size={18} />
             {unreadChat > 0 && !showChat && <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white">{unreadChat}</span>}
+          </button>
+          <button
+            onClick={() => { setShowPolls((v) => !v); setShowChat(false); }}
+            className={cn('relative grid h-11 w-11 place-items-center rounded-xl transition-colors sm:h-9 sm:w-9', showPolls ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20')}
+            title="Polls & Q&A"
+          >
+            <BarChart3 size={18} />
+            {polls.length + questions.length > 0 && !showPolls && (
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white">
+                {polls.length + questions.length}
+              </span>
+            )}
+          </button>
+          {/* Disabled rather than hidden where unsupported, with the reason in the
+              tooltip — a silently missing control reads as a bug. */}
+          <button
+            onClick={captions.toggle}
+            disabled={!captions.supported}
+            className={cn(
+              'grid h-11 w-11 place-items-center rounded-xl transition-colors sm:h-9 sm:w-9',
+              captions.enabled ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20',
+              !captions.supported && 'cursor-not-allowed opacity-40 hover:bg-white/10'
+            )}
+            title={
+              !captions.supported
+                ? 'Live captions need Chrome or Edge'
+                : captions.enabled
+                  // Say why nothing is appearing rather than looking broken.
+                  ? (muted ? 'Captions on — unmute to caption your speech' : 'Turn off captions')
+                  : 'Turn on live captions'
+            }
+          >
+            <Captions size={18} />
           </button>
           <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> <span className="hidden sm:inline">Copy link</span></Button>
         </div>
       </header>
 
       {mediaError && (
-        <div className="mx-4 mb-2 rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-300">{mediaError}</div>
+        <div className="mx-3 mb-2 rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-300 sm:mx-4">{mediaError}</div>
       )}
 
-      {/* Presenting banner — you always SEE what you're sharing (like Google Meet) */}
+      {/* Presenting banner — you always SEE what you're sharing (like Google Meet).
+          It wraps on phones: label + "Stop presenting" in one rounded-full row is
+          wider than 320px, and the room clips (no page scroll) so the button
+          would simply be unreachable. */}
       {sharingScreen && (
-        <div className="mx-auto mb-2 flex items-center gap-3 rounded-full bg-emerald-500/15 px-4 py-1.5 text-sm text-emerald-200 ring-1 ring-emerald-500/30">
-          <MonitorUp size={15} />
+        <div className="mx-3 mb-2 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 px-4 py-1.5 text-xs text-emerald-200 ring-1 ring-emerald-500/30 sm:mx-auto sm:gap-3 sm:rounded-full sm:text-sm">
+          <MonitorUp size={15} className="shrink-0" />
           <span className="font-medium">You’re presenting to everyone</span>
           <button onClick={toggleScreenShare} className="rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-600">Stop presenting</button>
         </div>
       )}
       {!sharingScreen && presenting && presenterRemote && (
-        <div className="mx-auto mb-2 flex items-center gap-2 rounded-full bg-cyan-500/15 px-4 py-1.5 text-sm text-cyan-200 ring-1 ring-cyan-500/30">
-          <MonitorUp size={15} />
-          <span className="font-medium">{presenterName} is presenting</span>
+        <div className="mx-3 mb-2 flex flex-wrap items-center justify-center gap-2 rounded-2xl bg-cyan-500/15 px-4 py-1.5 text-xs text-cyan-200 ring-1 ring-cyan-500/30 sm:mx-auto sm:rounded-full sm:text-sm">
+          <MonitorUp size={15} className="shrink-0" />
+          <span className="min-w-0 break-words font-medium">{presenterName} is presenting</span>
         </div>
       )}
 
       <div className="relative flex min-h-0 flex-1">
-        <div className="min-h-0 flex-1 px-2 sm:px-4">
+        {/* Single-screen stage. The tile grid is sized to the space available
+            (`auto-rows-fr` splits the height across however many rows there are),
+            so ANY participant count fits on one screen with no scrolling — the
+            previous fixed `aspect-video` tiles forced a definite height per row
+            and pushed later rows out of view behind the control bar.
+            Only the presenting layout keeps a scroll axis (its horizontal
+            filmstrip), so the grid path clips instead. */}
+        <div
+          className={cn(
+            'min-h-0 min-w-0 flex-1 flex flex-col px-2 sm:px-4',
+            presenting && presenterStream ? 'scrollbar-thin overflow-y-auto' : 'overflow-hidden'
+          )}
+        >
         {presenting && presenterStream ? (
           <div className="flex h-full flex-col gap-2 sm:gap-3">
             {/* min-h floor: on short/mobile viewports flex sizing alone can
                 squeeze the shared screen to near-nothing — always keep it usable. */}
             <VideoTile stream={presenterStream} name={presenterName} muted={presenterIsMe} fit="contain" label={presenterIsMe ? 'Your shared screen' : `${presenterName}’s screen`} className="min-h-[38vh] flex-1 sm:min-h-[45vh]" />
-            <div className="flex justify-center gap-2 overflow-x-auto pb-2">
-              <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)`} handRaised={handRaised} reactions={myReactions} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36" />
+            {/* w-fit + mx-auto instead of justify-center: a centred flex scroll
+                container makes its left-most tiles unreachable once it overflows. */}
+            <div className="scrollbar-thin mx-auto flex w-fit max-w-full shrink-0 gap-2 overflow-x-auto pb-2">
+              <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)`} handRaised={handRaised} reactions={myReactions} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36 2xl:h-28 2xl:w-44" />
               {remotes.filter((r) => r.socketId !== presenterSid).map((r) => (
-                <VideoTile key={r.socketId} stream={r.stream} name={r.user?.name} avatar={r.user?.avatar} label={r.user?.name || 'Guest'} handRaised={!!raisedHands[r.socketId]} reactions={reactionsForRemote(r.socketId)} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36" />
+                <VideoTile key={r.socketId} stream={r.stream} name={r.user?.name} avatar={r.user?.avatar} label={r.user?.name || 'Guest'} handRaised={!!raisedHands[r.socketId]} reactions={reactionsForRemote(r.socketId)} className="h-16 w-24 shrink-0 sm:h-20 sm:w-32 md:h-24 md:w-36 2xl:h-28 2xl:w-44" />
               ))}
             </div>
           </div>
         ) : (
-          <div className={cn('grid h-full gap-2 place-content-center sm:gap-3', cols, portrait && 'place-items-center')}>
+          <div className={cn('grid min-h-0 flex-1 auto-rows-fr gap-2 py-1 sm:gap-3', cols, portrait && 'place-items-center')}>
             <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`} handRaised={handRaised} reactions={myReactions} className={tileAspect} />
             {remotes.map((r) => (
               <VideoTile
@@ -365,7 +439,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           </div>
         )}
         {remotes.length === 0 && !presenting && (
-          <p className="mt-3 text-center text-sm text-white/50">
+          // shrink-0 so this line takes its own height from the flex column
+          // instead of being added on top of a full-height grid (which would
+          // overflow the stage and reintroduce scrolling).
+          <p className="shrink-0 py-2 text-center text-sm text-white/50">
             {status === 'connecting' ? 'Connecting…' : 'You’re the only one here. Share the meeting ID or link to invite others.'}
           </p>
         )}
@@ -375,13 +452,35 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
             (absolute, full-bleed) instead of sharing the flex row with it —
             a fixed-width sidebar on a phone-size viewport used to squeeze the
             video pane down to a sliver. From sm: up it's a normal side panel. */}
+        {/* z-20, below the drawers (z-30), so an open panel covers the captions
+            rather than having text bleed through it. */}
+        <CaptionOverlay lines={captions.lines} />
+
+        <MeetingPollsPanel
+          open={showPolls}
+          onClose={() => setShowPolls(false)}
+          isHost={isHost}
+          myUserId={me?._id}
+          polls={polls}
+          questions={questions}
+          onCreatePoll={createPoll}
+          onVote={votePoll}
+          onClosePoll={closePoll}
+          onAsk={askQuestion}
+          onUpvote={upvoteQuestion}
+          onAnswer={answerQuestion}
+        />
+
         {showChat && (
-          <aside className="absolute inset-0 z-30 flex flex-col bg-navy-950/98 sm:static sm:inset-auto sm:z-auto sm:w-80 sm:shrink-0 sm:border-l sm:border-white/10 sm:bg-navy-950/95 lg:w-96">
+          /* bg-navy-950/[0.98] — a bare `/98` modifier isn't in Tailwind's opacity
+             scale, so it emitted no rule at all and the video showed through the
+             full-screen mobile drawer. */
+          <aside className="absolute inset-0 z-30 flex flex-col bg-navy-950/[0.98] sm:static sm:inset-auto sm:z-auto sm:w-80 sm:shrink-0 sm:border-l sm:border-white/10 sm:bg-navy-950/95 lg:w-96 2xl:w-[28rem]">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <p className="font-semibold">In-call messages</p>
-              <button onClick={() => setShowChat(false)} className="rounded-lg p-1 text-white/60 hover:text-white"><X size={18} /></button>
+              <p className="min-w-0 truncate font-semibold">In-call messages</p>
+              <button onClick={() => setShowChat(false)} className="-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/60 hover:text-white sm:h-9 sm:w-9"><X size={18} /></button>
             </div>
-            <div className="scrollbar-thin flex-1 space-y-3 overflow-y-auto p-4">
+            <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
               {chatMessages.length === 0 && <p className="text-center text-xs text-white/40">Messages are only visible to people in this call.</p>}
               {chatMessages.map((m) => (
                 <div key={m.id} className={cn('flex flex-col', m.mine && 'items-end')}>
@@ -391,9 +490,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
               ))}
               <div ref={chatEndRef} />
             </div>
-            <form onSubmit={submitChat} className="flex items-center gap-2 border-t border-white/10 p-3">
-              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message" className="ring-brand min-w-0 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40" />
-              <button type="submit" disabled={!chatInput.trim()} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500 text-white disabled:opacity-50"><Send size={16} /></button>
+            {/* text-base on phones — anything under 16px makes iOS zoom the page on focus. */}
+            <form onSubmit={submitChat} className="flex shrink-0 items-center gap-2 border-t border-white/10 p-3">
+              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message" className="ring-brand min-w-0 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-base text-white placeholder:text-white/40 sm:text-sm" />
+              <button type="submit" disabled={!chatInput.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-500 text-white disabled:opacity-50 sm:h-9 sm:w-9"><Send size={16} /></button>
             </form>
           </aside>
         )}
@@ -401,7 +501,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
 
       {/* flex-wrap: on narrow phones 7-8 circular controls at full size don't fit
           one row — they used to overflow off-screen instead of wrapping. */}
-      <footer className="flex flex-wrap items-center justify-center gap-2 px-3 py-4 sm:gap-3 sm:px-4 sm:py-5">
+      <footer className="mb-safe flex shrink-0 flex-wrap items-center justify-center gap-2 px-3 py-4 sm:gap-3 sm:px-4 sm:py-5">
         <CtrlButton active={!muted} onClick={toggleMute} on={<Mic size={20} />} off={<MicOff size={20} />} label={muted ? 'Unmute' : 'Mute'} />
         {meeting.type !== 'audio' && (
           <CtrlButton active={!camOff} onClick={toggleCamera} on={<Video size={20} />} off={<VideoOff size={20} />} label={camOff ? 'Start video' : 'Stop video'} />
@@ -424,9 +524,13 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           {showReactions && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowReactions(false)} />
-              <div className="absolute bottom-16 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-2xl bg-navy-950/95 p-2 shadow-soft-lg ring-1 ring-white/10">
+              {/* Fixed + wrapping: 8 emoji buttons in one row are ~356px wide, so
+                  anchored to the (possibly off-centre) React button they ran off
+                  the side of a 320px screen. The offsets clear the control bar,
+                  which wraps to two rows on phones, plus the home indicator. */}
+              <div className="fixed bottom-[calc(9rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex w-[min(92vw,20rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl bg-navy-950/95 p-2 shadow-soft-lg ring-1 ring-white/10 sm:bottom-[calc(7rem+env(safe-area-inset-bottom))] sm:w-auto sm:flex-nowrap">
                 {REACTION_EMOJIS.map((e) => (
-                  <button key={e} onClick={() => { sendReaction(e); setShowReactions(false); }} className="grid h-10 w-10 place-items-center rounded-xl text-2xl transition-transform hover:scale-125 hover:bg-white/10">{e}</button>
+                  <button key={e} onClick={() => { sendReaction(e); setShowReactions(false); }} className="grid h-11 w-11 place-items-center rounded-xl text-2xl transition-transform hover:scale-125 hover:bg-white/10 sm:h-10 sm:w-10">{e}</button>
                 ))}
               </div>
             </>

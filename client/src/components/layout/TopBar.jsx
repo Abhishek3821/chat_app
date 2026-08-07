@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Search, Bell, Sun, Moon, Plus, Check, Download } from 'lucide-react';
+import { Bell, Sun, Moon, Plus, Check, Download } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
+import GlobalSearch from '../search/GlobalSearch';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
 import { CountBadge } from '../ui/Badge';
@@ -20,6 +21,7 @@ const titles = {
   '/status': 'Status',
   '/groups': 'Groups',
   '/contacts': 'Contacts',
+  '/starred': 'Starred',
   '/settings': 'Settings',
   '/admin': 'Admin Dashboard',
 };
@@ -75,33 +77,44 @@ export default function TopBar() {
   };
 
   return (
-    <header className="frost z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
+    <header className="frost neu-rail-bottom relative z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       <div className="flex items-center gap-2 md:hidden">
         <LogoMark size={30} />
       </div>
       <h1 className="hidden text-xl font-bold text-content md:block">{titles[pathname] || 'ChatConnect'}</h1>
 
-      <div className="relative mx-auto hidden w-full max-w-md lg:block">
-        <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={18} />
-        <input
-          placeholder="Search people, messages, meetings…"
-          className="ring-brand h-10 w-full rounded-xl border border-border bg-surface-2 pl-11 pr-4 text-sm transition-colors placeholder:text-content-muted focus:border-brand-400/60"
-        />
-      </div>
+      {/* Inline field from md up (there's room, and it grows with the viewport);
+          below that it renders as an icon that opens a full-screen sheet. */}
+      <GlobalSearch />
 
       <div className="ml-auto flex items-center gap-1.5">
+        {/* Both of these used to be `hidden sm:inline-flex`, i.e. absent on
+            phones. That was backwards for Install (installing to the home
+            screen is a phone action above all), and it left New Chat reachable
+            only from the chat list's + button — so from any other page on a
+            phone you couldn't start one. They collapse to icons instead. */}
+        {installable && (
+          <Button variant="outline" size="icon-sm" className="sm:hidden" onClick={promptInstall} aria-label="Install ChatConnect as an app" title="Install ChatConnect as an app">
+            <Download size={17} />
+          </Button>
+        )}
         {installable && (
           <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={promptInstall} title="Install ChatConnect as an app">
             <Download size={16} /> Install app
           </Button>
         )}
+        <Button variant="primary" size="icon-sm" className="sm:hidden" onClick={() => openModal('newChat')} aria-label="New chat">
+          <Plus size={18} />
+        </Button>
         <Button variant="primary" size="sm" className="hidden sm:inline-flex" onClick={() => openModal('newChat')}>
           <Plus size={16} /> New
         </Button>
 
         <button
           onClick={toggleTheme}
-          className="ring-brand grid h-10 w-10 place-items-center rounded-xl text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+          // 44px minimum touch target on phones, tightened to 40px once there's
+          // a pointer instead of a thumb.
+          className="neu-raised-sm neu-press ring-brand grid h-11 w-11 place-items-center rounded-full bg-surface text-content-muted hover:text-content sm:h-10 sm:w-10"
           aria-label="Toggle theme"
         >
           <AnimatePresence mode="wait" initial={false}>
@@ -114,7 +127,8 @@ export default function TopBar() {
         <div className="relative">
           <button
             onClick={() => setNotifOpen((v) => !v)}
-            className="ring-brand relative grid h-10 w-10 place-items-center rounded-xl text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+            className="neu-raised-sm neu-press ring-brand relative grid h-11 w-11 place-items-center rounded-full bg-surface text-content-muted hover:text-content sm:h-10 sm:w-10"
+            aria-label={unread > 0 ? `Notifications (${unread} unread)` : 'Notifications'}
           >
             <Bell size={19} />
             <span className="absolute right-1.5 top-1.5">
@@ -130,7 +144,9 @@ export default function TopBar() {
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                  className="glass-strong absolute right-0 top-12 z-40 w-80 overflow-hidden rounded-2xl shadow-soft-lg"
+                  // w-80 is exactly 320px, so on a 320-360px phone the panel ran
+                  // off the left edge. Cap it to the viewport minus the gutters.
+                  className="glass-strong absolute right-0 top-12 z-40 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-3xl sm:w-80"
                 >
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <p className="font-semibold text-content">Notifications</p>
@@ -154,7 +170,7 @@ export default function TopBar() {
                         {n.from ? (
                           <Avatar src={n.from.avatar} name={n.from.name} size="sm" />
                         ) : (
-                          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-brand-500/10 text-brand-500"><Bell size={16} /></span>
+                          <span className="neu-inset grid h-9 w-9 shrink-0 place-items-center rounded-full text-brand-600 dark:text-brand-300"><Bell size={16} /></span>
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-content">{n.title}</p>

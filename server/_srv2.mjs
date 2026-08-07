@@ -1,0 +1,10 @@
+process.env.NODE_ENV='production'; process.env.JWT_SECRET='x'.repeat(48);
+import express from 'express'; import http from 'http'; import bcrypt from 'bcryptjs';
+const app = express();
+const HASH = bcrypt.hashSync('correct horse battery staple', 12);
+const HASH10 = bcrypt.hashSync('1234', 10);
+app.get('/cheap', (req,res)=>res.json({ok:1}));
+app.get('/login', async (req,res)=>{ const ok = await bcrypt.compare('correct horse battery staple', HASH); res.json({ok}); });
+app.get('/pin', async (req,res)=>{ const ok = await bcrypt.compare('1234', HASH10); res.json({ok}); });
+const s = http.createServer(app); s.keepAliveTimeout=60000;
+s.listen(5398, ()=>console.log('READY2'));

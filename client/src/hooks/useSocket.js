@@ -108,7 +108,9 @@ export function useSocket() {
     const { appendMessage, setTyping } = useChat.getState();
 
     socket.on('receive-message', ({ chatId, message }) => {
-      appendMessage(chatId, message);
+      // ingestMessage, not appendMessage: an encrypted message has to be
+      // decrypted before it enters the store, and that step is async.
+      useChat.getState().ingestMessage(chatId, message);
       const chat = useChat.getState();
       const senderId = message.sender?._id || message.sender;
       if (String(senderId) !== String(userId)) {
@@ -159,6 +161,17 @@ export function useSocket() {
     });
     socket.on('chat-disappearing', ({ chatId, seconds }) => useChat.getState().applyDisappearing(chatId, seconds));
 
+    // Multi-device: a pin/archive/mute performed on another device of mine.
+    socket.on('chat-flag', ({ chatId, action, value }) => useChat.getState().applyChatFlag(chatId, action, value));
+    // Encryption turned on/off (by me elsewhere, or by another participant).
+    socket.on('chat-e2ee', ({ chatId, e2ee }) => useChat.getState().applyChatE2EE(chatId, e2ee));
+    // Wallpaper changed on another of my devices.
+    socket.on('chat-theme', ({ chatId, wallpaper, bubble }) => useChat.getState().applyChatTheme(chatId, wallpaper, bubble));
+
+    // A scheduled message went out / was cancelled / failed. The dispatcher and
+    // my other devices both emit this, so the pending list stays in step.
+    socket.on('scheduled-message', (payload) => useChat.getState().applyScheduledUpdate(payload || {}));
+
     // Group metadata changes (rename, avatar, members, roles) sync live.
     socket.on('group-updated', ({ chat }) => { if (chat) useChat.getState().applyChatUpdate(chat); });
 
@@ -167,7 +180,11 @@ export function useSocket() {
     socket.on('live-location-stopped', ({ chatId, messageId }) => useChat.getState().applyLiveLocationStopped(chatId, messageId));
 
     // Someone pinned/unpinned a message in a chat I'm in.
-    socket.on('message-pinned', ({ chatId, messageId, pinned }) => useChat.getState().applyPinned(chatId, messageId, !!pinned));
+    // Pin added / removed early / expired / pushed out by the 3-pin cap. `pin`
+    // carries the expiry so the banner can count down without a refetch.
+    socket.on('message-pinned', ({ chatId, messageId, pinned, pin }) =>
+      useChat.getState().applyPinned(chatId, messageId, !!pinned, pin)
+    );
 
     // ── Contact + status notifications (bell + toast) ─────────────
     socket.on('contact-request', ({ from }) => {

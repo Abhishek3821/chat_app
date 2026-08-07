@@ -44,11 +44,13 @@ import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
 import { Chip } from '@/components/ui/Badge';
-import { cn, formatRelative } from '@/lib/utils';
+import { cn, formatRelative, PAGE_SHELL } from '@/lib/utils';
 import { useUI, ACCENTS } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useApiKeys } from '@/store/useApiKeys';
 import { useWorkspace } from '@/store/useWorkspace';
+import { useE2EE } from '@/store/useE2EE';
+import { WALLPAPERS } from '@/lib/wallpapers';
 import { DEMO_MODE } from '@/lib/api';
 import { ME } from '@/lib/demoData';
 import { getPushState, enablePush, disablePush } from '@/lib/push';
@@ -109,17 +111,19 @@ function ProfilePanel({ user }) {
 
         <div className="relative -mt-12 flex flex-col items-center gap-4 sm:flex-row sm:items-end sm:gap-5">
           <Avatar src={user?.avatar} name={user?.name} size="2xl" online={user?.isOnline} ring className="ring-4 ring-surface" />
-          <div className="flex-1 pb-1 text-center sm:pb-2 sm:text-left">
+          <div className="min-w-0 flex-1 pb-1 text-center sm:pb-2 sm:text-left">
             <div className="flex flex-col items-center gap-1 sm:flex-row sm:items-center sm:gap-2">
-              <h2 className="font-display text-xl font-extrabold tracking-tight text-content">{user?.name}</h2>
+              <h2 className="font-display text-xl font-extrabold tracking-tight text-content break-words">{user?.name}</h2>
               <span className="inline-flex items-center gap-1 rounded-full bg-brand-500/10 px-2.5 py-0.5 text-xs font-semibold text-brand-600 dark:text-brand-300">
                 @{user?.username}
               </span>
             </div>
-            <p className="mt-1 flex items-center gap-1.5 text-sm text-content-muted">
+            {/* break-all: an email is one unbreakable word, so without it this flex
+                row's min-content is wider than a 320px phone. */}
+            <p className="mt-1 flex flex-wrap items-center justify-center gap-1.5 break-all text-sm text-content-muted sm:justify-start">
               {user?.email}
               {user?.isVerified && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300">
                   <ShieldCheck size={11} /> Verified
                 </span>
               )}
@@ -130,7 +134,7 @@ function ProfilePanel({ user }) {
           </Button>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-border bg-surface-2/60 p-4">
+        <div className="mt-5 rounded-2xl neu-inset bg-surface-2/60 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">About</p>
           <p className="mt-1.5 text-sm leading-relaxed text-content">
             {user?.bio || 'Add a short bio to tell people a little about you.'}
@@ -151,19 +155,164 @@ function ProfilePanel({ user }) {
 
 function DetailRow({ icon: Icon, label, value }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <div className="flex items-center gap-3">
-        <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+    <div className="flex items-center justify-between gap-3 py-3 sm:gap-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
           <Icon size={18} />
         </span>
-        <p className="text-sm font-medium text-content-muted">{label}</p>
+        <p className="truncate text-sm font-medium text-content-muted">{label}</p>
       </div>
-      <p className="max-w-[55%] truncate text-sm font-semibold text-content">{value}</p>
+      <p className="min-w-0 max-w-[55%] truncate text-sm font-semibold text-content">{value}</p>
     </div>
   );
 }
 
 /* ── Privacy ──────────────────────────────────────────────────── */
+/**
+ * End-to-end encryption, from the account's point of view.
+ *
+ * Encryption is per-chat (you turn it on for a conversation), but the identity
+ * behind it is per-account — so this is where you create it, unlock it on a new
+ * device, change the passphrase, or forget the key on this machine.
+ */
+function EncryptionSection() {
+  const status = useE2EE((s) => s.status);
+  const busy = useE2EE((s) => s.busy);
+  const changePassphrase = useE2EE((s) => s.changePassphrase);
+  const lockDevice = useE2EE((s) => s.lockDevice);
+  const openModal = useUI((s) => s.openModal);
+
+  const [changing, setChanging] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+
+  const submitChange = async (e) => {
+    e.preventDefault();
+    try {
+      await changePassphrase(current, next);
+      toast.success('Passphrase changed.');
+      setChanging(false);
+      setCurrent('');
+      setNext('');
+    } catch (err) {
+      toast.error(err.message || 'Could not change the passphrase.');
+    }
+  };
+
+  const copy = {
+    unsupported: {
+      tone: 'warn',
+      title: 'Not available in this browser',
+      body: 'End-to-end encryption needs a secure connection (https) and the Web Crypto API. Open the app over https to use it.',
+    },
+    none: {
+      tone: 'idle',
+      title: 'Not set up',
+      body: 'Create an encryption key to start locking individual conversations. Message text is then sealed on your device — the server stores ciphertext it cannot read.',
+    },
+    locked: {
+      tone: 'warn',
+      title: 'Locked on this device',
+      body: 'Your account has an encryption key, but this device doesn’t hold it yet. Enter your passphrase to read encrypted chats here.',
+    },
+    unlocked: {
+      tone: 'ok',
+      title: 'Active',
+      body: 'This device can read your encrypted chats. Turn encryption on for a conversation from its info panel.',
+    },
+  }[status] || { tone: 'idle', title: 'Checking…', body: 'Looking up your encryption status.' };
+
+  return (
+    <Section title="End-to-end encryption" description="Lock individual conversations so only the people in them can read the messages.">
+      <div
+        className={cn(
+          'rounded-2xl border p-4',
+          copy.tone === 'ok' && 'border-emerald-500/30 bg-emerald-500/5',
+          copy.tone === 'warn' && 'border-amber-500/30 bg-amber-500/5',
+          copy.tone === 'idle' && 'border-border bg-surface-2/60'
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <span
+            className={cn(
+              'grid h-9 w-9 shrink-0 place-items-center rounded-xl',
+              copy.tone === 'ok' ? 'bg-brand-gradient text-white shadow-glow' : 'bg-content/10 text-content-muted'
+            )}
+          >
+            <Lock size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-content">{copy.title}</p>
+            <p className="mt-1 text-xs leading-relaxed text-content-muted">{copy.body}</p>
+
+            {status === 'unlocked' && (
+              <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                Message <b>text</b> is end-to-end encrypted. Attachments are not yet — and encrypted chats can’t be
+                searched from the header search, only from inside the chat.
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {status === 'none' && (
+                <Button size="sm" onClick={() => openModal('e2eeSetup')}>
+                  <Lock size={15} /> Set up encryption
+                </Button>
+              )}
+              {status === 'locked' && (
+                <Button size="sm" onClick={() => openModal('e2eeSetup')}>
+                  <KeyRound size={15} /> Unlock on this device
+                </Button>
+              )}
+              {status === 'unlocked' && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => setChanging((v) => !v)}>
+                    <KeyRound size={15} /> Change passphrase
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      if (!window.confirm('Forget the encryption key on this device? You’ll need your passphrase to read encrypted chats here again.')) return;
+                      await lockDevice();
+                      toast.success('Encryption locked on this device.');
+                    }}
+                  >
+                    <LogOut size={15} /> Lock this device
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {changing && (
+              <form onSubmit={submitChange} className="mt-3 space-y-2.5 border-t border-border pt-3">
+                <Input
+                  type="password"
+                  icon={KeyRound}
+                  autoComplete="current-password"
+                  placeholder="Current passphrase"
+                  value={current}
+                  onChange={(e) => setCurrent(e.target.value)}
+                />
+                <Input
+                  type="password"
+                  icon={KeyRound}
+                  autoComplete="new-password"
+                  placeholder="New passphrase (8+ characters)"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+                <Button type="submit" size="sm" disabled={busy || next.length < 8}>
+                  {busy ? 'Saving…' : 'Save new passphrase'}
+                </Button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 function PrivacyPanel() {
   const [privacy, setPrivacy] = useState({
     lastSeen: true,
@@ -180,6 +329,8 @@ function PrivacyPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
+      <EncryptionSection />
+
       <Section title="Visibility" description="Control what other people can see about you.">
         <Rows>
           <ToggleRow
@@ -215,10 +366,10 @@ function PrivacyPanel() {
 
       <Section title="Groups">
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+          <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
             <UserPlus size={18} />
           </span>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-content">Who can add me to groups</p>
             <p className="text-xs text-content-muted">Choose who is allowed to add you to group chats.</p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -229,6 +380,7 @@ function PrivacyPanel() {
                 <Chip
                   key={opt.id}
                   active={addToGroups === opt.id}
+                  className="h-11 sm:h-9"
                   onClick={() => {
                     setAddToGroups(opt.id);
                     toast.success(`Group invites: ${opt.label}`);
@@ -324,12 +476,12 @@ function NotificationsPanel() {
       </Section>
 
       <Section title="Push notifications" description="Get notified when the app is closed. Enabled per device.">
-        <div className="flex items-start justify-between gap-4 py-1">
-          <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+        <div className="flex items-start justify-between gap-3 py-1 sm:gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
               <BellRing size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-content">Push on this device</p>
               <p className="text-xs text-content-muted">
                 {pushState === 'unsupported'
@@ -394,15 +546,21 @@ function NotificationsPanel() {
 }
 
 /* ── Appearance ───────────────────────────────────────────────── */
+/* Swatches preview the real thing: the light theme's pale-mint canvas and the
+   dark theme's navy panels, so the cards match what picking them actually does. */
 const THEME_CARDS = [
-  { id: 'light', label: 'Light', icon: Sun, swatch: 'bg-white', dots: ['bg-slate-200', 'bg-slate-300'] },
-  { id: 'dark', label: 'Dark', icon: Moon, swatch: 'bg-navy-900', dots: ['bg-navy-800', 'bg-slate-600'] },
-  { id: 'system', label: 'System', icon: Monitor, swatch: 'bg-gradient-to-br from-white to-navy-900', dots: ['bg-slate-300', 'bg-navy-800'] },
+  { id: 'light', label: 'Light', icon: Sun, swatch: 'bg-mint-50', dots: ['bg-white', 'bg-mint-200'] },
+  { id: 'dark', label: 'Dark', icon: Moon, swatch: 'bg-navy-950', dots: ['bg-navy-900', 'bg-navy-800'] },
+  { id: 'system', label: 'System', icon: Monitor, swatch: 'bg-gradient-to-br from-mint-50 to-navy-950', dots: ['bg-mint-200', 'bg-navy-900'] },
 ];
 
 function AppearancePanel() {
   const { theme, setTheme, accent, setAccent } = useUI();
   const updateSettings = useAuth((s) => s.updateSettings);
+  const wallpaper = useAuth((s) => s.user?.settings?.wallpaper) || '';
+  const isDark =
+    theme === 'dark' ||
+    (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
 
   // Apply immediately AND persist to the account, so each user keeps their OWN
   // theme + accent (it follows their login, never shared across users/devices).
@@ -410,6 +568,11 @@ function AppearancePanel() {
     setTheme(id);
     updateSettings({ theme: id }).catch(() => toast.error('Could not save your theme.'));
     toast.success(`${id[0].toUpperCase() + id.slice(1)} theme applied`);
+  };
+  const pickWallpaper = (w) => {
+    updateSettings({ wallpaper: w.id })
+      .then(() => toast.success(w.id ? `Default wallpaper: ${w.name}` : 'Default wallpaper cleared'))
+      .catch(() => toast.error('Could not save your wallpaper.'));
   };
   const pickAccent = (a) => {
     setAccent(a.id);
@@ -420,7 +583,7 @@ function AppearancePanel() {
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
       <Section title="Theme" description="Choose how ChatConnect looks to you.">
-        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-2 grid grid-cols-1 gap-3 xs:grid-cols-3">
           {THEME_CARDS.map(({ id, label, icon: Icon, swatch, dots }) => {
             const active = theme === id;
             return (
@@ -439,7 +602,7 @@ function AppearancePanel() {
                 )}
               >
                 {/* Preview swatch */}
-                <div className={cn('mb-3 h-20 w-full overflow-hidden rounded-xl border border-border', swatch)}>
+                <div className={cn('mb-3 h-16 w-full overflow-hidden rounded-xl border border-border xs:h-20', swatch)}>
                   <div className="flex h-full flex-col justify-end gap-1.5 p-2.5">
                     <div className={cn('h-2 w-3/4 rounded-full', dots[0])} />
                     <div className={cn('h-2 w-1/2 rounded-full', dots[1])} />
@@ -465,6 +628,34 @@ function AppearancePanel() {
         </div>
       </Section>
 
+      <Section
+        title="Default chat wallpaper"
+        description="Used by every conversation that doesn't have its own. Set a per-chat one from the chat's info panel."
+      >
+        <div className="mt-2 grid grid-cols-4 gap-2.5 xs:grid-cols-6 sm:grid-cols-8">
+          {WALLPAPERS.map((w) => {
+            const active = (wallpaper || '') === w.id;
+            const preview = isDark ? w.dark : w.light;
+            return (
+              <button
+                key={w.id || 'default'}
+                type="button"
+                onClick={() => pickWallpaper(w)}
+                title={w.name}
+                aria-label={`Use the ${w.name} wallpaper by default`}
+                aria-pressed={active}
+                className={cn(
+                  'ring-brand aspect-square rounded-xl border-2 transition-all',
+                  active ? 'scale-105 border-brand-500' : 'border-border hover:border-brand-500/40',
+                  !w.id && 'bg-surface-2'
+                )}
+                style={preview}
+              />
+            );
+          })}
+        </div>
+      </Section>
+
       <Section title="Accent color" description="Recolors buttons, highlights and gradients across the whole app.">
         <div className="mt-1 flex flex-wrap items-center gap-3">
           {ACCENTS.map((a) => {
@@ -481,7 +672,7 @@ function AppearancePanel() {
                 <span
                   style={{ backgroundColor: a.dot }}
                   className={cn(
-                    'grid h-10 w-10 place-items-center rounded-full text-white shadow-soft ring-2 ring-offset-2 ring-offset-surface transition-all',
+                    'grid h-11 w-11 place-items-center rounded-full text-white shadow-soft ring-2 ring-offset-2 ring-offset-surface transition-all sm:h-10 sm:w-10',
                     active ? 'ring-content/40 scale-105' : 'ring-transparent hover:scale-105'
                   )}
                 >
@@ -537,7 +728,7 @@ function WorkspacePanel() {
       <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
         <Section title="Personal account" description="You're using ChatConnect for personal use.">
           <div className="mt-2 flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
               <User size={18} />
             </span>
             <div className="text-sm text-content">
@@ -622,8 +813,10 @@ function WorkspacePanel() {
         </div>
         {isManager ? (
           <div className="mt-4 flex items-end gap-2">
-            <div className="flex-1"><Field label="Workspace name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
-            <Button onClick={saveName} disabled={savingName || !name.trim() || name === workspace.name}>Save</Button>
+            {/* min-w-0: an <input>'s intrinsic min-width is ~20 characters, which
+                pushes this row past a 320px phone without it. */}
+            <div className="min-w-0 flex-1"><Field label="Workspace name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
+            <Button onClick={saveName} disabled={savingName || !name.trim() || name === workspace.name} className="shrink-0">Save</Button>
           </div>
         ) : (
           <p className="mt-3 text-sm text-content">You're a member of <span className="font-semibold">{workspace.name}</span>.</p>
@@ -634,7 +827,7 @@ function WorkspacePanel() {
         <Section title="Invite teammates" description="Share this link — anyone who signs up with it joins your workspace.">
           <div className="mt-2 flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{inviteLink}</code>
-            <Button size="sm" variant="subtle" onClick={copyLink}><Copy size={14} /> Copy</Button>
+            <Button size="sm" variant="subtle" onClick={copyLink} className="h-11 shrink-0 sm:h-9"><Copy size={14} /> Copy</Button>
           </div>
           <button onClick={rotate} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Generate a new link (revokes the current one)</button>
         </Section>
@@ -648,24 +841,26 @@ function WorkspacePanel() {
             const suspended = m.accountStatus === 'suspended';
             const canManage = isManager && !isOwnerRow && !isMe;
             return (
-              <div key={m._id} className="flex items-center gap-3 rounded-2xl border border-border p-2.5">
+              /* flex-wrap: the 4-button action cluster can't fit beside the name +
+                 badges on a phone, so it drops to a second line instead of overflowing. */
+              <div key={m._id} className="neu-raised-sm flex flex-wrap items-center gap-2 rounded-2xl bg-surface p-2.5 sm:gap-3">
                 <Avatar src={m.avatar} name={m.name} size="sm" online={m.isOnline} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-content">{m.name}</p>
                   <p className="truncate text-xs text-content-muted">@{m.username}</p>
                 </div>
                 {suspended && (
-                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600 dark:text-amber-400">
+                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600 dark:text-amber-400">
                     Paused
                   </span>
                 )}
-                <span className="rounded-full bg-content/5 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
+                <span className="neu-inset-sm shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold uppercase text-content-muted">{m.workspaceRole}</span>
                 {canManage && (
-                  <div className="flex items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1">
                     <button
                       onClick={() => changeRole(m)}
                       title={m.workspaceRole === 'admin' ? 'Demote to member' : 'Promote to admin'}
-                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-brand-500"
+                      className="ring-brand grid h-11 w-11 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-brand-500 sm:h-8 sm:w-8"
                     >
                       <ShieldCheck size={15} />
                     </button>
@@ -673,7 +868,7 @@ function WorkspacePanel() {
                       <button
                         onClick={() => makeOwner(m)}
                         title="Transfer ownership"
-                        className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-amber-500"
+                        className="ring-brand grid h-11 w-11 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-amber-500 sm:h-8 sm:w-8"
                       >
                         <Crown size={15} />
                       </button>
@@ -681,14 +876,14 @@ function WorkspacePanel() {
                     <button
                       onClick={() => toggleSuspend(m)}
                       title={suspended ? 'Resume access' : 'Pause access'}
-                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-content"
+                      className="ring-brand grid h-11 w-11 place-items-center rounded-lg text-content-muted transition-colors hover:bg-content/5 hover:text-content sm:h-8 sm:w-8"
                     >
                       {suspended ? <Check size={15} /> : <Lock size={15} />}
                     </button>
                     <button
                       onClick={() => kick(m)}
                       title="Remove from workspace"
-                      className="ring-brand grid h-8 w-8 place-items-center rounded-lg text-red-500 transition-colors hover:bg-red-500/10"
+                      className="ring-brand grid h-11 w-11 place-items-center rounded-lg text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400 sm:h-8 sm:w-8"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -782,7 +977,7 @@ function DeveloperPanel() {
             <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this key now — it won't be shown again.</p>
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-3 py-2 text-xs text-content">{newKey}</code>
-              <Button size="sm" variant="subtle" onClick={() => copy(newKey)}><Copy size={14} /> Copy</Button>
+              <Button size="sm" variant="subtle" onClick={() => copy(newKey)} className="h-11 shrink-0 sm:h-9"><Copy size={14} /> Copy</Button>
             </div>
             <button onClick={() => setNewKey(null)} className="mt-2 text-xs font-medium text-content-muted hover:text-content">Done</button>
           </div>
@@ -811,14 +1006,14 @@ function DeveloperPanel() {
         ) : (
           <div className="mt-2 space-y-2">
             {keys.map((k) => (
-              <div key={k.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500"><KeyRound size={18} /></span>
+              <div key={k.id} className="neu-raised-sm flex items-center gap-3 rounded-2xl bg-surface p-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><KeyRound size={18} /></span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-content">{k.label}</p>
                   <p className="truncate text-xs text-content-muted"><code>{k.prefix}…</code> · {k.scopes.join(', ')}</p>
                   <p className="text-[11px] text-content-muted">{k.lastUsedAt ? `Last used ${formatRelative(k.lastUsedAt)}` : 'Never used'}</p>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="shrink-0 text-red-500 hover:bg-red-500/10"><Trash2 size={15} /> Revoke</Button>
+                <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="h-11 shrink-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9"><Trash2 size={15} /> Revoke</Button>
               </div>
             ))}
           </div>
@@ -827,15 +1022,15 @@ function DeveloperPanel() {
 
       <Section title="Using the API" description="Send your key as an X-API-Key header on every request — from your server, never from a browser.">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+          <div className="rounded-2xl neu-inset bg-surface-2/60 p-3">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><Terminal size={13} /> Base URL</p>
             <code className="mt-1 block truncate text-xs font-medium text-content">{API_V1_BASE}</code>
           </div>
-          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+          <div className="rounded-2xl neu-inset bg-surface-2/60 p-3">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><KeyRound size={13} /> Auth</p>
             <p className="mt-1 text-xs font-medium text-content"><code>X-API-Key</code> header</p>
           </div>
-          <div className="rounded-2xl border border-border bg-surface-2/60 p-3">
+          <div className="rounded-2xl neu-inset bg-surface-2/60 p-3">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-muted"><AlertTriangle size={13} /> Rate limit</p>
             <p className="mt-1 text-xs font-medium text-content">120 req / min per key</p>
           </div>
@@ -848,7 +1043,7 @@ function DeveloperPanel() {
         </div>
 
         <p className="mb-1.5 mt-4 text-sm font-medium text-content">Endpoints</p>
-        <div className="overflow-x-auto">
+        <div className="scrollbar-thin overflow-x-auto">
           <table className="w-full min-w-[480px] text-left text-sm">
             <thead>
               <tr className="text-[11px] uppercase tracking-wide text-content-muted">
@@ -885,6 +1080,7 @@ function PinInput({ value, onChange, placeholder, autoComplete = 'off' }) {
   return (
     <div className="relative">
       <KeyRound className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={18} />
+      {/* text-base on phones: iOS Safari zooms the viewport on focus below 16px. */}
       <input
         type={show ? 'text' : 'password'}
         inputMode="numeric"
@@ -892,7 +1088,7 @@ function PinInput({ value, onChange, placeholder, autoComplete = 'off' }) {
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 8))}
-        className="ring-brand w-full rounded-xl border border-border bg-surface-2 py-3 pl-11 pr-11 text-sm text-content tracking-widest placeholder:tracking-normal placeholder:text-content-muted transition-colors"
+        className="ring-brand w-full rounded-xl neu-inset bg-surface-2 py-3 pl-11 pr-11 text-base text-content tracking-widest placeholder:tracking-normal placeholder:text-content-muted transition-colors sm:text-sm"
       />
       <button
         type="button"
@@ -1062,7 +1258,7 @@ function AccountPanel() {
 
       <Section title="Two-step verification" description="Require a PIN to open ChatConnect on a device.">
         <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
             <ShieldCheck size={18} />
           </span>
           <div className="min-w-0 flex-1">
@@ -1108,7 +1304,7 @@ function AccountPanel() {
           </div>
         ) : (
           <div className="mt-3 flex items-end gap-2">
-            <div className="flex-1">
+            <div className="min-w-0 flex-1">
               <PinInput placeholder="New 4–8 digit PIN" value={pin} onChange={setPin} autoComplete="new-password" />
             </div>
             <Button
@@ -1130,15 +1326,17 @@ function AccountPanel() {
         ) : (
           <div className="mt-2 space-y-2">
             {sessions.map((s) => (
-              <div key={s.id} className="flex items-center gap-3 rounded-2xl border border-border p-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+              <div key={s.id} className="neu-raised-sm flex items-center gap-3 rounded-2xl bg-surface p-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
                   <Monitor size={18} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 truncate text-sm font-semibold text-content">
+                  {/* `truncate` here only clipped the UA string (no ellipsis) and could
+                      push the badge out of sight — wrap + break-all instead. */}
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all text-sm font-semibold text-content">
                     {s.device || 'Unknown device'}
                     {s.current && (
-                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400">
+                      <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400">
                         This device
                       </span>
                     )}
@@ -1148,7 +1346,7 @@ function AccountPanel() {
                   </p>
                 </div>
                 {!s.current && (
-                  <Button size="sm" variant="ghost" onClick={() => revokeOne(s.id)} className="shrink-0 text-red-500 hover:bg-red-500/10">
+                  <Button size="sm" variant="ghost" onClick={() => revokeOne(s.id)} className="h-11 shrink-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9">
                     Sign out
                   </Button>
                 )}
@@ -1165,11 +1363,11 @@ function AccountPanel() {
 
       <Section title="Your data" description="Download a copy of your ChatConnect data.">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/10 text-brand-500">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
               <Download size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-content">Export my data</p>
               <p className="text-xs text-content-muted">Your profile, contacts, chats and messages as a JSON archive.</p>
             </div>
@@ -1182,12 +1380,12 @@ function AccountPanel() {
 
       {/* Log out */}
       <Section>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-content/10 text-content">
+        <div className="flex items-center justify-between gap-3 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-content/10 text-content">
               <LogOut size={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-medium text-content">Log out</p>
               <p className="text-xs text-content-muted">Sign out of this device.</p>
             </div>
@@ -1212,11 +1410,13 @@ function AccountPanel() {
         className="rounded-3xl border border-red-500/30 bg-red-500/[0.04] p-5 shadow-soft sm:p-6"
       >
         <div className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/10 text-red-500">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-500/10 text-red-500">
             <AlertTriangle size={18} />
           </span>
-          <div>
-            <h3 className="font-display text-base font-bold text-red-500">Danger zone</h3>
+          <div className="min-w-0">
+            {/* red-600/red-400 rather than red-500: red-500 on these surfaces is
+                only ~3.8:1, under AA for body-size text. */}
+            <h3 className="font-display text-base font-bold text-red-600 dark:text-red-400">Danger zone</h3>
             <p className="text-sm text-content-muted">Permanently delete your account and all of its data.</p>
           </div>
         </div>
@@ -1308,7 +1508,7 @@ export default function SettingsPage() {
         variants={stagger}
         initial="initial"
         animate="animate"
-        className="mx-auto max-w-5xl p-4 md:p-6"
+        className={PAGE_SHELL}
       >
         {/* Header */}
         <motion.div variants={rise} className="mb-6">
@@ -1326,7 +1526,7 @@ export default function SettingsPage() {
                 key={id}
                 active={active === id}
                 onClick={() => setActive(id)}
-                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap"
+                className="flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap"
               >
                 <Icon size={14} /> {label}
               </Chip>
@@ -1334,7 +1534,7 @@ export default function SettingsPage() {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-[220px_1fr]">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_1fr] lg:grid-cols-[220px_1fr] 2xl:grid-cols-[240px_1fr]">
           {/* Desktop: vertical tab list */}
           <motion.nav variants={rise} className="hidden md:block">
             <div className="glass sticky top-6 rounded-3xl p-2 shadow-soft">

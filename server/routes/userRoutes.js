@@ -12,6 +12,7 @@ import {
   toggleFavorite,
   toggleBlock,
   toggleChatFlag,
+  setChatTheme,
   deleteAccount,
   exportData,
 } from '../controllers/userController.js';
@@ -33,6 +34,9 @@ router.post('/me/contacts/:id', addContact);
 router.delete('/me/contacts/:id', removeContact);
 router.post('/me/favorites/:id', toggleFavorite);
 router.post('/me/block/:id', toggleBlock);
+// Per-chat wallpaper/bubble. Declared BEFORE the `:action` catch-all below,
+// which would otherwise swallow 'theme' as if it were pin/archive/mute.
+router.put('/me/chats/:chatId/theme', setChatTheme);
 router.post('/me/chats/:chatId/:action', toggleChatFlag);
 
 router.get('/:id', getUserById);

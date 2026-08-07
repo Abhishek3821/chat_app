@@ -11,7 +11,7 @@ Compiled by grepping all `process.env.` / `import.meta.env.` references in `serv
 `MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
 
 ### 🟡 Public-by-construction — safe in the bundle, but still access-controlled resources
-Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. `client/.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` and `VITE_TENOR_KEY` are therefore *exposed by design* — use short-lived TURN credentials (`VITE_TURN_CREDENTIALS_URL`) and an HTTP-referrer-restricted Tenor key. **Never** put a real secret behind a `VITE_` prefix.
+Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. `client/.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` is therefore *exposed by design* — prefer short-lived TURN credentials (`VITE_TURN_CREDENTIALS_URL`). **Never** put a real secret behind a `VITE_` prefix.
 
 ### 🟢 Non-secret configuration
 `PORT` · `NODE_ENV` · `CLIENT_URL` · `JWT_ACCESS_EXPIRES` · `REFRESH_TOKEN_DAYS` · `SESSION_IDLE_DAYS` · `EMAIL_HOST` · `EMAIL_PORT` · `EMAIL_USER` · `EMAIL_FROM` · `STORAGE_DRIVER` · `CLOUDINARY_CLOUD_NAME` · `VAPID_PUBLIC_KEY` · `VAPID_SUBJECT` · `LIVEKIT_URL` · `DNS_SERVERS` · `EXTRA_CORS_ORIGINS` · `ENABLE_EMAIL_VERIFICATION` · `TWILIO_FROM` · all `VITE_*`
@@ -34,7 +34,7 @@ TWILIO_AUTH_TOKEN · TWILIO_FROM · EXTRA_CORS_ORIGINS · DNS_SERVERS · REDIS_U
 - **`JWT_COOKIE_EXPIRES_DAYS`** — documented in `.env.example` but never read; the access cookie uses the hardcoded `ACCESS_COOKIE_MS` (1 h) and the refresh cookie uses `REFRESH_TOKEN_DAYS`.
 - **`ENABLE_LOGIN_OTP`** — no code path reads it. Login is single-step password auth; there is no login-OTP feature to toggle.
 
-Three vars are used in code but **missing from `server/.env.example`**: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`. `VITE_TENOR_KEY` is likewise absent from `client/.env.example`.
+Three vars are used in code but **missing from `server/.env.example`**: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`.
 
 ---
 
@@ -149,14 +149,13 @@ The adapter gets its own dedicated pub/sub pair (`getAdapterPair()`) separate fr
 | `VITE_TURN_USERNAME` 🟡 | client — `lib/iceServers.js:24` | With `VITE_TURN_URL` | `''` | Static TURN username. |
 | `VITE_TURN_CREDENTIAL` 🟡 | client — `lib/iceServers.js:25` | With `VITE_TURN_URL` | `''` | Static TURN credential — **visible in the bundle**. Prefer the endpoint below. |
 | `VITE_TURN_CREDENTIALS_URL` 🟡 | client — `lib/iceServers.js:27,31` | No | *(unset)* | Endpoint returning **time-limited** TURN credentials (one ice-server object or an array), e.g. metered.ca's `/api/v1/turn/credentials?apiKey=…`. Fetched once at startup; connections created before it resolves fall back to STUN for that session, and every subsequent call/meeting is upgraded since `ICE_SERVERS` is read at `RTCPeerConnection` creation time. **Only used when `VITE_TURN_URL` is absent** (`else if`). |
-| `VITE_TENOR_KEY` 🟡 | client — `components/chat/GifPicker.jsx:9` | No | `''` → picker explains how to enable it | Tenor (Google) GIF API key. Public in the bundle → restrict it by HTTP referrer in Google Cloud. Missing from `client/.env.example`. |
 | `import.meta.env.PROD` | client — `lib/api.js:97` | built-in | — | Guards the loud console error when a production build has no `VITE_API_URL`. |
 | `import.meta.env.DEV` | client — `hooks/useSocket.js:57` | built-in | — | Selects the direct-to-`:5000` socket connection in dev. |
 
 **Env-file layering** (Vite: `.env` < `.env.[mode]`, later wins):
 - `client/.env` — `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_DEMO_MODE`, all four `VITE_TURN_*`
 - `client/.env.development` — blank URLs + `VITE_DEMO_MODE=false`, so `npm run dev` always targets the **local** backend and never drifts onto the deployed one
-- `client/.env.production` — `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_DEMO_MODE`, `VITE_TENOR_KEY`
+- `client/.env.production` — `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_DEMO_MODE`
 
 ---
 

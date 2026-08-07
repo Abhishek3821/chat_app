@@ -124,18 +124,18 @@ export const STATUS_FEED = [
   {
     user: ME,
     isMe: true,
-    items: [{ _id: 's0', type: 'text', content: 'Shipping something beautiful today ✨', background: 'linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4)', createdAt: hrs(1), viewers: [U.u1, U.u2] }],
+    items: [{ _id: 's0', type: 'text', content: 'Shipping something beautiful today ✨', background: 'linear-gradient(135deg,#0c2c47,#2d5652)', createdAt: hrs(1), viewers: [U.u1, U.u2] }],
   },
   {
     user: U.u1,
     seenAll: false,
     items: [
-      { _id: 's1', type: 'text', content: 'Coffee & code ☕', background: 'linear-gradient(135deg,#f59e0b,#ec4899)', createdAt: hrs(2) },
-      { _id: 's2', type: 'text', content: 'New design dropping soon 👀', background: 'linear-gradient(135deg,#8b5cf6,#06b6d4)', createdAt: hrs(1) },
+      { _id: 's1', type: 'text', content: 'Coffee & code ☕', background: 'linear-gradient(135deg,#2d5652,#74beb8)', createdAt: hrs(2) },
+      { _id: 's2', type: 'text', content: 'New design dropping soon 👀', background: 'linear-gradient(135deg,#123857,#3d6a80)', createdAt: hrs(1) },
     ],
   },
-  { user: U.u3, seenAll: false, items: [{ _id: 's3', type: 'text', content: 'Golden hour 🌅', background: 'linear-gradient(135deg,#f97316,#ef4444)', createdAt: hrs(5) }] },
-  { user: U.u5, seenAll: true, items: [{ _id: 's4', type: 'text', content: 'On repeat 🎧', background: 'linear-gradient(135deg,#10b981,#06b6d4)', createdAt: hrs(8) }] },
+  { user: U.u3, seenAll: false, items: [{ _id: 's3', type: 'text', content: 'Golden hour 🌅', background: 'linear-gradient(135deg,#224747,#97d3cd)', createdAt: hrs(5) }] },
+  { user: U.u5, seenAll: true, items: [{ _id: 's4', type: 'text', content: 'On repeat 🎧', background: 'linear-gradient(135deg,#061a2a,#2d7670)', createdAt: hrs(8) }] },
 ];
 
 export const NOTIFICATIONS = [

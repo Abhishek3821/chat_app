@@ -23,6 +23,8 @@ import { getAdapterPair, redisEnabled } from './utils/redis.js';
 import { initQueue } from './utils/queue.js';
 import { registerFanoutJobs } from './utils/jobs.js';
 import { sweepStaleCalls } from './utils/callService.js';
+import { startScheduledDispatcher } from './utils/scheduledDispatcher.js';
+import { startPinSweeper } from './utils/pins.js';
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5290';
@@ -154,6 +156,15 @@ async function start() {
   // Zombie-call sweeper: closes ringing/live Call records whose clients died
   // without reporting an ending (crash, network loss on both sides).
   setInterval(() => sweepStaleCalls().catch(() => {}), 60_000).unref();
+
+  // Scheduled-message dispatcher. Claims due rows with an atomic compare-and-set,
+  // so running several instances behind a load balancer can't double-send.
+  startScheduledDispatcher();
+
+  // Pinned messages expire on the schedule their pinner chose. Reads already
+  // filter lapsed pins out, so this is about telling open clients on time and
+  // keeping the arrays from growing — not about correctness.
+  startPinSweeper();
 
   server.listen(PORT, () => {
     console.log(`\n🚀 ChatConnect API listening on http://localhost:${PORT}`);

@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
-import Workspace from '../models/Workspace.js';
 import ContactRequest from '../models/ContactRequest.js';
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
@@ -10,10 +9,12 @@ import Call from '../models/Call.js';
 import Meeting from '../models/Meeting.js';
 import Report from '../models/Report.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
+import { getWorkspaceType } from '../utils/workspaceService.js';
 import { sessionCookieOptions } from '../utils/token.js';
 import { emitToUser } from '../socket/index.js';
 import { applyPresencePrivacy } from '../utils/privacy.js';
 import { normalizePhone } from '../utils/sendSms.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
 
 const PUBLIC_FIELDS = 'name username email phone avatar bio isOnline lastSeen accountStatus createdAt';
 // PUBLIC_FIELDS plus the fields needed to evaluate presence privacy (stripped
@@ -40,8 +41,8 @@ export const searchUsers = asyncHandler(async (req, res) => {
     if (phoneTerm.startsWith('+')) orClauses.push({ phone: phoneTerm.slice(1) });
     else orClauses.push({ phone: `+${phoneTerm}` });
   }
-  const ws = await Workspace.findById(req.user.workspace).select('type');
-  if (ws && ws.type !== 'personal') {
+  const wsType = await getWorkspaceType(req.user.workspace);
+  if (wsType && wsType !== 'personal') {
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     orClauses.push({ workspace: req.user.workspace, $or: [{ email: rx }, { username: rx }, { name: rx }] });
   }
@@ -104,9 +105,11 @@ export const updateProfile = asyncHandler(async (req, res) => {
 
 // Whitelists so a client can't stuff arbitrary keys into these schemaless objects.
 const PRIVACY_KEYS = ['lastSeen', 'profilePhoto', 'about', 'status', 'readReceipts', 'groupAddPermission', 'onlineStatus'];
-const SETTINGS_KEYS = ['theme', 'accent', 'notifications', 'enterToSend'];
+const SETTINGS_KEYS = ['theme', 'accent', 'notifications', 'enterToSend', 'wallpaper'];
 const THEME_VALUES = ['light', 'dark', 'system'];
-const ACCENT_VALUES = ['indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'];
+// Keep in sync with User.settings.accent's enum and the client's ACCENTS list.
+// 'teal' is the brand palette and the default.
+const ACCENT_VALUES = ['teal', 'indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'];
 
 // PATCH /api/users/me/privacy
 export const updatePrivacy = asyncHandler(async (req, res) => {
@@ -137,6 +140,12 @@ export const updateSettings = asyncHandler(async (req, res) => {
   }
   if (req.body.accent !== undefined && !ACCENT_VALUES.includes(req.body.accent)) {
     throw new ApiError(400, 'Invalid accent color.');
+  }
+  // Wallpapers are stored as a preset id owned by the client's catalogue, never
+  // as CSS — same reasoning as setChatTheme. '' clears it.
+  if (req.body.wallpaper !== undefined) {
+    const w = String(req.body.wallpaper);
+    if (w && (w.length > 64 || !/^[a-z0-9-]+$/i.test(w))) throw new ApiError(400, 'Invalid wallpaper id.');
   }
   const user = await User.findById(req.user._id);
   const current = user.settings.toObject?.() ?? user.settings;
@@ -225,7 +234,62 @@ export const toggleChatFlag = asyncHandler(async (req, res) => {
   const id = req.params.chatId;
   const has = user[field].some((c) => String(c) === id);
   await User.findByIdAndUpdate(req.user._id, has ? { $pull: { [field]: id } } : { $addToSet: { [field]: id } });
-  res.json({ success: true, [req.params.action]: !has });
+  const value = !has;
+  // These flags are per-user, not per-chat, so no other participant should hear
+  // about them — but every one of MY OWN devices must. Without this, archiving a
+  // chat on your phone left it un-archived on your laptop until a full reload.
+  emitToUser(String(req.user._id), 'chat-flag', { chatId: id, action: req.params.action, value });
+  res.json({ success: true, [req.params.action]: value });
+});
+
+/**
+ * PUT /api/users/me/chats/:chatId/theme  { wallpaper, bubble }
+ *
+ * Per-chat wallpaper. Personal to the caller — WhatsApp semantics: changing
+ * yours doesn't touch what the other side sees, so this lives on the User doc
+ * as a sparse override list rather than on the shared Chat.
+ *
+ * Sending an empty `wallpaper` clears the override, and the row is REMOVED
+ * rather than stored blank, so `chatThemes` only ever holds real customisations
+ * and never grows one entry per chat you happen to open.
+ *
+ * The value is a preset id, not CSS: the client owns the catalogue, and letting
+ * a client store arbitrary style strings that other surfaces then render is how
+ * you get a CSS-injection vector.
+ */
+export const setChatTheme = asyncHandler(async (req, res) => {
+  const chatId = req.params.chatId;
+  // You can only theme a conversation you're actually in.
+  const isMember = await Chat.exists({ _id: chatId, 'participants.user': req.user._id });
+  if (!isMember) throw new ApiError(403, 'You are not a participant of this chat.');
+
+  const clean = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const wallpaper = clean(req.body.wallpaper, 64);
+  const bubble = clean(req.body.bubble, 32);
+  if (wallpaper && !/^[a-z0-9-]+$/i.test(wallpaper)) throw new ApiError(400, 'Invalid wallpaper id.');
+  if (bubble && !/^[a-z0-9-]+$/i.test(bubble)) throw new ApiError(400, 'Invalid bubble id.');
+
+  if (!wallpaper && !bubble) {
+    await User.findByIdAndUpdate(req.user._id, { $pull: { chatThemes: { chat: chatId } } });
+  } else {
+    // Upsert-in-place: try to update an existing row, and only push when there
+    // wasn't one. Two cheap indexed writes beat read-modify-write on the doc.
+    const updated = await User.updateOne(
+      { _id: req.user._id, 'chatThemes.chat': chatId },
+      { $set: { 'chatThemes.$.wallpaper': wallpaper, 'chatThemes.$.bubble': bubble, 'chatThemes.$.updatedAt': new Date() } }
+    );
+    if (!updated.matchedCount) {
+      await User.findByIdAndUpdate(req.user._id, {
+        $push: { chatThemes: { chat: chatId, wallpaper, bubble, updatedAt: new Date() } },
+      });
+    }
+  }
+
+  // Same reasoning as toggleChatFlag: a personal setting nobody else should
+  // hear about, but every one of MY devices should.
+  emitToUser(String(req.user._id), 'chat-theme', { chatId, wallpaper, bubble });
+  invalidateChatListCache(req.user._id); // getChats embeds the theme on each row
+  res.json({ success: true, wallpaper, bubble });
 });
 
 // The two-step PIN (app lock) itself is enabled/disabled/verified in

@@ -16,6 +16,7 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 | [**FILE_UPLOADS.md**](FILE_UPLOADS.md) | Upload endpoints, size/type limits, storage drivers, and how uploaded/protected media is accessed. |
 | [**ENVIRONMENT.md**](ENVIRONMENT.md) | Every environment variable actually read by the app — non-secret, by design. Base URL / Socket URL resolution. |
 | [**BUSINESS_LOGIC.md**](BUSINESS_LOGIC.md) | Feature flows and the business rules behind them — the "why", not just the "what". |
+| [**ARCHITECTURE_REVIEW.md**](ARCHITECTURE_REVIEW.md) | Staff-level review: current topology, findings ranked by blast radius, monolith→services plan, queue design, fault tolerance, and a triggered roadmap. |
 | [`../postman/`](../postman/) | A Postman collection (159 requests) + environment, generated from `API.md`. |
 
 ## Quick start for a new integration

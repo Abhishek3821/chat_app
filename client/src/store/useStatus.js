@@ -24,10 +24,15 @@ export const useStatus = create((set, get) => ({
     if (get().feed.length === 0) set({ loading: true });
     try {
       const { data } = await api.get('/status');
-      const feed = (data.feed || []).map((e) => ({
-        ...e,
-        isMe: String(e.user._id) === String(me?._id),
-      }));
+      // Drop malformed entries HERE rather than defending in every consumer:
+      // StatusPage reads entry.user.* and entry.items[0].* directly, so an entry
+      // with a null user (owner removed) or an empty items array would throw
+      // during render and trip the error boundary. Also note the old code did
+      // `e.user._id` inside the map, so ONE bad entry threw and aborted the whole
+      // refresh, silently leaving the previous feed on screen.
+      const feed = (Array.isArray(data.feed) ? data.feed : [])
+        .filter((e) => e && e.user && e.user._id && Array.isArray(e.items) && e.items.length > 0)
+        .map((e) => ({ ...e, isMe: String(e.user._id) === String(me?._id) }));
       // Put my own status first.
       feed.sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0));
       set({ feed });

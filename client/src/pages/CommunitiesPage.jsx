@@ -11,7 +11,7 @@ import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
 import { useCommunities } from '@/store/useCommunities';
 import { useChat } from '@/store/useChat';
-import { gradientFor, cn } from '@/lib/utils';
+import { gradientFor, cn, PAGE_SHELL } from '@/lib/utils';
 
 export default function CommunitiesPage() {
   const { communities, active, load, open, create, join, addGroup, leave } = useCommunities();
@@ -39,18 +39,20 @@ export default function CommunitiesPage() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
-      <div className="mx-auto max-w-5xl p-4 md:p-6">
+      {/* The list of communities is a card grid that benefits from the full width;
+          the detail view re-clamps itself to a readable column (see CommunityDetail). */}
+      <div className={PAGE_SHELL}>
         {view === 'list' ? (
           <>
             <motion.header
               initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}
               className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
             >
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-2xl font-bold tracking-tight md:text-3xl"><span className="gradient-text">Communities</span></h1>
                 <p className="mt-1 text-sm text-content-muted">Bring related groups together under one roof, with an announcement channel everyone sees.</p>
               </div>
-              <div className="flex shrink-0 gap-2">
+              <div className="flex flex-wrap gap-2 sm:shrink-0">
                 <Button variant="outline" size="md" onClick={() => setModal('join')}><UserPlus size={17} /> Join</Button>
                 <Button size="md" onClick={() => setModal('create')}><Plus size={18} /> New community</Button>
               </div>
@@ -66,7 +68,7 @@ export default function CommunitiesPage() {
                 />
               </div>
             ) : (
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {communities.map((c) => (
                   <motion.button
                     key={c._id}
@@ -162,7 +164,7 @@ function CommunityDetail({ community, onBack, onOpenGroup, onAddGroup, onLeave }
       </div>
 
       {community.isAdmin && community.inviteCode && (
-        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border bg-surface-2/60 p-3">
+        <div className="mt-4 flex items-center gap-3 rounded-2xl neu-inset bg-surface-2/60 p-3">
           <span className="text-xs font-medium text-content-muted">Invite code</span>
           <code className="flex-1 truncate rounded-lg bg-surface px-3 py-1.5 font-mono text-sm text-content">{community.inviteCode}</code>
           <Button variant="outline" size="sm" onClick={copyInvite}><Copy size={14} /> Copy</Button>

@@ -32,7 +32,9 @@ export const useMeetings = create((set, get) => ({
     }
     const { data } = await api.post('/meetings', { title, description, startAt, durationMinutes, type, recurrence, participants, timezone, settings, inviteEmails });
     set((s) => ({ meetings: [data.meeting, ...s.meetings].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)) }));
-    return data.meeting;
+    // invitesQueued comes from the server (validated + de-duplicated), so the UI
+    // reports what was really mailed rather than what was typed.
+    return { ...data.meeting, invitesQueued: data.invitesQueued ?? 0 };
   },
 
   rsvp: async (id, response) => {

@@ -76,47 +76,59 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
   // ── Search mode: replace the header with a live in-chat message filter ──
   if (searchOpen) {
     return (
-      <header className="frost flex h-16 shrink-0 items-center gap-2 border-b border-border/70 px-3 sm:px-4">
-        <Search size={18} className="shrink-0 text-content-muted" />
-        <input
-          autoFocus
-          value={search || ''}
-          onChange={(e) => onSearch?.(e.target.value)}
-          placeholder={`Search messages${d.name ? ` with ${d.name}` : ''}`}
-          className="min-w-0 flex-1 bg-transparent text-sm text-content outline-none placeholder:text-content-muted"
-        />
-        <button onClick={closeSearch} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-content-muted hover:bg-content/5">
-          <X size={18} />
-        </button>
+      <header className="frost neu-rail-bottom relative z-10 flex h-16 shrink-0 items-center gap-2 border-b border-border/70 px-2 sm:px-4">
+        <label className="neu-inset flex min-w-0 flex-1 items-center gap-2 rounded-full bg-surface-2 px-3.5 py-2">
+          <Search size={17} className="shrink-0 text-content-muted" />
+          <input
+            autoFocus
+            value={search || ''}
+            onChange={(e) => onSearch?.(e.target.value)}
+            placeholder={`Search messages${d.name ? ` with ${d.name}` : ''}`}
+            className="min-w-0 flex-1 bg-transparent text-sm text-content outline-none placeholder:text-content-muted"
+          />
+        </label>
+        <HeaderBtn icon={X} onClick={closeSearch} />
       </header>
     );
   }
 
   return (
-    <header className="frost flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-3 sm:px-4">
-      <button onClick={() => setChatListOpen(true)} className="grid h-9 w-9 place-items-center rounded-xl text-content-muted hover:bg-content/5 md:hidden">
-        <ArrowLeft size={20} />
-      </button>
+    /* z-10 + the rail bevel: the header has to sit ABOVE the conversation so
+       its lift shadow falls onto the first message instead of under it. */
+    <header className="frost neu-rail-bottom relative z-10 flex h-16 shrink-0 items-center gap-2 border-b border-border/70 px-2 sm:gap-3 sm:px-4">
+      <HeaderBtn icon={ArrowLeft} onClick={() => setChatListOpen(true)} className="md:hidden" />
 
-      <button onClick={toggleRightPanel} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button onClick={toggleRightPanel} className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl px-1 py-1 text-left transition-colors hover:bg-content/5 sm:gap-3">
         <Avatar src={d.avatar} name={d.name} size="md" online={d.isGroup ? undefined : isOnline} />
         <div className="min-w-0">
-          <p className="truncate font-semibold text-content">{d.name}</p>
-          <p className="truncate text-xs text-content-muted">{status}</p>
+          <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-content sm:text-base">
+            <span className="truncate">{d.name}</span>
+            {chat?.e2ee?.enabled && (
+              // The lock belongs next to the name, not buried in the info panel:
+              // whether a conversation is encrypted has to be visible while you
+              // are typing into it.
+              <Lock size={13} className="shrink-0 text-brand-500" aria-label="End-to-end encrypted" />
+            )}
+          </p>
+          <p className="truncate text-xs text-content-muted">
+            {chat?.e2ee?.enabled ? 'End-to-end encrypted' : status}
+          </p>
         </div>
       </button>
 
-      <div className="relative flex items-center gap-1">
+      <div className="relative flex shrink-0 items-center gap-0.5 sm:gap-1">
         <HeaderBtn icon={Phone} onClick={() => startCall({ type: 'audio', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
         <HeaderBtn icon={Video} onClick={() => startCall({ type: 'video', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
         <HeaderBtn icon={Search} onClick={openSearch} className="hidden sm:grid" />
-        <HeaderBtn icon={PanelRight} onClick={toggleRightPanel} className="hidden lg:grid" />
+        {/* Inline right panel only exists from xl up (see RightPanel) — below that
+            the panel is a drawer, reachable via the header/menu instead. */}
+        <HeaderBtn icon={PanelRight} onClick={toggleRightPanel} className="hidden xl:grid" />
         <HeaderBtn icon={MoreVertical} onClick={() => setMenuOpen((v) => !v)} />
 
         {menuOpen && (
           <>
             <button className="fixed inset-0 z-10 cursor-default" onClick={() => setMenuOpen(false)} aria-label="Close menu" />
-            <div className="glass-strong absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-2xl py-1">
+            <div className="glass-strong absolute right-0 top-12 z-20 w-[min(13rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl py-1">
               <MenuRow icon={Info} label={d.isGroup ? 'Group info' : 'Contact info'} onClick={() => { toggleRightPanel(); setMenuOpen(false); }} />
               <MenuRow icon={Search} label="Search messages" onClick={openSearch} />
               <MenuRow icon={Lock} label="Lock chat" onClick={handleLock} />
@@ -130,11 +142,15 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
   );
 }
 
+/** Round, extruded control that presses in when held. */
 function HeaderBtn({ icon: Icon, onClick, className }) {
   return (
     <button
       onClick={onClick}
-      className={cn('ring-brand grid h-10 w-10 place-items-center rounded-xl text-content-muted transition-colors hover:bg-content/5 hover:text-content', className)}
+      className={cn(
+        'neu-raised-sm neu-press ring-brand grid h-11 w-11 shrink-0 place-items-center rounded-full bg-surface text-content-muted hover:text-content sm:h-10 sm:w-10',
+        className
+      )}
     >
       <Icon size={19} />
     </button>
@@ -143,8 +159,8 @@ function HeaderBtn({ icon: Icon, onClick, className }) {
 
 function MenuRow({ icon: Icon, label, danger, onClick }) {
   return (
-    <button onClick={onClick} className={cn('flex w-full items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-content/5', danger ? 'text-red-500' : 'text-content')}>
-      <Icon size={16} /> {label}
+    <button onClick={onClick} className={cn('flex w-full items-center gap-2.5 px-3 py-3 text-left text-sm transition-colors hover:bg-content/5 sm:py-2.5', danger ? 'text-red-500' : 'text-content')}>
+      <Icon size={16} className="shrink-0" /> {label}
     </button>
   );
 }

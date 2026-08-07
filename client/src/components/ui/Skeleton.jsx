@@ -1,7 +1,9 @@
 import { cn } from '../../lib/utils';
 
+/** A placeholder is a hole in the page, so it reads as one: pressed into the
+ *  surface rather than a flat grey block sitting on top of it. */
 export function Skeleton({ className }) {
-  return <div className={cn('shimmer rounded-lg bg-content/10', className)} />;
+  return <div className={cn('shimmer neu-inset-sm rounded-lg bg-surface-2', className)} />;
 }
 
 /** Chat-list row skeleton. Sized to match the real row (Avatar size="md",
@@ -24,10 +26,11 @@ export function ChatRowSkeleton() {
 /** Message bubble skeletons. */
 export function MessageSkeleton() {
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-4 p-4 sm:p-6">
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className={cn('flex', i % 2 ? 'justify-end' : 'justify-start')}>
-          <Skeleton className={cn('h-12 rounded-2xl', i % 2 ? 'w-52' : 'w-64')} />
+          {/* Clamped: the flat 13/16rem widths overflowed a 320px column. */}
+          <Skeleton className={cn('h-12 rounded-2xl', i % 2 ? 'w-[min(13rem,70%)]' : 'w-[min(16rem,85%)]')} />
         </div>
       ))}
     </div>

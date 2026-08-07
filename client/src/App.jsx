@@ -1,9 +1,10 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast, useToasterStore } from 'react-hot-toast';
 
 import { useUI } from './store/useUI';
 import { useAuth } from './store/useAuth';
+import { useE2EE } from './store/useE2EE';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import LockScreen from './components/LockScreen.jsx';
 import BusyCallBanner from './components/overlays/BusyCallBanner.jsx';
@@ -28,10 +29,37 @@ const CommunitiesPage = lazy(() => import('./pages/CommunitiesPage.jsx'));
 const BusinessPage = lazy(() => import('./pages/BusinessPage.jsx'));
 const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage.jsx'));
 const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
+const StarredPage = lazy(() => import('./pages/StarredPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 const DevelopersPage = lazy(() => import('./pages/DevelopersPage.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const MeetingRoom = lazy(() => import('./pages/MeetingRoom.jsx'));
+const JoinInvite = lazy(() => import('./pages/JoinInvite.jsx'));
+
+/**
+ * Caps how many toasts can be on screen at once.
+ *
+ * Almost every mutation in the app confirms itself with a toast, and the
+ * settings screens fire one PER toggle — so a normal "change a few things"
+ * session stacked five or six of them in the same corner, each hanging around
+ * for seconds. Nothing was broken; there was just no ceiling. Oldest-first
+ * dismissal keeps the newest (the one that matches what you just did) visible.
+ *
+ * Done here rather than by passing an `id` at ~100 call sites: one rule, and it
+ * covers toasts fired from stores and socket handlers too.
+ */
+const MAX_VISIBLE_TOASTS = 2;
+
+function ToastLimiter() {
+  const { toasts } = useToasterStore();
+  useEffect(() => {
+    toasts
+      .filter((t) => t.visible)
+      .slice(MAX_VISIBLE_TOASTS)
+      .forEach((t) => toast.dismiss(t.id));
+  }, [toasts]);
+  return null;
+}
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -55,7 +83,7 @@ function AdminRoute({ children }) {
 
 function SplashScreen() {
   return (
-    <div className="grid h-screen place-items-center bg-[rgb(var(--app-bg))]">
+    <div className="grid h-[100dvh] place-items-center bg-[rgb(var(--app-bg))]">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-brand-500/30 border-t-brand-500" />
     </div>
   );
@@ -65,6 +93,7 @@ export default function App() {
   const  theme = useUI((s) => s.theme);
   const  accent = useUI((s) => s.accent);
   const init = useAuth((s) => s.init);
+  const userId = useAuth((s) => s.user?._id);
   const userSettings = useAuth((s) => s.user?.settings);
   const location = useLocation();
 
@@ -73,7 +102,9 @@ export default function App() {
   useEffect(() => {
     if (!userSettings) return;
     if (userSettings.theme) useUI.getState().setTheme(userSettings.theme);
-    useUI.getState().setAccent(userSettings.accent || 'indigo');
+    // Fall back to the brand palette, not the old indigo — otherwise every
+    // signed-in account with no saved accent gets forced off the new theme.
+    useUI.getState().setAccent(userSettings.accent || 'teal');
   }, [userSettings?.theme, userSettings?.accent]);
 
   // Apply the theme to <html>, resolving 'system' against the OS (and reacting to
@@ -107,6 +138,15 @@ export default function App() {
     init();
   }, [init]);
 
+  // Encryption follows the signed-in account: pick up this device's stored
+  // private key (or learn that one needs unlocking) on sign-in, and wipe every
+  // key from memory on sign-out so the next account on this browser starts
+  // clean and can never touch the previous one's messages.
+  useEffect(() => {
+    if (userId) useE2EE.getState().init();
+    else useE2EE.getState().reset();
+  }, [userId]);
+
   return (
     <ErrorBoundary resetKey={location.pathname}>
       {/* Route swaps are instant + reliable; page transitions live in AppLayout
@@ -132,6 +172,25 @@ export default function App() {
             }
           />
 
+          {/* Invite landing pages (QR codes / shared links). Protected but outside
+              the shell: they resolve the invite, then redirect into the app. */}
+          <Route
+            path="/invite/g/:code"
+            element={
+              <ProtectedRoute>
+                <JoinInvite kind="group" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/invite/u/:code"
+            element={
+              <ProtectedRoute>
+                <JoinInvite kind="user" />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Protected app shell */}
           <Route
             element={
@@ -149,6 +208,7 @@ export default function App() {
             <Route path="/business" element={<BusinessPage />} />
             <Route path="/broadcasts" element={<BroadcastsPage />} />
             <Route path="/contacts" element={<ContactsPage  />} />
+            <Route path="/starred" element={<StarredPage />} />
             <Route
               path="/developers"
               element={
@@ -175,13 +235,28 @@ export default function App() {
       {/* Someone called while we were on another call / in a meeting. */}
       <BusyCallBanner />
 
+
+      <ToastLimiter />
       <Toaster
         position="top-center"
+        // Settings fires a confirmation per toggle (theme, accent, wallpaper,
+        // presence, every notification switch…), so changing three things in a
+        // row used to pile three 3.2s toasts on top of each other in the same
+        // spot. `gutter` guarantees visible separation between whatever IS
+        // stacked, and the container clears the 64px top bar instead of sitting
+        // on it. ToastLimiter above caps how many can stack at once.
+        gutter={10}
+        containerStyle={{ top: 76 }}
         toastOptions={{
           className: '!bg-surface !text-content !border !border-border !shadow-soft-lg !rounded-2xl',
-          duration: 3200,
-          success: { iconTheme: { primary: '#06b6d4', secondary: '#fff' } },
-          error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
+          duration: 2600,
+          // Success rides the accent (via the same token the primary surfaces
+          // use, so it recolors with the picker instead of staying teal); error
+          // stays red because that's a semantic signal, not a brand colour.
+          // `secondary` is the glyph punched out of the icon, so it tracks the
+          // toast's own surface.
+          success: { iconTheme: { primary: 'rgb(var(--accent-fill))', secondary: 'rgb(var(--surface))' } },
+          error: { iconTheme: { primary: '#ef4444', secondary: 'rgb(var(--surface))' } },
         }}
       />
     </ErrorBoundary>

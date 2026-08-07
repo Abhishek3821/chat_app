@@ -42,7 +42,7 @@ export default function ForgotPassword() {
   };
 
   return (
-    <motion.div {...pageMotion} className="flex min-h-screen w-full">
+    <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase
         eyebrow="Account recovery"
         headline={
@@ -68,7 +68,7 @@ export default function ForgotPassword() {
               transition={{ duration: 0.3 }}
             >
               <motion.div variants={rise} className="mb-8 flex justify-center lg:justify-start">
-                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
+                <span className="grid h-14 w-14 place-items-center rounded-2xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
                   <KeyRound size={26} />
                 </span>
               </motion.div>
@@ -105,9 +105,10 @@ export default function ForgotPassword() {
                 </Button>
               </form>
 
+              {/* mt-6 → mt-3 + py-3: same 24px visual gap, but a 44px hit area. */}
               <Link
                 to="/login"
-                className="ring-brand mt-6 inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-content-muted transition-colors hover:text-content"
+                className="ring-brand mt-3 inline-flex items-center gap-1.5 rounded-lg py-3 text-sm font-semibold text-content-muted transition-colors hover:text-content"
               >
                 <ArrowLeft size={16} /> Back to sign in
               </Link>
@@ -125,7 +126,7 @@ export default function ForgotPassword() {
                 initial={{ scale: 0.6, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
-                className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-500"
+                className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
               >
                 <MailCheck size={30} />
               </motion.div>
@@ -133,10 +134,10 @@ export default function ForgotPassword() {
               <h2 className="mt-6 font-display text-2xl font-extrabold tracking-tight text-content">Check your inbox</h2>
               <p className="mt-2 text-sm leading-relaxed text-content-muted">
                 We sent a reset link to{' '}
-                <span className="font-semibold text-content">{email.trim()}</span>. Follow it to choose a new password.
+                <span className="break-all font-semibold text-content">{email.trim()}</span>. Follow it to choose a new password.
               </p>
 
-              <div className="mt-7 rounded-2xl border border-border bg-surface-2/60 px-4 py-3 text-left text-xs text-content-muted">
+              <div className="mt-7 rounded-2xl neu-inset bg-surface-2/60 px-4 py-3 text-left text-xs text-content-muted">
                 Didn&apos;t get it? Check your spam folder, or resend the link below. Links expire after 30 minutes.
               </div>
 

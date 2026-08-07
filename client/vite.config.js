@@ -20,22 +20,39 @@ export default defineConfig({
         // Only split off leaf libraries (they depend on React but nothing
         // depends back on them), so no circular chunk is created. React stays
         // in the main vendor chunk.
+        // ALLOWLIST, never a blanket fallback.
+        //
+        // A manualChunks assignment OVERRIDES Rollup's automatic chunking for
+        // dynamically-imported modules, so naming a chunk for a library turns it
+        // into a static chunk in the entry graph — which index.html then
+        // modulepreloads on every page load, silently defeating `lazy()`. That
+        // has now bitten this project twice: once with emoji-picker-react, and
+        // again with recharts (~102 kB gzip of admin-only charting eagerly
+        // preloaded for every user), plus ~32 kB of its transitive deps that the
+        // old `return 'vendor'` fallback swept in.
+        //
+        // So: only libraries that are genuinely part of the FIRST paint get a
+        // named chunk. Everything else returns undefined and Rollup places it
+        // with whichever async chunk actually imports it. Adding a new heavy,
+        // lazily-used dependency now needs no config change at all.
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory-vendor')) return 'charts';
+
+          // Eager: imported by the shell (router, layout, stores, HTTP, sockets).
+          // react/react-dom must share one chunk — two copies breaks hooks.
+          if (
+            /node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(id) ||
+            /node_modules\/(axios|zustand|socket\.io-client|engine\.io-client|date-fns|clsx|tailwind-merge|lucide-react|react-hot-toast)\//.test(id)
+          ) {
+            return 'vendor';
+          }
+          // framer-motion animates the shell itself, so it is first-paint work.
           if (id.includes('framer-motion')) return 'motion';
-          // LiveKit is only used inside the (lazy) meeting room — keep it out of
-          // the eager vendor bundle so it loads only when someone joins a meeting.
-          if (id.includes('livekit-client') || id.includes('@livekit')) return 'livekit';
-          // emoji-picker-react is only ever reached via a dynamic import() (the
-          // emoji button toggle, not on mount) — returning undefined here lets
-          // Rollup fall through to its OWN automatic splitting for dynamically-
-          // imported modules, giving it a separate async chunk. Forcing it into
-          // 'vendor' (the blanket rule below) would silently defeat the lazy()
-          // call entirely, since a manualChunks assignment overrides Rollup's
-          // dynamic-import chunking.
-          if (id.includes('emoji-picker-react')) return undefined;
-          return 'vendor';
+
+          // Everything else (recharts/d3, livekit, emoji-picker-react, qrcode, …)
+          // is only reachable through a lazy route or a dynamic import — let
+          // Rollup keep it in an async chunk.
+          return undefined;
         },
       },
     },

@@ -60,11 +60,11 @@ export default function PinResetForm({ onDone, onCancel }) {
   };
 
   const inputCls =
-    'w-full rounded-xl border border-border bg-surface-2 px-3 py-2.5 text-center text-content outline-none focus:border-brand-500';
+    'ring-brand w-full rounded-2xl neu-inset bg-surface-2 px-3 py-2.5 text-center text-content';
 
   return (
     <form onSubmit={submit} className="text-center">
-      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-brand-500/10 text-brand-500">
+      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
         <MailCheck size={22} />
       </span>
       <p className="text-sm font-semibold text-content">Reset your PIN</p>
