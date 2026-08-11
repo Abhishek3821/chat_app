@@ -108,7 +108,7 @@ export function useSocket() {
     const { appendMessage, setTyping } = useChat.getState();
 
     socket.on('receive-message', ({ chatId, message }) => {
-      // ingestMessage, not appendMessage: an encrypted message has to be
+      // ingestMessage keeps the store the single place that normalises an
       // decrypted before it enters the store, and that step is async.
       useChat.getState().ingestMessage(chatId, message);
       const chat = useChat.getState();
@@ -164,7 +164,6 @@ export function useSocket() {
     // Multi-device: a pin/archive/mute performed on another device of mine.
     socket.on('chat-flag', ({ chatId, action, value }) => useChat.getState().applyChatFlag(chatId, action, value));
     // Encryption turned on/off (by me elsewhere, or by another participant).
-    socket.on('chat-e2ee', ({ chatId, e2ee }) => useChat.getState().applyChatE2EE(chatId, e2ee));
     // Wallpaper changed on another of my devices.
     socket.on('chat-theme', ({ chatId, wallpaper, bubble }) => useChat.getState().applyChatTheme(chatId, wallpaper, bubble));
 

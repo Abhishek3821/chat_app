@@ -1,20 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward, Globe, Mail, X, Plus } from 'lucide-react';
+import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward, Mail, X, Plus } from 'lucide-react';
 import Modal from '../ui/Modal';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
 import { Input, Field, Textarea } from '../ui/Input';
 import Switch from '../ui/Switch';
 import { Chip } from '../ui/Badge';
-import E2EESetupModal from './E2EESetupModal';
 
-// Full IANA zone list where the browser supports it, else a sensible short list.
-const TIMEZONES =
-  typeof Intl.supportedValuesOf === 'function'
-    ? Intl.supportedValuesOf('timeZone')
-    : ['UTC', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'];
+// Scheduling no longer asks for a zone — meetings are created in whatever zone
+// the scheduler is in, which is what they typed the time in. Still sent to the
+// server, which needs it to render invitation emails and the .ics attachment.
 const BROWSER_TZ = (() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 })();
@@ -42,9 +39,6 @@ export default function ModalHost() {
       <ForwardMessageModal open={activeModal === 'forwardMessage'} onClose={closeModal} message={modalData?.message} />
       {/* Mounted only while open: it holds passphrase state, which should not
           sit in a live component between uses. */}
-      {activeModal === 'e2eeSetup' && (
-        <E2EESetupModal open onClose={closeModal} chatId={modalData?.chatId} />
-      )}
     </>
   );
 }
@@ -171,7 +165,7 @@ function CreateGroupModal({ open, onClose }) {
   );
 }
 
-const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none', timezone: BROWSER_TZ });
+const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none' });
 const EMPTY_SETTINGS = { joinAnytime: true, muteOnEntry: false, autoRecord: false, askToJoin: true };
 
 function ScheduleMeetingModal({ open, onClose }) {
@@ -225,7 +219,11 @@ function ScheduleMeetingModal({ open, onClose }) {
         startAt: startAt.toISOString(),
         type: form.type,
         recurrence: form.recurrence,
-        timezone: form.timezone,
+        // The picker is gone, but the value is NOT cosmetic: the server formats
+        // the invitation email and the .ics attachment with it, and it defaults
+        // to UTC when absent — which would tell invitees the wrong hour. The
+        // time above was typed in the scheduler's own zone, so send that.
+        timezone: BROWSER_TZ,
         participants: invitees,
         inviteEmails,
         settings,
@@ -257,18 +255,6 @@ function ScheduleMeetingModal({ open, onClose }) {
           <Field label="Date"><Input type="date" icon={Calendar} value={form.date} onChange={set('date')} /></Field>
           <Field label="Time"><Input type="time" icon={Clock} value={form.time} onChange={set('time')} /></Field>
         </div>
-        <Field label="Time zone">
-          <div className="relative">
-            <Globe className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-content-muted" size={16} />
-            <select
-              value={form.timezone}
-              onChange={set('timezone')}
-              className="ring-brand h-11 w-full appearance-none rounded-xl neu-inset bg-surface-2 pl-10 pr-3 text-sm text-content"
-            >
-              {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>))}
-            </select>
-          </div>
-        </Field>
         <Field label="Type">
           <div className="flex gap-2">
             <TypeChip active={form.type === 'video'} onClick={() => setForm((f) => ({ ...f, type: 'video' }))} icon={Video} label="Video" />

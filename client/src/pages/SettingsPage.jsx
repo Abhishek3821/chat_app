@@ -49,7 +49,6 @@ import { useUI, ACCENTS } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useApiKeys } from '@/store/useApiKeys';
 import { useWorkspace } from '@/store/useWorkspace';
-import { useE2EE } from '@/store/useE2EE';
 import { WALLPAPERS } from '@/lib/wallpapers';
 import { DEMO_MODE } from '@/lib/api';
 import { ME } from '@/lib/demoData';
@@ -168,151 +167,6 @@ function DetailRow({ icon: Icon, label, value }) {
 }
 
 /* ── Privacy ──────────────────────────────────────────────────── */
-/**
- * End-to-end encryption, from the account's point of view.
- *
- * Encryption is per-chat (you turn it on for a conversation), but the identity
- * behind it is per-account — so this is where you create it, unlock it on a new
- * device, change the passphrase, or forget the key on this machine.
- */
-function EncryptionSection() {
-  const status = useE2EE((s) => s.status);
-  const busy = useE2EE((s) => s.busy);
-  const changePassphrase = useE2EE((s) => s.changePassphrase);
-  const lockDevice = useE2EE((s) => s.lockDevice);
-  const openModal = useUI((s) => s.openModal);
-
-  const [changing, setChanging] = useState(false);
-  const [current, setCurrent] = useState('');
-  const [next, setNext] = useState('');
-
-  const submitChange = async (e) => {
-    e.preventDefault();
-    try {
-      await changePassphrase(current, next);
-      toast.success('Passphrase changed.');
-      setChanging(false);
-      setCurrent('');
-      setNext('');
-    } catch (err) {
-      toast.error(err.message || 'Could not change the passphrase.');
-    }
-  };
-
-  const copy = {
-    unsupported: {
-      tone: 'warn',
-      title: 'Not available in this browser',
-      body: 'End-to-end encryption needs a secure connection (https) and the Web Crypto API. Open the app over https to use it.',
-    },
-    none: {
-      tone: 'idle',
-      title: 'Not set up',
-      body: 'Create an encryption key to start locking individual conversations. Message text is then sealed on your device — the server stores ciphertext it cannot read.',
-    },
-    locked: {
-      tone: 'warn',
-      title: 'Locked on this device',
-      body: 'Your account has an encryption key, but this device doesn’t hold it yet. Enter your passphrase to read encrypted chats here.',
-    },
-    unlocked: {
-      tone: 'ok',
-      title: 'Active',
-      body: 'This device can read your encrypted chats. Turn encryption on for a conversation from its info panel.',
-    },
-  }[status] || { tone: 'idle', title: 'Checking…', body: 'Looking up your encryption status.' };
-
-  return (
-    <Section title="End-to-end encryption" description="Lock individual conversations so only the people in them can read the messages.">
-      <div
-        className={cn(
-          'rounded-2xl border p-4',
-          copy.tone === 'ok' && 'border-emerald-500/30 bg-emerald-500/5',
-          copy.tone === 'warn' && 'border-amber-500/30 bg-amber-500/5',
-          copy.tone === 'idle' && 'border-border bg-surface-2/60'
-        )}
-      >
-        <div className="flex items-start gap-3">
-          <span
-            className={cn(
-              'grid h-9 w-9 shrink-0 place-items-center rounded-xl',
-              copy.tone === 'ok' ? 'bg-brand-gradient text-white shadow-glow' : 'bg-content/10 text-content-muted'
-            )}
-          >
-            <Lock size={17} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-content">{copy.title}</p>
-            <p className="mt-1 text-xs leading-relaxed text-content-muted">{copy.body}</p>
-
-            {status === 'unlocked' && (
-              <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
-                Message <b>text</b> is end-to-end encrypted. Attachments are not yet — and encrypted chats can’t be
-                searched from the header search, only from inside the chat.
-              </p>
-            )}
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {status === 'none' && (
-                <Button size="sm" onClick={() => openModal('e2eeSetup')}>
-                  <Lock size={15} /> Set up encryption
-                </Button>
-              )}
-              {status === 'locked' && (
-                <Button size="sm" onClick={() => openModal('e2eeSetup')}>
-                  <KeyRound size={15} /> Unlock on this device
-                </Button>
-              )}
-              {status === 'unlocked' && (
-                <>
-                  <Button size="sm" variant="outline" onClick={() => setChanging((v) => !v)}>
-                    <KeyRound size={15} /> Change passphrase
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      if (!window.confirm('Forget the encryption key on this device? You’ll need your passphrase to read encrypted chats here again.')) return;
-                      await lockDevice();
-                      toast.success('Encryption locked on this device.');
-                    }}
-                  >
-                    <LogOut size={15} /> Lock this device
-                  </Button>
-                </>
-              )}
-            </div>
-
-            {changing && (
-              <form onSubmit={submitChange} className="mt-3 space-y-2.5 border-t border-border pt-3">
-                <Input
-                  type="password"
-                  icon={KeyRound}
-                  autoComplete="current-password"
-                  placeholder="Current passphrase"
-                  value={current}
-                  onChange={(e) => setCurrent(e.target.value)}
-                />
-                <Input
-                  type="password"
-                  icon={KeyRound}
-                  autoComplete="new-password"
-                  placeholder="New passphrase (8+ characters)"
-                  value={next}
-                  onChange={(e) => setNext(e.target.value)}
-                />
-                <Button type="submit" size="sm" disabled={busy || next.length < 8}>
-                  {busy ? 'Saving…' : 'Save new passphrase'}
-                </Button>
-              </form>
-            )}
-          </div>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
 function PrivacyPanel() {
   const [privacy, setPrivacy] = useState({
     lastSeen: true,
@@ -329,7 +183,6 @@ function PrivacyPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-      <EncryptionSection />
 
       <Section title="Visibility" description="Control what other people can see about you.">
         <Rows>
@@ -1107,6 +960,7 @@ function PinInput({ value, onChange, placeholder, autoComplete = 'off' }) {
 function AccountPanel() {
   const { logout, changePassword: doChangePassword, deleteAccount, exportMyData, enableTwoStep, disableTwoStep, changeTwoStepPin, listSessions, revokeSession, revokeOtherSessions } = useAuth();
   const twoStepEnabled = useAuth((s) => s.user?.twoStepEnabled);
+  const accountEmail = useAuth((s) => s.user?.email || '');
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1239,6 +1093,24 @@ function AccountPanel() {
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
       <Section title="Change password" description="Use at least 8 characters with a mix of letters and numbers.">
         <form onSubmit={changePassword} className="mt-2 space-y-4">
+          {/* Anchor for the browser's password manager.
+              Without a username field inside a form that has current-password +
+              new-password inputs, Chrome/Edge look OUTSIDE the form for one and
+              fill the nearest preceding text input — which is the global search
+              box in the top bar. That's why opening Settings → Account used to
+              drop your email into the search field and run a search.
+              It must be `sr-only`, NOT hidden/display:none: password managers
+              skip fields they consider invisible, and we'd be back to square one. */}
+          <input
+            type="text"
+            name="username"
+            autoComplete="username"
+            value={accountEmail}
+            readOnly
+            tabIndex={-1}
+            aria-hidden="true"
+            className="sr-only"
+          />
           <Field label="Current password">
             <Input icon={Lock} type="password" autoComplete="current-password" placeholder="••••••••" value={pw.current} onChange={setField('current')} />
           </Field>

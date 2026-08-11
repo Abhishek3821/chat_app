@@ -1,12 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Unlock, Palette } from 'lucide-react';
+import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Palette } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
 import { ToggleRow } from '../ui/Switch';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
-import { useE2EE } from '../../store/useE2EE';
 import { useContacts } from '../../store/useContacts';
 import { WALLPAPERS } from '../../lib/wallpapers';
 import { useState } from 'react';
@@ -60,70 +59,7 @@ export default function RightPanel({ chat, currentUser }) {
   };
 
   /* ── Encryption ── */
-  const e2eeStatus = useE2EE((s) => s.status);
-  const enableForChat = useE2EE((s) => s.enableForChat);
-  const disableForChat = useE2EE((s) => s.disableForChat);
-  const e2eeBusy = useE2EE((s) => s.busy);
   const openModal = useUI((s) => s.openModal);
-  const encrypted = Boolean(chat?.e2ee?.enabled);
-
-  const toggleEncryption = async () => {
-    if (DEMO_MODE) return toast('Encryption is available in the full app.');
-    if (e2eeStatus === 'unsupported') {
-      return toast.error('This browser can’t do end-to-end encryption (it needs a secure connection).');
-    }
-    if (e2eeStatus !== 'unlocked') {
-      // No identity yet, or locked on this device — send them through setup
-      // first; there's nothing to seal a chat key with until that's done.
-      return openModal('e2eeSetup', { chatId: chat._id });
-    }
-    try {
-      if (encrypted) {
-        if (!window.confirm('Turn off encryption for this chat? New messages will be readable by the server again. Messages already encrypted stay encrypted.')) return;
-        await disableForChat(chat._id);
-        toast.success('Encryption turned off for new messages.');
-      } else {
-        await enableForChat(chat._id);
-        toast.success('This chat is now end-to-end encrypted 🔒');
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.message || err.message || 'Could not change encryption.');
-    }
-  };
-
-  /* ── Wallpaper ── */
-  const setChatTheme = useChat((s) => s.setChatTheme);
-  const theme = useUI((s) => s.theme);
-  const isDark =
-    theme === 'dark' ||
-    (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
-
-  // Was `${origin}/join/${chat._id}` — a dead link twice over: there is no /join
-  // route, and the server's join endpoint keys off `inviteCode`, not the chat id.
-  const inviteUrl = inviteUrlForGroup(chat?.inviteCode);
-
-  const copyInvite = async () => {
-    if (!inviteUrl) {
-      toast.error('This group has no invite code yet.');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      toast.success('Invite link copied');
-    } catch {
-      toast(inviteUrl);
-    }
-  };
-
-  const handleDeleteChat = async () => {
-    const group = chat?.isGroup;
-    if (!window.confirm(group ? 'Leave and remove this group from your list?' : 'Delete this conversation?')) return;
-    await deleteChat(chat._id);
-    toast.success(group ? 'You left the group' : 'Chat deleted');
-    setRightPanel(false);
-    navigate('/');
-  };
-
   const handleMute = (v) => {
     setMuted(v);
     toggleMuteChat(chat._id); // persists to the account
@@ -186,37 +122,6 @@ export default function RightPanel({ chat, currentUser }) {
             <ToggleRow title="Mute notifications" icon={Bell} checked={muted} onChange={handleMute} />
           </div>
         </div>
-
-        {/* End-to-end encryption */}
-        <Section title="Encryption" icon={encrypted ? Lock : Unlock}>
-          <div className="space-y-2.5">
-            <p className="text-xs leading-relaxed text-content-muted">
-              {encrypted
-                ? 'Messages in this chat are sealed on your device. The server stores ciphertext it cannot read — and neither can search or notification previews.'
-                : 'Turn this on and message text is encrypted on your device before it is sent. Only the people in this chat can read it.'}
-            </p>
-            {encrypted && (
-              // Said plainly rather than buried: text is sealed, files are not.
-              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
-                Message text is end-to-end encrypted. Attachments (images, files, voice notes) are <b>not</b> yet —
-                avoid sending sensitive files here.
-              </p>
-            )}
-            <button
-              onClick={toggleEncryption}
-              disabled={e2eeBusy}
-              className={cn(
-                'ring-brand inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors disabled:opacity-60',
-                encrypted
-                  ? 'border-border text-content-muted hover:bg-content/5'
-                  : 'border-transparent bg-brand-gradient text-white shadow-glow'
-              )}
-            >
-              {encrypted ? <Unlock size={16} /> : <Lock size={16} />}
-              {e2eeBusy ? 'Working…' : encrypted ? 'Turn off encryption' : 'Encrypt this chat'}
-            </button>
-          </div>
-        </Section>
 
         {/* Wallpaper */}
         <Section title="Wallpaper" icon={Palette}>

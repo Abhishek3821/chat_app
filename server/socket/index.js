@@ -12,6 +12,76 @@ import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callSe
 // id used in a Mongo query MUST be validated here — otherwise a client could send
 // `{ chatId: { $ne: null } }` and turn a scoped update into a whole-collection one.
 const isId = (v) => typeof v === 'string' && mongoose.isValidObjectId(v);
+
+/* ── Per-socket flood protection ───────────────────────────────────
+   The REST API sits behind apiLimiter; the socket layer had NOTHING, so one
+   authenticated client in a `while(true) emit()` loop could saturate the event
+   loop and hammer Mongo. Two token buckets per socket:
+
+     GENERAL  every inbound event. Sized for the worst LEGITIMATE burst, which
+              is WebRTC negotiation: a 6-person mesh sends offer/answer plus
+              ~20 ICE candidates to each of 5 peers in a couple of seconds.
+     WRITES   the subset that hits the database on every call. Much tighter,
+              because these are what turn a flood into database load.
+
+   Over-limit packets are dropped SILENTLY (no error emitted back) — replying
+   would hand an attacker free amplification. A socket that keeps hammering past
+   BAN_STRIKES is disconnected outright. */
+const GENERAL_BUCKET = { capacity: 60, refillPerSec: 30 };
+const WRITE_BUCKET = { capacity: 20, refillPerSec: 5 };
+const BAN_STRIKES = 200; // dropped packets before we give up on the socket
+const WRITE_EVENTS = new Set([
+  'message:read',
+  'message:delivered',
+  'message-read',
+  'message-reaction',
+  'meeting:caption',
+  'meeting:poll-create',
+  'meeting:poll-vote',
+  'meeting:poll-close',
+  'meeting:qa-ask',
+  'meeting:qa-upvote',
+  'meeting:qa-answer',
+  'meeting:join',
+  'meeting:remove',
+  'join-chat',
+]);
+
+/** Classic token bucket. Returns false when the caller is out of budget. */
+function takeToken(bucket, spec, now) {
+  const elapsed = (now - bucket.last) / 1000;
+  bucket.tokens = Math.min(spec.capacity, bucket.tokens + elapsed * spec.refillPerSec);
+  bucket.last = now;
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
+/**
+ * Install the throttle. `socket.use` sees EVERY inbound packet, so this also
+ * covers any event added later — which a per-handler wrapper would silently miss.
+ */
+function installRateLimit(socket) {
+  const general = { tokens: GENERAL_BUCKET.capacity, last: Date.now() };
+  const writes = { tokens: WRITE_BUCKET.capacity, last: Date.now() };
+  let strikes = 0;
+
+  socket.use(([event] = [], next) => {
+    const now = Date.now();
+    const spec = WRITE_EVENTS.has(event) ? WRITE_BUCKET : GENERAL_BUCKET;
+    const bucket = WRITE_EVENTS.has(event) ? writes : general;
+    // Charge the general bucket too, so a write-event flood can't sidestep it.
+    const ok = takeToken(bucket, spec, now) && (bucket === general || takeToken(general, GENERAL_BUCKET, now));
+    if (ok) return next();
+
+    strikes += 1;
+    if (strikes === 1 || strikes % 100 === 0) {
+      console.warn(`⚠️  socket rate limit: user=${socket.userId} event=${event} dropped=${strikes}`);
+    }
+    if (strikes >= BAN_STRIKES) socket.disconnect(true);
+    // Deliberately no next() — the packet is dropped without a reply.
+  });
+}
 // Live-caption transcript is capped per meeting: it's appended to on every final
 // caption, so an unbounded array on a hot document would grow all meeting long.
 const MAX_TRANSCRIPT_LINES = 500;
@@ -96,8 +166,27 @@ async function areMutualContacts(aId, bId) {
  * (1:1 calls) OR both are members of the same group chat (so group-call
  * participants who aren't personal contacts can still connect to each other).
  */
+/** True when either user has blocked the other. One query, both directions. */
+async function eitherHasBlocked(a, b) {
+  try {
+    return !!(await User.exists({
+      $or: [
+        { _id: a, blockedUsers: b },
+        { _id: b, blockedUsers: a },
+      ],
+    }));
+  } catch {
+    return false; // a lookup failure must not hard-block legitimate signaling
+  }
+}
+
 async function canSignal(fromId, toId, chatId) {
   if (!isId(fromId) || !isId(toId)) return false;
+  // A block has to stop the phone from ringing, not just hide the caller from
+  // search. Neither the mutual-contact path nor the shared-group path below
+  // considered it, so blocking someone you'd previously added left them able to
+  // call you. Checked first, so it overrides both.
+  if (await eitherHasBlocked(fromId, toId)) return false;
   if (await areMutualContacts(fromId, toId)) return true;
   if (isId(chatId)) {
     try {
@@ -175,6 +264,9 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.data.avatar = socket.userAvatar;
     socket.data.email = socket.userEmail;
     socket.join(`user:${userId}`);
+
+    // Before any handler runs, so a flood is dropped at the door.
+    installRateLimit(socket);
 
     // IMPORTANT: register ALL event listeners synchronously FIRST. Clients emit
     // 'join-chat' the instant they connect; any `await` before this point would

@@ -49,20 +49,23 @@ const ChatRow = memo(function ChatRow({ chat, active, onOpen, currentUser, anima
           <p className={cn('truncate text-sm font-semibold', active ? 'text-white' : 'text-content')}>{d.name}</p>
           {/* Which conversations are sealed has to be legible from the list,
               not only once you're inside one. */}
-          {chat.e2ee?.enabled && (
-            <Lock
-              size={12}
-              aria-label="End-to-end encrypted"
-              className={cn('shrink-0', active ? 'text-white/80' : 'text-brand-500')}
-            />
-          )}
           {chat.pinned && <Pin size={12} className={cn('shrink-0', active ? 'text-white/70' : 'text-content-muted')} />}
           <span className={cn('ml-auto shrink-0 text-[11px]', active ? 'text-white/80' : 'text-content-muted')}>
             {formatChatTime(chat.lastMessage?.createdAt)}
           </span>
         </div>
         <div className="flex items-center gap-1">
-          {sentByMe && (chat.lastMessage?.status === 'read' ? <CheckCheck size={14} className={active ? 'text-white/80' : 'text-cyan-500'} /> : <Check size={14} className={active ? 'text-white/70' : 'text-content-muted'} />)}
+          {/* Same three states as the bubble ticks, and the same reason for a
+              literal blue on "read" — see the Ticks note in MessageBubble. */}
+          {sentByMe && (
+            chat.lastMessage?.status === 'read' ? (
+              <CheckCheck size={14} strokeWidth={2.75} className={active ? 'text-sky-200' : 'text-sky-500'} aria-label="Read" />
+            ) : chat.lastMessage?.status === 'delivered' ? (
+              <CheckCheck size={14} className={active ? 'text-white/70' : 'text-content-muted'} aria-label="Delivered" />
+            ) : (
+              <Check size={14} className={active ? 'text-white/70' : 'text-content-muted'} aria-label="Sent" />
+            )
+          )}
           <p className={cn('truncate text-xs', active ? 'text-white/85' : 'text-content-muted')}>{lastMessagePreview(chat)}</p>
           <div className="ml-auto flex items-center gap-1.5">
             {chat.muted && <BellOff size={13} className={active ? 'text-white/70' : 'text-content-muted'} />}

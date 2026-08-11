@@ -15,6 +15,7 @@ import {
   Store,
   LayoutDashboard,
   Code2,
+  Blocks,
   Settings,
   LogOut,
   ChevronRight,
@@ -63,6 +64,7 @@ export default function MobileNav() {
     { to: '/broadcasts', icon: Megaphone, label: 'Broadcast lists', hint: 'Send to many at once' },
     ...(isTeam ? [{ to: '/business', icon: Store, label: 'Business', hint: 'Catalog, labels, replies' }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: LayoutDashboard, label: 'Admin', hint: 'Workspace dashboard' }] : []),
+    ...(isAdmin ? [{ to: '/platform', icon: Blocks, label: 'Embed platform', hint: 'Apps, capabilities, secrets' }] : []),
     ...(isAdmin ? [{ to: '/developers', icon: Code2, label: 'Developers', hint: 'API keys and webhooks' }] : []),
     { to: '/settings', icon: Settings, label: 'Settings', hint: 'Appearance, privacy, account' },
   ];

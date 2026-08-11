@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
+import { tenantScope, sameTenant } from '../utils/tenancy.js';
 import ContactRequest from '../models/ContactRequest.js';
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
@@ -46,7 +47,13 @@ export const searchUsers = asyncHandler(async (req, res) => {
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     orClauses.push({ workspace: req.user.workspace, $or: [{ email: rx }, { username: rx }, { name: rx }] });
   }
-  const match = { _id: { $ne: req.user._id, $nin: req.user.blockedUsers }, $or: orClauses };
+  // tenantScope FIRST: user discovery is the primary way to reach a stranger, so
+  // it must never cross an embedded tenant's boundary (utils/tenancy.js).
+  const match = {
+    ...tenantScope(req.user),
+    _id: { $ne: req.user._id, $nin: req.user.blockedUsers },
+    $or: orClauses,
+  };
 
   const users = await User.find(match).select(PUBLIC_WITH_PRIVACY).limit(20).lean();
   const meId = String(req.user._id);
@@ -61,8 +68,12 @@ export const searchUsers = asyncHandler(async (req, res) => {
 export const getUserById = asyncHandler(async (req, res) => {
   // Global reachability: any user is viewable by id (public fields only, with
   // presence/photo privacy applied below). Not a directory dump — you need the id.
-  const user = await User.findById(req.params.id).select(PUBLIC_WITH_PRIVACY).lean();
+  const user = await User.findById(req.params.id).select(`${PUBLIC_WITH_PRIVACY} app`).lean();
   if (!user) throw new ApiError(404, 'User not found.');
+  // "Global reachability" is a first-party product decision; it must not reach
+  // ACROSS an embedded tenant. 404 rather than 403 so the endpoint can't be used
+  // to probe which ids exist in another tenant.
+  if (!sameTenant(user, req.user)) throw new ApiError(404, 'User not found.');
   const viewerIsContact = (user.contacts || []).some((c) => String(c) === String(req.user._id));
   res.json({ success: true, user: applyPresencePrivacy(user, viewerIsContact) });
 });
@@ -176,6 +187,11 @@ export const addContact = asyncHandler(async (req, res) => {
   if (targetId === String(req.user._id)) throw new ApiError(400, "You can't add yourself.");
   const target = await User.findById(targetId);
   if (!target) throw new ApiError(404, 'User not found.');
+  // Tenant boundary first. The workspace comparison below can't carry this: for
+  // two platform end users both sides are undefined, so it compares equal and
+  // lets the request through — which would let one tenant's user add a user of
+  // another tenant (or one of ours) purely from a known id.
+  if (!sameTenant(target, req.user)) throw new ApiError(404, 'User not found.');
   if (String(target.workspace) !== String(req.user.workspace)) {
     throw new ApiError(403, 'You can only add people in your workspace.');
   }

@@ -1,5 +1,6 @@
 import ContactRequest from '../models/ContactRequest.js';
 import User from '../models/User.js';
+import { sameTenant } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
@@ -12,7 +13,10 @@ export const sendRequest = asyncHandler(async (req, res) => {
   if (to === String(req.user._id)) throw new ApiError(400, "You can't add yourself.");
   const target = await User.findById(to);
   if (!target) throw new ApiError(404, 'User not found.');
-  // Global reachability: contact requests may cross workspace/personal boundaries.
+  // Global reachability: contact requests may cross workspace/personal boundaries
+  // — but NEVER an embedded tenant boundary. 404, not 403, so this can't be used
+  // to probe for ids belonging to another tenant.
+  if (!sameTenant(target, req.user)) throw new ApiError(404, 'User not found.');
 
   // Respect blocks in both directions.
   const blocked =

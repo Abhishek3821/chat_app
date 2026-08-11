@@ -3,6 +3,7 @@ import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
 import Meeting from '../models/Meeting.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { tenantScope } from '../utils/tenancy.js';
 import { applyPresencePrivacy } from '../utils/privacy.js';
 import { normalizePhone } from '../utils/sendSms.js';
 
@@ -23,9 +24,6 @@ import { normalizePhone } from '../utils/sendSms.js';
  * Privacy rules it inherits rather than reinvents:
  *  • Locked chats (the PIN-hidden ones) are excluded everywhere — surfacing
  *    their messages in search would walk straight around the lock.
- *  • Encrypted chats can't be matched server-side at all (the server holds only
- *    ciphertext); the client searches those locally. `encryptedChats` in the
- *    response tells it which ones it still owes the user an answer for.
  *  • People search keeps the existing reachability rule: partial matching over
  *    your own contacts, exact-identifier matching globally. No browsable
  *    directory of every user on the platform.
@@ -39,7 +37,7 @@ const escapeRx = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const globalSearch = asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, MAX_QUERY);
   if (q.length < 2) {
-    return res.json({ success: true, query: q, people: [], chats: [], messages: [], meetings: [], encryptedChats: [] });
+    return res.json({ success: true, query: q, people: [], chats: [], messages: [], meetings: [] });
   }
 
   const meId = req.user._id;
@@ -50,12 +48,11 @@ export const globalSearch = asyncHandler(async (req, res) => {
   // Every chat I'm in, minus the locked ones. Bounded by how many chats a person
   // is actually in, and both other branches need it.
   const myChats = await Chat.find({ 'participants.user': meId, _id: { $nin: locked } })
-    .select('_id name isGroup avatar participants e2ee.enabled updatedAt')
+    .select('_id name isGroup avatar participants updatedAt')
     .sort({ updatedAt: -1 })
     .lean();
 
-  const searchableChatIds = myChats.filter((c) => !c.e2ee?.enabled).map((c) => c._id);
-  const encryptedChatIds = myChats.filter((c) => c.e2ee?.enabled).map((c) => String(c._id));
+  const searchableChatIds = myChats.map((c) => c._id);
 
   const [people, messages, meetings] = await Promise.all([
     searchPeople({ req, q, term, rx }),
@@ -99,8 +96,6 @@ export const globalSearch = asyncHandler(async (req, res) => {
     chats: populatedChats,
     messages,
     meetings,
-    // The client searches these locally against its decrypted cache.
-    encryptedChats: encryptedChatIds,
   });
 });
 
@@ -121,6 +116,7 @@ async function searchPeople({ req, q, term, rx }) {
   }
 
   const users = await User.find({
+    ...tenantScope(req.user), // never surface another tenant's users
     _id: { $ne: req.user._id, $nin: req.user.blockedUsers || [] },
     $or: orClauses,
   })
@@ -139,7 +135,7 @@ async function searchPeople({ req, q, term, rx }) {
 }
 
 /**
- * Messages across every (unlocked, unencrypted) chat I'm in. Text index first,
+ * Messages across every (unlocked) chat I'm in. Text index first,
  * regex only to top up — see the scale note at the top of the file.
  */
 async function searchMessagesAcrossChats({ meId, q, rx, chatIds }) {
@@ -148,7 +144,6 @@ async function searchMessagesAcrossChats({ meId, q, rx, chatIds }) {
     chat: { $in: chatIds },
     isDeleted: false,
     deletedFor: { $ne: meId },
-    encrypted: { $ne: true },
   };
 
   /* The `content` text index is the fast path, but it is not guaranteed to

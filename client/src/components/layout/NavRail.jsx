@@ -13,6 +13,7 @@ import {
   Settings,
   LayoutDashboard,
   Code2,
+  Blocks,
   LogOut,
 } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
@@ -103,6 +104,18 @@ export default function NavRail() {
                 <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
                   <LayoutDashboard size={21} className="shrink-0" />
                   <span className={railLabel}>Admin</span>
+                </span>
+              )}
+            </NavLink>
+          </Tooltip>
+        )}
+        {user?.role === 'admin' && (
+          <Tooltip label="Embed platform" className="2xl:w-full" labelClassName="2xl:hidden">
+            <NavLink to="/platform" className="block 2xl:w-full">
+              {({ isActive }) => (
+                <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
+                  <Blocks size={21} className="shrink-0" />
+                  <span className={railLabel}>Platform</span>
                 </span>
               )}
             </NavLink>

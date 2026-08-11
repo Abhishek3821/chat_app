@@ -53,24 +53,15 @@ const messageSchema = new mongoose.Schema(
     content: { type: String, default: '' },
 
     /**
-     * End-to-end encrypted payload. When `encrypted` is true, `content` is
-     * ALWAYS the empty string — the readable text exists only as `enc.ct`,
-     * sealed with the chat key, which the server never holds. `enc.v` records
-     * which chat-key version sealed it, so a chat can rotate its key (on a
-     * membership change) without orphaning the history sealed under the old one.
+     * Retired: this conversation-level encryption feature was removed.
      *
-     * Consequences the rest of the codebase depends on:
-     *  • the `content` text index can't see these — server-side search skips
-     *    encrypted chats, and the client searches them locally instead;
-     *  • push/notification previews fall back to "🔒 Encrypted message";
-     *  • business auto-replies don't run on an encrypted thread.
+     * The flag is KEPT (read-only, never set) purely so the handful of messages
+     * written while it existed can still be recognised and rendered as
+     * "unavailable" rather than as an empty bubble. Their plaintext is gone: it
+     * only ever existed under a key the server never held, so nothing here or
+     * on the client can recover it. Nothing sets this any more.
      */
-    encrypted: { type: Boolean, default: false },
-    enc: {
-      ct: { type: String }, // base64 AES-256-GCM ciphertext
-      iv: { type: String }, // base64 96-bit nonce, unique per message
-      v: { type: Number }, // chat-key version this was sealed with
-    },
+    encrypted: { type: Boolean, default: false, select: true },
 
     attachments: [attachmentSchema],
     location: { lat: Number, lng: Number, label: String },

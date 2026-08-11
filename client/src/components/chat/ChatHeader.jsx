@@ -103,15 +103,9 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-content sm:text-base">
             <span className="truncate">{d.name}</span>
-            {chat?.e2ee?.enabled && (
-              // The lock belongs next to the name, not buried in the info panel:
-              // whether a conversation is encrypted has to be visible while you
-              // are typing into it.
-              <Lock size={13} className="shrink-0 text-brand-500" aria-label="End-to-end encrypted" />
-            )}
           </p>
           <p className="truncate text-xs text-content-muted">
-            {chat?.e2ee?.enabled ? 'End-to-end encrypted' : status}
+            {status}
           </p>
         </div>
       </button>

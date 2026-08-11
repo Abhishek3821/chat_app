@@ -13,7 +13,6 @@ import { cn, formatDate, formatDateSeparator, PAGE_SHELL } from '@/lib/utils';
 import { getChatDisplay } from '@/lib/chat';
 import { useAuth } from '@/store/useAuth';
 import { useChat } from '@/store/useChat';
-import { useE2EE } from '@/store/useE2EE';
 
 /**
  * Starred messages.
@@ -40,28 +39,6 @@ export default function StarredPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
-
-  /** Decrypt whatever came back, grouping by chat so each chat's keys are
-   *  fetched once rather than once per starred message. */
-  const decrypt = useCallback(async (rows) => {
-    const encrypted = rows.filter((m) => m.encrypted);
-    if (!encrypted.length) return rows;
-
-    const byChat = new Map();
-    for (const m of encrypted) {
-      const id = String(m.chat?._id || m.chat);
-      if (!byChat.has(id)) byChat.set(id, []);
-      byChat.get(id).push(m);
-    }
-    const decoded = new Map();
-    await Promise.all(
-      [...byChat.entries()].map(async ([chatId, list]) => {
-        const out = await useE2EE.getState().hydrate(chatId, list);
-        out.forEach((m) => decoded.set(String(m._id), m));
-      })
-    );
-    return rows.map((m) => decoded.get(String(m._id)) || m);
-  }, []);
 
   const load = useCallback(
     async (before) => {
@@ -205,7 +182,6 @@ function StarredRow({ message, me, onOpen, onUnstar }) {
               in <span className="font-medium">{where}</span>
             </span>
           )}
-          {message.encrypted && <Lock size={11} className="shrink-0 text-brand-500" />}
         </div>
 
         <p className={cn('mt-1 line-clamp-3 break-words text-sm', message.undecryptable ? 'italic text-content-muted' : 'text-content')}>

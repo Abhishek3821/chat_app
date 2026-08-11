@@ -195,6 +195,58 @@ async function main() {
   const rd = await readEvt;
   check('read receipt reaches the sender (`message:read`)', rd.ok, rd.e?.message);
 
+  // ── 2b. Tick state machine, PERSISTED ───────────────────────────
+  // The live socket events above prove the ticks update in the moment. This
+  // proves the server actually wrote it down — otherwise ticks silently reset
+  // to one tick on the next reload, which is the classic version of this bug.
+  // `messageStatus()` on the client derives sent/delivered/read purely from
+  // deliveredTo + readBy, so those are exactly the fields that must persist.
+  head('Tick state machine (persisted)');
+  const fetchMsg = async () => {
+    const res = await http('GET', `/messages/${chatId}`, { token: A.token });
+    const list = res.data?.messages || res.data || [];
+    return (Array.isArray(list) ? list : []).find((m) => String(m._id) === String(msgId));
+  };
+  const persisted = await fetchMsg();
+  const deliveredIds = (persisted?.deliveredTo || []).map((u) => String(u?._id ?? u));
+  const readerIds = (persisted?.readBy || []).map((r) => String(r.user?._id ?? r.user));
+  check('deliveredTo persisted for the recipient', deliveredIds.includes(String(B.id)), JSON.stringify(deliveredIds));
+  check('readBy persisted for the recipient', readerIds.includes(String(B.id)), JSON.stringify(readerIds));
+
+  /* Exact copy of client/src/lib/chat.js → messageStatus(), which is what
+     actually picks the glyph. Note it only ever inspects the OTHER party's ids:
+     the server also lists the sender in deliveredTo/readBy (you have obviously
+     seen your own message, and it keeps unread counts correct), and that must
+     not be mistaken for the recipient having received it. */
+  const derive = (m, peers) => {
+    const readers = new Set((m?.readBy || []).map((r) => String(r.user?._id ?? r.user)));
+    const delivered = new Set((m?.deliveredTo || []).map((u) => String(u?._id ?? u)));
+    if (peers.every((id) => readers.has(id))) return 'read';
+    if (peers.some((id) => delivered.has(id) || readers.has(id))) return 'delivered';
+    return 'sent';
+  };
+  const peers = [String(B.id)];
+
+  // Walk a fresh message through all three states in order.
+  const fresh = await http('POST', '/messages', { token: A.token, body: { chatId, content: 'tick walk' } });
+  const freshId = fresh.data?.message?._id || fresh.data?._id;
+  const refetch = async () => {
+    const res = await http('GET', `/messages/${chatId}`, { token: A.token });
+    const list = res.data?.messages || res.data || [];
+    return (Array.isArray(list) ? list : []).find((m) => String(m._id) === String(freshId));
+  };
+  check('1. just sent, no acks → ONE tick ("sent")', derive(fresh.data?.message || fresh.data, peers) === 'sent', derive(fresh.data?.message || fresh.data, peers));
+
+  sb.emit('message:delivered', { chatId, messageId: freshId });
+  await sleep(700);
+  const afterDelivered = await refetch();
+  check('2. recipient device acked → TWO ticks ("delivered")', derive(afterDelivered, peers) === 'delivered', derive(afterDelivered, peers));
+
+  sb.emit('message:read', { chatId });
+  await sleep(700);
+  const afterRead = await refetch();
+  check('3. recipient opened the chat → BLUE ticks ("read")', derive(afterRead, peers) === 'read', derive(afterRead, peers));
+
   // ── 3. Presence ─────────────────────────────────────────────────
   head('Presence');
   const offline = settle(waitFor(sa, 'user-offline', 6000));
@@ -250,6 +302,125 @@ async function main() {
   sc.emit('call:invite', { to: A.id, callId: new mongoose.Types.ObjectId().toString(), type: 'audio' });
   const sr = await strangerRing;
   check('a non-contact CANNOT ring a stranger (signaling gate holds)', !sr.ok, 'stranger reached the callee');
+
+  // ── 5. Meeting attendance report ────────────────────────────────
+  // The report only reads `meeting.attendees`; those rows are written by the
+  // socket join/leave handlers. So a REST-only test would pass against a
+  // completely broken feature — attendance has to be driven through a socket.
+  head('Meeting attendance report');
+  const mk = await http('POST', '/meetings', {
+    token: A.token,
+    body: {
+      title: 'Attendance check',
+      startAt: new Date(Date.now() + 60_000).toISOString(),
+      durationMinutes: 30,
+      type: 'video',
+      participants: [B.id],
+    },
+  });
+  const meetingId = mk.data?.meeting?._id || mk.data?._id;
+  check('host can create a meeting', !!meetingId, `${mk.status} ${JSON.stringify(mk.data)?.slice(0, 120)}`);
+
+  if (meetingId) {
+    const joined = await new Promise((resolve) => {
+      sa.emit('meeting:join', { meetingId }, resolve);
+      setTimeout(() => resolve({ ok: false, error: 'timeout' }), 6000);
+    });
+    check('host joins the meeting room over the socket', joined?.ok === true, joined?.error);
+
+    const joinedB = await new Promise((resolve) => {
+      sb2.emit('meeting:join', { meetingId }, resolve);
+      setTimeout(() => resolve({ ok: false, error: 'timeout' }), 6000);
+    });
+    check('invited guest joins the meeting room', joinedB?.ok === true, joinedB?.error);
+
+    await sleep(1200); // accrue a measurable amount of attendance time
+    sb2.emit('meeting:leave', { meetingId });
+    await sleep(700); // the leave handler writes leftAt + durationSeconds
+
+    const rep = await http('GET', `/meetings/${meetingId}/report`, { token: A.token });
+    const r2 = rep.data?.report;
+    check('host can fetch the attendance report', rep.status === 200 && !!r2, `${rep.status}`);
+    check('report lists BOTH attendees', (r2?.attendees?.length || 0) >= 2, `got ${r2?.attendees?.length ?? 0}`);
+    check('attendeeCount matches the rows', r2?.attendeeCount === (r2?.attendees?.length || 0), `${r2?.attendeeCount}`);
+    const guestRow = (r2?.attendees || []).find((a) => a.email === B.email);
+    check('the guest row records a joinedAt', !!guestRow?.joinedAt, JSON.stringify(guestRow || {}).slice(0, 120));
+    check('leaving stamps leftAt + a non-zero duration', !!guestRow?.leftAt && guestRow?.durationSeconds >= 1, `leftAt=${guestRow?.leftAt} dur=${guestRow?.durationSeconds}`);
+    check('meeting was auto-marked started', !!r2?.startedAt, `${r2?.startedAt}`);
+
+    const denied = await http('GET', `/meetings/${meetingId}/report`, { token: B.token });
+    check('a non-host CANNOT read the attendance report', denied.status === 403, `${denied.status}`);
+  }
+
+  // ── 5b. History pagination (scroll-back) ────────────────────────
+  // The server always supported `?before=`, but no client code ever sent it, so
+  // conversations past one page had no reachable history. The client now pages
+  // on scroll-up; this pins down the contract it relies on.
+  head('History pagination');
+  const PAGE = 40;
+  for (let i = 0; i < PAGE + 6; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await http('POST', '/messages', { token: A.token, body: { chatId, content: `history ${i}` } });
+  }
+  const p1 = await http('GET', `/messages/${chatId}?limit=${PAGE}`, { token: A.token });
+  const first = p1.data?.messages || [];
+  check(`first page returns exactly ${PAGE}`, first.length === PAGE, `${first.length}`);
+  check('page is ordered oldest → newest', first.length > 1 && new Date(first[0].createdAt) <= new Date(first[first.length - 1].createdAt), 'ordering is reversed');
+
+  const cursor = new Date(first[0].createdAt).toISOString();
+  const p2 = await http('GET', `/messages/${chatId}?limit=${PAGE}&before=${encodeURIComponent(cursor)}`, { token: A.token });
+  const older = p2.data?.messages || [];
+  check('`before` cursor returns an older page', older.length > 0, `${older.length}`);
+  check('older page is also oldest → newest', older.length > 1 && new Date(older[0].createdAt) <= new Date(older[older.length - 1].createdAt), 'ordering is reversed');
+
+  const ids1 = new Set(first.map((m) => String(m._id)));
+  check('no overlap between the two pages', older.every((m) => !ids1.has(String(m._id))), 'pages overlap — scroll-back would duplicate rows');
+  check('every older message really is older than the cursor', older.every((m) => new Date(m.createdAt) < new Date(cursor)), 'cursor leaked newer messages');
+  check('pins ride along on page 1 only (not on paged-back requests)', p2.data?.pins === undefined, 'pins repeated on every page');
+
+  // ── 6. Security: blocking is enforced past discovery ────────────
+  // Blocking used to be checked ONLY when searching for people and sending
+  // contact requests. Nothing looked at it on the send path or in the call
+  // signaling gate, so blocking someone you already had a chat with left them
+  // able to message and ring you.
+  head('Security · blocking');
+  const blockRes = await http('POST', `/users/me/block/${B.id}`, { token: A.token });
+  check('A can block B', blockRes.status === 200, `${blockRes.status} ${JSON.stringify(blockRes.data)?.slice(0, 80)}`);
+
+  const blockedSend = await http('POST', '/messages', { token: B.token, body: { chatId, content: 'should be refused' } });
+  check('a blocked user CANNOT send into the existing chat', blockedSend.status === 403, `${blockedSend.status}`);
+  const blockerSend = await http('POST', '/messages', { token: A.token, body: { chatId, content: 'also refused' } });
+  check('the blocker also cannot message the blocked user', blockerSend.status === 403, `${blockerSend.status}`);
+
+  const blockedRing = settle(waitFor(sa, 'call:incoming', 2500));
+  sb2.emit('call:invite', { to: A.id, callId: new mongoose.Types.ObjectId().toString(), type: 'audio', chatId });
+  const br = await blockedRing;
+  check('a blocked user CANNOT ring (signaling gate blocks)', !br.ok, 'the call reached the blocker');
+
+  const unblock = await http('POST', `/users/me/block/${B.id}`, { token: A.token });
+  check('unblocking restores messaging', unblock.status === 200, `${unblock.status}`);
+  const afterUnblock = await http('POST', '/messages', { token: B.token, body: { chatId, content: 'allowed again' } });
+  check('messages flow again after unblock', afterUnblock.status === 201, `${afterUnblock.status}`);
+
+  // ── 7. Security: socket flood protection ────────────────────────
+  head('Security · socket rate limit');
+  // A legitimate WebRTC burst must survive. 40 ICE candidates back-to-back is
+  // well within what a real mesh negotiation produces.
+  const legitBurst = settle(waitFor(sa, 'call:ice-candidate', 4000));
+  for (let i = 0; i < 40; i += 1) {
+    sb2.emit('call:ice-candidate', { to: A.id, callId, chatId, candidate: { candidate: `c${i}` } });
+  }
+  const lb = await legitBurst;
+  check('a realistic 40-candidate ICE burst is NOT throttled', lb.ok, lb.e?.message);
+
+  // A hard loop must get cut off rather than being allowed to saturate the loop.
+  const flood = connect(C.token);
+  await settle(waitFor(flood, 'connect', 8000));
+  const cut = settle(waitFor(flood, 'disconnect', 12000));
+  for (let i = 0; i < 3000; i += 1) flood.emit('typing-start', { chatId });
+  const fl = await cut;
+  check('a 3000-event flood gets the socket disconnected', fl.ok, 'socket survived a flood');
+  flood.close();
 
   sa.close(); sb2.close(); sc.close();
 

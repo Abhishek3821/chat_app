@@ -52,6 +52,25 @@ const userSchema = new mongoose.Schema(
     workspace: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', index: true },
     workspaceRole: { type: String, enum: ['owner', 'admin', 'member'], default: 'member' },
 
+    /* ── Embedded-platform tenancy ──────────────────────────────────
+       Set only for END USERS provisioned by a third-party product through the
+       /v1 platform API. `null` means a first-party ChatConnect account, and the
+       distinction is what every isolation filter keys off (see scopeToTenant):
+       a tenant's users must never see, search or message users of another
+       tenant, nor our own.
+
+       `externalId` is the host product's own id for the person, so they can
+       address users by their existing primary key instead of storing ours.
+
+       NOTE ON UNIQUENESS: email/username stay GLOBALLY unique, and tenant users
+       are given synthesized values derived from appId+externalId (see
+       synthesizeIdentity). That is deliberate — making those indexes
+       tenant-scoped would mean dropping and rebuilding unique indexes on a live
+       users collection, and this achieves the same isolation with no migration
+       and no window where duplicates could slip in. */
+    app: { type: mongoose.Schema.Types.ObjectId, ref: 'App', default: null, index: true },
+    externalId: { type: String, default: null },
+
     isVerified: { type: Boolean, default: false },
     otp: { type: String, select: false },
     otpExpires: { type: Date, select: false },
@@ -124,32 +143,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    /**
-     * End-to-end encryption identity (ECDH P-256).
-     *
-     * `publicKey` is public by design — anyone who can message you fetches it to
-     * seal a chat key for you. Everything else is your PRIVATE key, and it is
-     * only ever stored here already encrypted under a key derived from your
-     * E2EE passphrase (PBKDF2-SHA256 → AES-GCM), done entirely in the browser.
-     * The passphrase is never sent. The server therefore holds a blob it cannot
-     * open; this exists so you can unlock the same identity on a second device,
-     * and it is `select: false` so it never rides along on an ordinary user
-     * lookup (profile, search, participant population).
-     *
-     * Lose the passphrase and the blob is unrecoverable — that is the point,
-     * and the client says so before you set one.
-     */
-    e2ee: {
-      publicKey: { type: String, default: '' }, // base64 SPKI
-      wrappedPrivateKey: { type: String, default: '', select: false }, // base64 AES-GCM
-      kdfSalt: { type: String, default: '', select: false }, // base64
-      kdfIterations: { type: Number, default: 0 },
-      wrapIv: { type: String, default: '', select: false }, // base64
-      // Bumped whenever the identity itself is replaced (not on a passphrase
-      // change), so clients can tell "re-wrapped" from "different key".
-      generation: { type: Number, default: 0 },
-      updatedAt: { type: Date },
-    },
   },
   { timestamps: true }
 );
@@ -160,6 +153,14 @@ userSchema.index({ name: 'text', username: 'text', email: 'text' });
 userSchema.index(
   { phone: 1 },
   { unique: true, partialFilterExpression: { phone: { $type: 'string', $gt: '' } } }
+);
+/* One end user per (tenant, host's own id) — this is what makes provisioning
+   idempotent: a host can POST the same user repeatedly and get an upsert rather
+   than duplicates. Partial so the millions of first-party accounts (app: null)
+   are excluded entirely and can't collide with each other on a null pair. */
+userSchema.index(
+  { app: 1, externalId: 1 },
+  { unique: true, partialFilterExpression: { app: { $type: 'objectId' }, externalId: { $type: 'string' } } }
 );
 
 userSchema.pre('save', async function hashPassword(next) {

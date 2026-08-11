@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { ArrowDown } from 'lucide-react';
 import MessageBubble from './MessageBubble';
@@ -20,6 +20,7 @@ function DateSeparator({ date }) {
 }
 
 function MessageList({
+  chatId,
   messages,
   loading,
   isGroup,
@@ -80,6 +81,38 @@ function MessageList({
     if (!windowed) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [lastId, typingUser, windowed]);
 
+  /* Scroll-back pagination.
+     Prepending older messages pushes everything down by exactly their height,
+     so the viewport has to be corrected in the same frame or the conversation
+     visibly jumps away from what you were reading. Measure scrollHeight before
+     the fetch, then add the delta once React has painted the new rows. */
+  const loadingOlder = useChat((s) => Boolean(s.loadingOlder[chatId]));
+  const noMoreOlder = useChat((s) => Boolean(s.noMoreOlder[chatId]));
+  const loadOlderMessages = useChat((s) => s.loadOlderMessages);
+  const pendingAnchor = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const anchor = pendingAnchor.current;
+    if (!el || anchor == null) return;
+    pendingAnchor.current = null;
+    el.scrollTop += el.scrollHeight - anchor;
+  }, [messages.length]);
+
+  const onScroll = useCallback(
+    (e) => {
+      const el = e.currentTarget;
+      // 120px of headroom: fire before the user hits the hard top, so the page
+      // is usually already in by the time they get there.
+      if (el.scrollTop > 120 || loadingOlder || noMoreOlder || windowed || !chatId) return;
+      pendingAnchor.current = el.scrollHeight;
+      loadOlderMessages(chatId).then((added) => {
+        if (!added) pendingAnchor.current = null; // nothing arrived; don't correct
+      });
+    },
+    [chatId, loadingOlder, noMoreOlder, windowed, loadOlderMessages]
+  );
+
   /* Land on the jumped-to message and flash it, so it's obvious which of the
      messages on screen was the one you picked. */
   useEffect(() => {
@@ -105,8 +138,24 @@ function MessageList({
         // The wallpaper lives on the scroll container, so it stays put behind
         // the bubbles instead of scrolling with them.
         style={wallpaper || undefined}
+        onScroll={onScroll}
         className={cn('scrollbar-thin h-full overflow-y-auto px-3 py-4 sm:px-6 2xl:px-10', wallpaper && 'bg-fixed')}
       >
+        {/* Scroll-back status. Only shown while a page is actually in flight, or
+            once, at the true beginning of the conversation. */}
+        {loadingOlder && (
+          <div className="flex justify-center pb-3">
+            <span className="neu-raised-sm rounded-full bg-surface px-3 py-1 text-[11px] font-semibold text-content-muted">
+              Loading earlier messages…
+            </span>
+          </div>
+        )}
+        {noMoreOlder && !loadingOlder && messages.length > 12 && (
+          <div className="flex justify-center pb-3">
+            <span className="text-[11px] font-medium text-content-muted">Start of the conversation</span>
+          </div>
+        )}
+
         {messages.map((m, i) => {
           const prev = messages[i - 1];
           const next = messages[i + 1];

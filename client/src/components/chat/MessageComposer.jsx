@@ -31,9 +31,6 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const updateLiveLocation = useChat((s) => s.updateLiveLocation);
   const stopLiveLocation = useChat((s) => s.stopLiveLocation);
   const isTeamWorkspace = useWorkspace((s) => s.workspace && s.workspace.type !== 'personal');
-  // Scheduling is impossible in an encrypted chat (the server would deliver it
-  // in the clear later) — the dialog says so rather than failing on submit.
-  const encryptedChat = useChat((s) => Boolean(s.chats.find((c) => c._id === chatId)?.e2ee?.enabled));
   const products = useBusiness((s) => s.products);
   const loadBusiness = useBusiness((s) => s.load);
   const shareProductToChat = useBusiness((s) => s.shareProduct);
@@ -526,7 +523,6 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         chatId={chatId}
         text={text}
         replyTo={replyTo}
-        encrypted={encryptedChat}
         onScheduled={(usedComposerText) => {
           // Only wipe the composer when the scheduled message WAS its text —
           // otherwise typing something new in the dialog would silently discard
@@ -823,7 +819,7 @@ function quickTimes() {
   ];
 }
 
-function ScheduleModal({ open, onClose, chatId, text, replyTo, encrypted, onScheduled }) {
+function ScheduleModal({ open, onClose, chatId, text, replyTo, onScheduled }) {
   const scheduled = useChat((s) => s.scheduledByChat[chatId]) || [];
   const loadScheduled = useChat((s) => s.loadScheduled);
   const scheduleMessage = useChat((s) => s.scheduleMessage);
@@ -877,20 +873,13 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, encrypted, onSche
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={busy || !body.trim() || encrypted}>
+          <Button variant="primary" onClick={submit} disabled={busy || !body.trim()}>
             {busy ? <Loader2 size={16} className="animate-spin" /> : <CalendarClock size={16} />} Schedule
           </Button>
         </div>
       }
     >
       <div className="space-y-4">
-        {encrypted && (
-          <p className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-            This chat is end-to-end encrypted, so messages can’t be scheduled — sending one later happens on the
-            server, which has no key and would deliver it unencrypted.
-          </p>
-        )}
-
         <div>
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-content-muted">Message</p>
           <Textarea
@@ -898,7 +887,6 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, encrypted, onSche
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="What should we send?"
-            disabled={encrypted}
             autoFocus
           />
         </div>
@@ -913,7 +901,6 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, encrypted, onSche
                   key={p.label}
                   type="button"
                   onClick={() => setWhen(value)}
-                  disabled={encrypted}
                   className={cn(
                     'neu-press rounded-full px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50',
                     when === value ? 'bg-brand-gradient text-white shadow-glow' : 'neu-raised-sm bg-surface text-content-muted'
@@ -929,7 +916,6 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, encrypted, onSche
             value={when}
             min={toLocalInput(new Date(Date.now() + 60_000))}
             onChange={(e) => setWhen(e.target.value)}
-            disabled={encrypted}
             className="neu-inset ring-brand h-11 w-full rounded-2xl bg-surface-2 px-3 text-base text-content disabled:opacity-50 sm:h-10 sm:text-sm"
           />
           {when && !Number.isNaN(new Date(when).getTime()) && (

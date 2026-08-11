@@ -11,14 +11,21 @@ import jwt from 'jsonwebtoken';
  */
 const ACCESS_TTL = process.env.JWT_ACCESS_EXPIRES || '1h';
 
-export function signAccessToken(user, sid) {
+/**
+ * @param {object|string} user
+ * @param {string} sid tracked session id
+ * @param {{expiresIn?: string}} [opts] override the TTL. Used by the embeddable
+ *   platform, where a tenant decides how long its end-user tokens live
+ *   (App.limits.userTokenMinutes) rather than inheriting the app-wide default.
+ */
+export function signAccessToken(user, sid, opts = {}) {
   const id = typeof user === 'object' ? user._id : user;
   const role = (typeof user === 'object' && user.role) || 'user';
   const tokenVersion = typeof user === 'object' ? user.tokenVersion || 0 : 0;
   return jwt.sign(
     { id: String(id), role, tokenVersion, sid: String(sid), type: 'access' },
     process.env.JWT_SECRET,
-    { algorithm: 'HS256', expiresIn: ACCESS_TTL }
+    { algorithm: 'HS256', expiresIn: opts.expiresIn || ACCESS_TTL }
   );
 }
 

@@ -2,8 +2,13 @@
    Dependency-free; handles push display/click routing AND caches the app so it
    opens (installed, like a native app) without a network connection. */
 
-const CACHE = 'cc-shell-v2';
-const APP_SHELL = ['/', '/index.html', '/logo.svg', '/manifest.webmanifest'];
+// Bumped to v3: the shell list gained the raster icons, and an old cache would
+// keep serving a manifest that still pointed only at the SVG.
+const CACHE = 'cc-shell-v3';
+const APP_SHELL = ['/', '/index.html', '/logo.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
+// Chrome will NOT render an SVG as a notification icon — it silently falls back
+// to a generic browser glyph, which is what every push used to show.
+const ICON = '/icon-192.png';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -67,10 +72,12 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'ChatConnect';
   const options = {
     body: data.body || '',
-    icon: data.icon || '/logo.svg',
-    badge: '/logo.svg',
+    icon: data.icon || ICON,
+    badge: ICON,
     tag: data.tag, // collapse repeat pings for the same chat
     renotify: Boolean(data.tag),
+    vibrate: [90, 40, 90],
+    timestamp: Date.now(),
     data: data.data || {},
   };
   // The server pushes to every recipient regardless of whether they have the app
@@ -86,16 +93,20 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
+  const data = event.notification.data || {};
+  const target = data.url || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      // Focus an existing tab if one is open; otherwise open a new one.
-      for (const w of wins) {
-        if ('focus' in w) {
-          if ('navigate' in w) w.navigate(target).catch(() => {});
-          return w.focus();
-        }
+      const open = wins.find((w) => 'focus' in w);
+      if (open) {
+        // Tell the running app to switch conversations rather than calling
+        // w.navigate(): navigate() is a real page load, so tapping a
+        // notification on an already-open app threw away the whole SPA — socket,
+        // stores, loaded messages — and re-booted it just to change chat.
+        if (data.chatId) open.postMessage({ type: 'cc:open-chat', chatId: data.chatId });
+        return open.focus();
       }
+      // Nothing open: cold-start at the deep link, which App.jsx reads on boot.
       if (self.clients.openWindow) return self.clients.openWindow(target);
       return undefined;
     })

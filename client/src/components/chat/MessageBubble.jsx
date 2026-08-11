@@ -35,11 +35,21 @@ function wellClass(isMine) {
   return isMine ? 'neu-on-accent' : 'neu-inset-sm bg-surface-2';
 }
 
+/**
+ * Sent → one tick. Delivered to the device → two ticks. Read → two BLUE ticks.
+ *
+ * The read state used to be `text-cyan-200`, but this project remaps Tailwind's
+ * `cyan` into the teal brand family (#bee6e2), so on a teal accent bubble the
+ * "read" ticks were a pale mint that looked identical to the white delivered
+ * ones — the state changed and nobody could see it. Read receipts are a
+ * semantic signal, not a brand colour, so this is a literal blue that stays put
+ * whatever the accent picker is set to.
+ */
 function Ticks({ status }) {
   if (status === 'failed') return <span title="Failed to send" className="text-[11px] font-bold text-rose-200">!</span>;
-  if (status === 'read') return <CheckCheck size={14} className="text-cyan-200" />; // coloured — read
-  if (status === 'delivered') return <CheckCheck size={14} className="text-white/70" />; // grey — delivered
-  return <Check size={14} className="text-white/70" />; // single — sent
+  if (status === 'read') return <CheckCheck size={15} strokeWidth={2.75} className="text-sky-400" aria-label="Read" title="Read" />;
+  if (status === 'delivered') return <CheckCheck size={15} className="text-white/75" aria-label="Delivered" title="Delivered" />;
+  return <Check size={15} className="text-white/70" aria-label="Sent" title="Sent" />;
 }
 
 function MessageBubble({
@@ -108,6 +118,11 @@ function MessageBubble({
   const sender = message.sender || {};
   const reactions = message.reactions || [];
   const deleted = Boolean(message.isDeleted);
+  /* Written while the retired per-chat encryption feature existed. Their text
+     only ever existed under a key the server never held, so it cannot be
+     recovered now the feature is gone — say that plainly instead of rendering
+     an empty bubble, which reads as a bug. */
+  const legacySealed = Boolean(message.encrypted) && !message.content;
   const forwarded = Boolean(message.forwardedFrom || message.forwarded);
   // Server rejects edits after this window, so don't offer the option past it.
   const EDIT_WINDOW_MS = 5 * 60 * 1000;
@@ -248,6 +263,10 @@ function MessageBubble({
           {deleted ? (
             <p className={cn('flex items-center gap-1.5 py-0.5 text-sm italic', isMine ? 'text-white/70' : 'text-content-muted')}>
               <Ban size={14} /> This message was deleted
+            </p>
+          ) : legacySealed ? (
+            <p className={cn('flex items-center gap-1.5 py-0.5 text-sm italic', isMine ? 'text-white/70' : 'text-content-muted')}>
+              <Ban size={14} /> Message unavailable
             </p>
           ) : editing ? (
             <div className="flex items-end gap-1.5 py-0.5">

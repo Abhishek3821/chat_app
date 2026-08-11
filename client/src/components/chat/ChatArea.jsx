@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Lock } from 'lucide-react';
 import ChatHeader from './ChatHeader';
 import MessageList from './MessageList';
 import MessageComposer from './MessageComposer';
@@ -9,7 +8,6 @@ import PinnedBanner from './PinnedBanner';
 import { useChat } from '../../store/useChat';
 import { useAuth } from '../../store/useAuth';
 import { useUI } from '../../store/useUI';
-import { useE2EE } from '../../store/useE2EE';
 import { getChatDisplay, chatPeerIds } from '../../lib/chat';
 import { wallpaperStyle } from '../../lib/wallpapers';
 import { emitSocket } from '../../hooks/useSocket';
@@ -53,12 +51,9 @@ export default function ChatArea({ chat }) {
   const openModal = useUI((s) => s.openModal);
   const theme = useUI((s) => s.theme);
   const defaultWallpaper = useAuth((s) => s.user?.settings?.wallpaper);
-  const e2eeStatus = useE2EE((s) => s.status);
-  const rehydrateChat = useChat((s) => s.rehydrateChat);
   const [replyTo, setReplyTo] = useState(null);
 
-  // In-chat search: the query plus whatever the server (or, for encrypted
-  // chats, the local cache) came back with.
+  // In-chat search: the query plus whatever the server came back with.
   const [search, setSearch] = useState('');
   const [searchState, setSearchState] = useState({ results: [], scope: 'none', loading: false, hasMore: false });
 
@@ -148,12 +143,6 @@ export default function ChatArea({ chat }) {
     if (messages.length) emitSocket('message:read', { chatId: chat._id });
   }, [messages.length, chat._id]);
 
-  // Unlocked mid-session (via the banner or Settings): the messages on screen
-  // were decrypted while locked, i.e. they're placeholders. Decrypt them now.
-  useEffect(() => {
-    if (e2eeStatus === 'unlocked') rehydrateChat(chatId);
-  }, [e2eeStatus, chatId, rehydrateChat]);
-
   const handleSend = async (payload) => {
     await sendMessage({ chatId: chat._id, ...payload });
     setReplyTo(null);
@@ -188,29 +177,6 @@ export default function ChatArea({ chat }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ChatHeader chat={chat} currentUser={currentUser} search={search} onSearch={setSearch} />
 
-        {/* This chat is sealed but this device can't open it — say so and offer
-            the way out, instead of leaving a screen of "🔒 could not decrypt". */}
-        {chat.e2ee?.enabled && e2eeStatus !== 'unlocked' && e2eeStatus !== 'idle' && (
-          <div className="neu-inset-sm flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
-            <Lock size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="min-w-0 flex-1 text-xs text-amber-800 dark:text-amber-200">
-              {e2eeStatus === 'unsupported'
-                ? 'This browser can’t open encrypted chats — it needs a secure (https) connection.'
-                : e2eeStatus === 'locked'
-                  ? 'Encrypted chat. Unlock encryption on this device to read these messages.'
-                  : 'Encrypted chat. Set up encryption to read these messages.'}
-            </p>
-            {e2eeStatus !== 'unsupported' && (
-              <button
-                onClick={() => openModal('e2eeSetup')}
-                className="shrink-0 rounded-lg bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-500/30 dark:text-amber-100"
-              >
-                {e2eeStatus === 'locked' ? 'Unlock' : 'Set up'}
-              </button>
-            )}
-          </div>
-        )}
-
         {/* Pinned strip — hidden while searching, where the results list owns
             the space and a pin has no bearing on what you're looking for. */}
         {!searching && (
@@ -234,6 +200,7 @@ export default function ChatArea({ chat }) {
           />
         ) : (
           <MessageList
+            chatId={chatId}
             messages={messages}
             loading={loadingMessages}
             isGroup={d.isGroup}

@@ -13,6 +13,8 @@ import {
   AlertTriangle,
   BookOpen,
   Code2,
+  ChevronDown,
+  Lock,
 } from 'lucide-react';
 import { Webhook } from 'lucide-react';
 import Button from '@/components/ui/Button';
@@ -53,6 +55,181 @@ const rise = {
   animate: { opacity: 1, y: 0 },
 };
 const stagger = { animate: { transition: { staggerChildren: 0.05 } } };
+
+/**
+ * Per-key integration guide, generated FROM THAT KEY'S SCOPES.
+ *
+ * Deliberately scope-aware rather than one generic snippet: showing
+ * `POST /messages` to someone holding a read-only key sends them to debug a 403
+ * that is working exactly as configured. Everything the key cannot do is listed
+ * separately, with the scope it would need, so a missing endpoint is explained
+ * instead of just absent.
+ *
+ * `plaintext` is only present for a key created in this page view — the server
+ * stores a hash, so for every other key the snippets use a placeholder.
+ */
+function KeyIntegration({ k, plaintext }) {
+  const KEY = plaintext || '<YOUR_API_KEY>';
+  const has = (s) => k.scopes.includes(s);
+  const allowed = ENDPOINTS.filter(([, , scope]) => scope === '—' || has(scope));
+  const missing = ENDPOINTS.filter(([, , scope]) => scope !== '—' && !has(scope));
+
+  const step1 = `curl ${API_BASE}/me \\\n  -H "X-API-Key: ${KEY}"`;
+
+  // A reusable helper is the shape almost everyone actually wants, and it puts
+  // the key in an env var — which is the habit worth teaching.
+  const step2 = `// Node 18+ · keep this on your SERVER. Never ship a key to a browser.
+const CC_KEY = process.env.CHATCONNECT_API_KEY; // ${k.prefix}…
+
+async function cc(path, init = {}) {
+  const res = await fetch('${API_BASE}' + path, {
+    ...init,
+    headers: { 'X-API-Key': CC_KEY, 'Content-Type': 'application/json', ...init.headers },
+  });
+  if (!res.ok) throw new Error('ChatConnect ' + res.status + ': ' + (await res.text()));
+  return res.json();
+}`;
+
+  /* A first task built from what this key can actually do. Ordered by how
+     commonly each one is the reason a key gets created at all. */
+  let step3 = null;
+  if (has('chat:write')) {
+    step3 = {
+      title: has('contacts:read') ? 'Send a message to a contact' : 'Send a message to a chat',
+      code: has('contacts:read')
+        ? `// 1. who can I message?
+const { contacts } = await cc('/contacts');
+const to = contacts[0];
+
+// 2. get-or-create the 1:1 chat (safe to call repeatedly)
+const { chat } = await cc('/chats/direct/' + to._id, { method: 'POST' });
+
+// 3. send
+await cc('/messages', {
+  method: 'POST',
+  body: JSON.stringify({ chatId: chat._id, content: 'Deploy finished ✅' }),
+});`
+        : `// You have chat:write but not contacts:read, so pass a chatId you
+// already know (grant contacts:read to look people up from code).
+await cc('/messages', {
+  method: 'POST',
+  body: JSON.stringify({ chatId: '<CHAT_ID>', content: 'Deploy finished ✅' }),
+});`,
+    };
+  } else if (has('meetings:write')) {
+    step3 = {
+      title: 'Schedule a meeting',
+      code: `const { meeting } = await cc('/meetings', {
+  method: 'POST',
+  body: JSON.stringify({
+    title: 'Kickoff',
+    startAt: new Date(Date.now() + 3600_000).toISOString(),
+    durationMinutes: 30,
+    type: 'video',
+  }),
+});
+console.log('Share this link:', meeting.link);`,
+    };
+  } else if (has('calls:write')) {
+    step3 = {
+      title: 'Start a call',
+      code: `await cc('/calls', {
+  method: 'POST',
+  body: JSON.stringify({ receiverId: '<USER_ID>', type: 'video' }),
+});`,
+    };
+  } else if (has('chat:read')) {
+    step3 = {
+      title: 'Read your conversations',
+      code: `const { chats } = await cc('/chats');
+const { messages } = await cc('/messages/' + chats[0]._id + '?limit=20');
+console.log(messages.map((m) => m.content));`,
+    };
+  }
+
+  return (
+    <div className="mt-3 border-t border-border pt-4">
+      {/* Step 1 — the credential itself */}
+      <p className="text-[11px] font-bold uppercase tracking-wide text-content-muted">1 · Authenticate</p>
+      <p className="mt-1 text-xs text-content-muted">
+        Every request carries <code className="neu-inset-sm rounded bg-surface-2 px-1">X-API-Key</code>. Base URL{' '}
+        <code className="neu-inset-sm rounded bg-surface-2 px-1">{API_BASE}</code>. Limit: <strong>120 requests/minute</strong> per key.
+      </p>
+      {!plaintext && (
+        <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+          The key itself is only shown at creation, so the snippets below use a placeholder — paste your own in.
+        </p>
+      )}
+      <CodeBlock code={step1} />
+
+      {/* Step 2 — the helper */}
+      <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-content-muted">2 · A tiny client</p>
+      <CodeBlock code={step2} />
+
+      {/* Step 3 — something real */}
+      {step3 && (
+        <>
+          <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-content-muted">3 · {step3.title}</p>
+          <CodeBlock code={step3.code} />
+        </>
+      )}
+
+      {/* What this key can and cannot reach */}
+      <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-content-muted">
+        This key can call {allowed.length} endpoint{allowed.length === 1 ? '' : 's'}
+      </p>
+      <div className="mt-2 space-y-1">
+        {allowed.map(([method, path, , desc]) => (
+          <div key={method + path} className="flex items-center gap-2 text-xs">
+            <span className="neu-raised-sm w-12 shrink-0 rounded bg-surface px-1 py-0.5 text-center font-mono text-[10px] font-bold text-brand-600 dark:text-brand-300">
+              {method}
+            </span>
+            <code className="shrink-0 text-content">{path}</code>
+            <span className="truncate text-content-muted">{desc}</span>
+          </div>
+        ))}
+      </div>
+
+      {missing.length > 0 && (
+        <>
+          <p className="mt-4 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-content-muted">
+            <Lock size={11} /> Not granted — would return 403
+          </p>
+          <div className="mt-2 space-y-1">
+            {missing.map(([method, path, scope]) => (
+              <div key={method + path} className="flex items-center gap-2 text-xs opacity-60">
+                <span className="w-12 shrink-0 rounded bg-content/10 px-1 py-0.5 text-center font-mono text-[10px] font-bold text-content-muted">
+                  {method}
+                </span>
+                <code className="shrink-0 text-content-muted">{path}</code>
+                <span className="truncate text-content-muted">
+                  needs <code>{scope}</code>
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-content-muted">
+            Scopes are fixed once a key is made — create a new key to change them.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Code block with a copy button, used throughout the integration guide. */
+function CodeBlock({ code }) {
+  return (
+    <div className="mt-2 flex items-start gap-2">
+      <pre className="scrollbar-thin min-w-0 flex-1 overflow-x-auto rounded-2xl bg-navy-950 p-3.5 text-[11px] leading-relaxed text-cyan-100">
+        {code}
+      </pre>
+      <Button size="sm" variant="subtle" onClick={() => copy(code)} className="h-9 w-9 shrink-0 px-0" aria-label="Copy snippet">
+        <Copy size={14} />
+      </Button>
+    </div>
+  );
+}
 
 function Card({ children, className }) {
   return (
@@ -165,6 +342,7 @@ export default function DevelopersPage() {
   const [picked, setPicked] = useState(['chat:read', 'chat:write', 'contacts:read']);
   const [creating, setCreating] = useState(false);
   const [newKey, setNewKey] = useState(null); // plaintext, shown once
+  const [openKey, setOpenKey] = useState(null); // which key's integration guide is expanded
 
   useEffect(() => {
     if (!DEMO_MODE) load();
@@ -180,7 +358,13 @@ export default function DevelopersPage() {
       const secret = await create(label.trim() || 'API key', picked);
       setNewKey(secret);
       setLabel('');
-      toast.success('API key created');
+      /* Open the new key's guide straight away. This is the ONLY moment the
+         plaintext exists, so it's the only time the snippets can carry the real
+         key — asking the user to go and expand it themselves risks them copying
+         the secret, dismissing the panel, and losing it. */
+      const created = useApiKeys.getState().keys.find((k) => secret.startsWith(k.prefix));
+      if (created) setOpenKey(created.id);
+      toast.success('API key created — integration steps are open below.');
     } catch (err) {
       toast.error(err.message || 'Could not create key');
     } finally {
@@ -277,17 +461,37 @@ export default function DevelopersPage() {
               <p className="mt-2 text-sm text-content-muted">No API keys yet.</p>
             ) : (
               <div className="mt-3 space-y-2">
-                {keys.map((k) => (
-                  <div key={k.id} className="neu-raised-sm flex items-center gap-3 rounded-2xl bg-surface p-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><KeyRound size={18} /></span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-content">{k.label}</p>
-                      <p className="truncate text-xs text-content-muted"><code>{k.prefix}…</code> · {k.scopes.join(', ')}</p>
-                      <p className="text-[11px] text-content-muted">{k.lastUsedAt ? `Last used ${formatRelative(k.lastUsedAt)}` : 'Never used'}</p>
+                {keys.map((k) => {
+                  const open = openKey === k.id;
+                  // The plaintext belongs to this key only if it's the one just
+                  // created — match on prefix so a second key can't show the first
+                  // key's secret in its snippets.
+                  const mine = newKey && newKey.startsWith(k.prefix) ? newKey : null;
+                  return (
+                    <div key={k.id} className="neu-raised-sm rounded-2xl bg-surface p-3">
+                      <div className="flex items-center gap-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300"><KeyRound size={18} /></span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-content">{k.label}</p>
+                          <p className="truncate text-xs text-content-muted"><code>{k.prefix}…</code> · {k.scopes.join(', ')}</p>
+                          <p className="text-[11px] text-content-muted">{k.lastUsedAt ? `Last used ${formatRelative(k.lastUsedAt)}` : 'Never used'}</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => setOpenKey(open ? null : k.id)}
+                          aria-expanded={open}
+                          className="h-11 shrink-0 sm:h-9"
+                        >
+                          <Code2 size={15} /> <span className="hidden xs:inline">Integrate</span>
+                          <ChevronDown size={14} className={cn('transition-transform', open && 'rotate-180')} />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="h-11 shrink-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9"><Trash2 size={15} /> <span className="hidden xs:inline">Revoke</span></Button>
+                      </div>
+                      {open && <KeyIntegration k={k} plaintext={mine} />}
                     </div>
-                    <Button size="sm" variant="ghost" onClick={() => revoke(k.id).then(() => toast('Key revoked'))} className="h-11 shrink-0 text-red-600 hover:bg-red-500/10 dark:text-red-400 sm:h-9"><Trash2 size={15} /> Revoke</Button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>

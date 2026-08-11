@@ -70,5 +70,14 @@ export const serveUpload = asyncHandler(async (req, res) => {
   // re-downloading the same image/video on scrollback/reopen — a real, common
   // case in a chat UI — without weakening the access control at all.
   res.set('Cache-Control', 'private, max-age=3600');
+  // User-supplied bytes served from our own origin. The upload allowlist already
+  // refuses .svg/.html/.js, and helmet adds nosniff globally, but the app opens
+  // attachments as TOP-LEVEL navigations (`window.open` for view-once, target
+  // _blank for images and documents) — and a document navigation is exactly the
+  // context where any active content in a file would get to run. `default-src
+  // 'none'` neutralises that regardless of how the type was resolved, while
+  // leaving plain image/video/PDF rendering alone.
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
   res.sendFile(filePath);
 });

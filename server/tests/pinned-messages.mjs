@@ -31,7 +31,7 @@ if (!baseUri) {
   console.error('MONGO_URI missing in server/.env — cannot run tests.');
   process.exit(1);
 }
-// Shares the throwaway database with tests/search-e2ee-wallpaper.mjs rather
+// Shares the throwaway database with tests/search-wallpaper.mjs rather
 // than minting a new one. Deliberate: the Atlas free tier caps the CLUSTER at
 // 500 collections, and one database per suite (~20 collections each) is what
 // exhausted it. Both suites drop the database on entry and CI runs them in

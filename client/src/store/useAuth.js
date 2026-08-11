@@ -225,13 +225,19 @@ export const useAuth = create((set, get) => ({
     await api.post('/auth/sessions/revoke-others');
   },
 
-  /** Local-only session teardown (used when the API says our token is dead). */
+  /** Local-only session teardown (used when the API says our token is dead).
+   *
+   *  Deliberately does NOT reset the appearance. This fires on any 401, which
+   *  with a 1-hour access token is a routine event — an expired token on page
+   *  load, a revoked session, a network blip mid-refresh. Wiping the saved
+   *  theme/accent there meant an ordinary token expiry silently reset the look
+   *  to dark/teal, and the user had no way to connect the two. A real logout
+   *  (below) still clears it, which is what the shared-browser case needs. */
   forceLogout: () => {
     sessionStorage.removeItem('cc_unlocked');
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
-    useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null, loading: false });
   },
 

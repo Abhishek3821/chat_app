@@ -68,26 +68,58 @@ export function messageAlertsAllowed({ isGroup, chatId } = {}) {
   return true;
 }
 
+/** Raster, not the SVG logo: Chrome silently refuses to render an SVG as a
+ *  notification icon and falls back to a generic browser glyph. */
+const APP_ICON = '/icon-192.png';
+
 /**
- * Show an OS notification for an incoming message.
+ * Show an OS notification for an incoming message, WhatsApp-style.
  *
  * Skipped while the app is focused — the in-app chat/bell already shows it, and
  * a duplicate OS toast over a visible window is what makes web chat apps feel
  * noisy. `tag` is per-chat so a burst from one person collapses into a single
- * notification instead of stacking ten.
+ * notification instead of stacking ten, and the body then leads with the count
+ * ("3 new messages") the way WhatsApp does rather than silently replacing the
+ * previous text.
+ *
+ * Shown through the SERVICE WORKER wherever one is registered. That is not a
+ * stylistic choice: Chrome on Android does not implement the `Notification`
+ * constructor at all — `new Notification()` throws "Illegal constructor" there,
+ * and because every call here is wrapped in a swallow-everything try/catch, the
+ * failure was completely silent. Mobile users were getting NO notifications.
+ * The constructor path is kept only as a desktop fallback for the brief window
+ * before the worker is ready.
  */
-export function notifyMessage({ chatId, title, body, icon, isGroup }) {
+export async function notifyMessage({ chatId, title, body, icon, isGroup }) {
   try {
     if (!notificationsSupported() || Notification.permission !== 'granted') return;
     if (appIsFocused()) return;
     if (!messageAlertsAllowed({ isGroup, chatId })) return;
-    const n = new Notification(title || 'New message', {
-      body: body || '',
-      icon: icon || '/logo.svg',
-      badge: '/logo.svg',
+
+    // Unread for THIS chat, so a burst reads as "N new messages" instead of the
+    // notification quietly swapping its text each time.
+    const unread = useChat.getState().chats.find((c) => c._id === chatId)?.unreadCount || 0;
+    const heading = title || 'New message';
+    const options = {
+      body: unread > 1 ? `${unread} new messages · ${body || ''}`.trim() : body || '',
+      icon: icon || APP_ICON,
+      badge: APP_ICON,
       tag: `cc-chat-${chatId}`,
       renotify: true,
-    });
+      vibrate: [90, 40, 90],
+      timestamp: Date.now(),
+      // Consumed by the worker's notificationclick handler, so a click lands in
+      // the right conversation whether the app was open or closed.
+      data: { chatId, url: chatId ? `/?chat=${chatId}` : '/' },
+    };
+
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (reg?.showNotification) {
+      await reg.showNotification(heading, options);
+      return;
+    }
+
+    const n = new Notification(heading, options);
     n.onclick = () => {
       try {
         window.focus();

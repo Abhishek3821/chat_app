@@ -1,10 +1,10 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster, toast, useToasterStore } from 'react-hot-toast';
 
 import { useUI } from './store/useUI';
+import { useChat } from './store/useChat';
 import { useAuth } from './store/useAuth';
-import { useE2EE } from './store/useE2EE';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import LockScreen from './components/LockScreen.jsx';
 import BusyCallBanner from './components/overlays/BusyCallBanner.jsx';
@@ -32,6 +32,7 @@ const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
 const StarredPage = lazy(() => import('./pages/StarredPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
 const DevelopersPage = lazy(() => import('./pages/DevelopersPage.jsx'));
+const PlatformPage = lazy(() => import('./pages/PlatformPage.jsx'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
 const MeetingRoom = lazy(() => import('./pages/MeetingRoom.jsx'));
 const JoinInvite = lazy(() => import('./pages/JoinInvite.jsx'));
@@ -96,19 +97,50 @@ export default function App() {
   const userId = useAuth((s) => s.user?._id);
   const userSettings = useAuth((s) => s.user?.settings);
   const location = useLocation();
+  const navigate = useNavigate();
 
-  // Each logged-in user's OWN look: hydrate theme + accent from THEIR account so
-  // preferences follow the person (not the browser) and never leak between users.
+  // Each logged-in user's OWN look. This used to force the account's values over
+  // whatever this browser had saved (and overwrite localStorage with them) on
+  // every load, so a stale server copy permanently beat your latest choice.
+  // hydrateAppearance keeps the account's value for a new device / a different
+  // user, and otherwise trusts what you last picked here. See useUI.
   useEffect(() => {
-    if (!userSettings) return;
-    if (userSettings.theme) useUI.getState().setTheme(userSettings.theme);
-    // Fall back to the brand palette, not the old indigo — otherwise every
-    // signed-in account with no saved accent gets forced off the new theme.
-    useUI.getState().setAccent(userSettings.accent || 'teal');
-  }, [userSettings?.theme, userSettings?.accent]);
+    if (!userId || !userSettings) return;
+    useUI.getState().hydrateAppearance(userId, userSettings);
+  }, [userId, userSettings?.theme, userSettings?.accent]);
 
   // Apply the theme to <html>, resolving 'system' against the OS (and reacting to
   // the OS switching light/dark while 'system' is selected).
+  /* Notification deep link: `/?chat=<id>`.
+     The server has always put that URL on every message push, and the service
+     worker has always navigated to it — but nothing here ever read the param, so
+     tapping a notification dumped you on the chat LIST instead of the
+     conversation it was about. Runs once the user is loaded (setActiveChat needs
+     an authenticated session), then strips the param so a later refresh or a
+     Back press doesn't silently reopen the same chat. */
+  useEffect(() => {
+    if (!userId) return;
+    const chatId = new URLSearchParams(location.search).get('chat');
+    if (!chatId) return;
+    useChat.getState().setActiveChat(chatId);
+    useUI.getState().setChatListOpen(false); // on a phone, show the conversation
+    navigate(location.pathname, { replace: true });
+  }, [userId, location.search, location.pathname, navigate]);
+
+  /* Warm path for the same thing: when the app is ALREADY open, the service
+     worker posts the chat id instead of navigating, so tapping a notification
+     switches conversations without tearing down and re-booting the SPA. */
+  useEffect(() => {
+    if (!userId || !navigator.serviceWorker) return undefined;
+    const onMessage = (event) => {
+      if (event.data?.type !== 'cc:open-chat' || !event.data.chatId) return;
+      useChat.getState().setActiveChat(event.data.chatId);
+      useUI.getState().setChatListOpen(false);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [userId]);
+
   useEffect(() => {
     const root = document.documentElement;
     const mq =
@@ -143,8 +175,6 @@ export default function App() {
   // key from memory on sign-out so the next account on this browser starts
   // clean and can never touch the previous one's messages.
   useEffect(() => {
-    if (userId) useE2EE.getState().init();
-    else useE2EE.getState().reset();
   }, [userId]);
 
   return (
@@ -214,6 +244,15 @@ export default function App() {
               element={
                 <AdminRoute>
                   <DevelopersPage />
+                </AdminRoute>
+              }
+            />
+            {/* Embeddable-platform console: tenants, capabilities, secrets. */}
+            <Route
+              path="/platform"
+              element={
+                <AdminRoute>
+                  <PlatformPage />
                 </AdminRoute>
               }
             />

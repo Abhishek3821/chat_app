@@ -1,6 +1,7 @@
 import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
+import { tenantScope } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat, emitToUser } from '../socket/index.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
@@ -29,9 +30,19 @@ export const createGroup = asyncHandler(async (req, res) => {
   if (!Array.isArray(members)) throw new ApiError(400, 'members must be a list.');
 
   const uniqueMembers = [...new Set(members.map(String))].filter((id) => id !== String(req.user._id));
-  // Tenant isolation: only members in the same workspace can be added.
+  /* Isolation: a member must be in the same workspace AND the same embedded
+     tenant. `workspace: req.user.workspace` alone was not enough — for a
+     platform end user that value is undefined, and Mongoose STRIPS undefined
+     from a query, so the restriction silently disappeared and any user id could
+     be added to the group. tenantScope always yields a concrete value. */
   const sameWs = uniqueMembers.length
-    ? (await User.find({ _id: { $in: uniqueMembers }, workspace: req.user.workspace }).select('_id')).map((u) => String(u._id))
+    ? (
+        await User.find({
+          _id: { $in: uniqueMembers },
+          workspace: req.user.workspace,
+          ...tenantScope(req.user),
+        }).select('_id')
+      ).map((u) => String(u._id))
     : [];
   const participants = [
     { user: req.user._id, role: 'owner' },
@@ -84,7 +95,11 @@ export const addMembers = asyncHandler(async (req, res) => {
 
   // Honor each invitee's groupAddPermission: 'contacts' means only their own
   // contacts may pull them into a group — otherwise anyone could add anyone.
-  const candidates = await User.find({ _id: { $in: requested }, workspace: chat.workspace }).select('name privacy contacts');
+  const candidates = await User.find({
+    _id: { $in: requested },
+    workspace: chat.workspace,
+    ...tenantScope(req.user), // same reason as createGroup above
+  }).select('name privacy contacts');
   const added = candidates.filter((u) => {
     const perm = u.privacy?.groupAddPermission || 'everyone';
     if (perm === 'contacts') return (u.contacts || []).some((c) => String(c) === String(req.user._id));

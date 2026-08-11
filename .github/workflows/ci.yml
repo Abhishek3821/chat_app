@@ -65,9 +65,9 @@ jobs:
       - name: feature-coverage suite (81 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/feature-coverage.mjs
-      - name: search / E2EE / wallpaper suite (69 checks)
+      - name: search / wallpaper suite
         if: ${{ env.MONGO_URI != '' }}
-        run: node tests/search-e2ee-wallpaper.mjs
+        run: node tests/search-wallpaper.mjs
       # Shares a test database with the suite above, so it must not run in
       # parallel with it (the free Atlas tier caps the cluster at 500
       # collections, and one database per suite is what exhausted it).

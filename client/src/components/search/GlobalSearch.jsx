@@ -184,6 +184,12 @@ export default function GlobalSearch() {
           onKeyDown={onKeyDown}
           placeholder="Search people, messages, meetings…"
           aria-label="Search"
+          // type=search + a non-credential name + autoComplete=off keep password
+          // managers from treating this as the username field for the password
+          // form on the Settings → Account screen (see the note there).
+          type="search"
+          name="app-search"
+          autoComplete="off"
           className="ring-brand h-10 w-full rounded-full neu-inset bg-surface-2 pl-11 pr-16 text-sm placeholder:text-content-muted"
         />
         <span className="pointer-events-none absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1">
@@ -252,6 +258,9 @@ export default function GlobalSearch() {
                   onKeyDown={onKeyDown}
                   placeholder="Search people, messages, meetings…"
                   aria-label="Search"
+                  type="search"
+                  name="app-search"
+                  autoComplete="off"
                   // text-base: anything smaller makes iOS Safari zoom on focus.
                   className="ring-brand h-11 w-full rounded-xl neu-inset bg-surface-2 pl-11 pr-9 text-base placeholder:text-content-muted"
                 />
@@ -339,7 +348,6 @@ function ResultsPanel({ query, results, loading, flat, cursor, me, onHover, onPi
               <p className="truncate text-sm font-semibold text-content">{d.name}</p>
               <p className="truncate text-xs text-content-muted">{c.isGroup ? 'Group' : 'Direct message'}</p>
             </div>
-            {c.e2ee?.enabled && <Tag>🔒</Tag>}
           </>
         );
       })}
@@ -376,13 +384,6 @@ function ResultsPanel({ query, results, loading, flat, cursor, me, onHover, onPi
         </>
       ))}
 
-      {results?.encryptedChats?.length > 0 && (
-        <p className="px-4 py-2.5 text-[11px] text-content-muted">
-          🔒 {results.encryptedChats.length} encrypted{' '}
-          {results.encryptedChats.length === 1 ? 'chat is' : 'chats are'} not searchable from here — open the chat and
-          search inside it.
-        </p>
-      )}
     </div>
   );
 }

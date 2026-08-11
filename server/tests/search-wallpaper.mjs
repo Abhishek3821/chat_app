@@ -1,34 +1,27 @@
 /**
- * End-to-end tests for the four features added on top of the audit findings:
+ * End-to-end tests for:
  *   1. global search (people / chats / messages / meetings)
  *   2. starred messages (real list + pagination, not a count)
  *   3. in-chat search over the WHOLE history + jump-to-message context
- *   4. end-to-end encryption (identity, key distribution, sealed messages,
- *      rotation on membership change, and the server's inability to read)
- *   5. per-chat wallpaper persistence
+ *   4. per-chat wallpaper persistence
  *
- * Runs the REAL server against an isolated database, and performs the client's
- * crypto with the very same module the browser ships (client/src/lib/e2ee.js)
- * under Node's WebCrypto — so this proves the actual wire contract, not a
- * re-implementation of it.
+ * Runs the REAL server against an isolated database.
  *
- * Run:  node tests/search-e2ee-wallpaper.mjs   (from /server)
+ * (This suite also covered the per-chat end-to-end encryption feature, which has
+ * since been removed from the product; those sections went with it.)
+ *
+ * Run:  node tests/search-wallpaper.mjs   (from /server)
  */
 import { spawn } from 'child_process';
 import path from 'path';
 import dns from 'dns';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.resolve(__dirname, '..');
-const CLIENT_DIR = path.resolve(SERVER_DIR, '..', 'client');
 dotenv.config({ path: path.join(SERVER_DIR, '.env') });
-
-// The browser's crypto module, imported directly. If this file and the client
-// ever drift, these tests break — which is the point.
-const e2ee = await import(pathToFileURL(path.join(CLIENT_DIR, 'src', 'lib', 'e2ee.js')).href);
 
 const PORT = 5103;
 const API = `http://127.0.0.1:${PORT}/api`;
@@ -113,7 +106,7 @@ async function finish(code) {
 // user from a fixed test range rather than a random draw that could collide.
 let phoneSeq = 0;
 
-/** Everything a test user needs, including a live E2EE identity. */
+/** Everything a test user needs. */
 async function makeUser(tag) {
   const stamp = `${Date.now()}${Math.floor(Math.random() * 1e4)}`;
   const email = `${tag}${stamp}@test.local`;
@@ -126,23 +119,6 @@ async function makeUser(tag) {
     throw new Error(`signup for ${tag} failed (${status}): ${data?.message || JSON.stringify(data)}`);
   }
   return { token: data.accessToken || data.token, id: data.user._id, name: data.user.name, email };
-}
-
-async function setupIdentity(user, passphrase) {
-  const pair = await e2ee.generateIdentity();
-  const publicKey = await e2ee.exportPublicKey(pair.publicKey);
-  const wrapped = await e2ee.wrapIdentity(pair.privateKey, passphrase);
-  const res = await http('POST', '/e2ee/identity', { token: user.token, body: { publicKey, ...wrapped } });
-  user.keys = { pair, publicKey, wrapped };
-  return res;
-}
-
-/** Seal a fresh chat key for every member — exactly what the client does. */
-async function sealChatKeyFor(members) {
-  const chatKey = await e2ee.generateChatKey();
-  const keys = [];
-  for (const m of members) keys.push({ user: m._id, ...(await e2ee.wrapChatKeyFor(chatKey, m.publicKey)) });
-  return { chatKey, keys };
 }
 
 (async () => {
@@ -261,7 +237,6 @@ async function sealChatKeyFor(members) {
     const { status, data } = await http('GET', `/messages/${chatId}/search?q=aardvark`, { token: A.token });
     check('in-chat search returns 200', status === 200);
     check('finds a message far outside the loaded page', data.messages?.some((m) => String(m._id) === String(needleId)));
-    check('reports it was a server-side search', data.encrypted === false);
   }
   {
     const { status, data } = await http('GET', `/messages/${chatId}/context/${needleId}?radius=10`, { token: A.token });
@@ -275,166 +250,7 @@ async function sealChatKeyFor(members) {
     check('non-member cannot search this chat', status === 403);
   }
 
-  /* ── 4. End-to-end encryption ─────────────────────────────────── */
-  section('E2EE — identity');
-  {
-    const { status } = await setupIdentity(A, 'alpha-pass-phrase');
-    check('A publishes an identity', status === 200);
-    await setupIdentity(B, 'bravo-pass-phrase');
-
-    const { data } = await http('GET', '/e2ee/me', { token: A.token });
-    check('identity round-trips for a second device', data.identity?.wrappedPrivateKey === A.keys.wrapped.wrappedPrivateKey);
-
-    const unwrapped = await e2ee.unwrapIdentity(data.identity, 'alpha-pass-phrase');
-    check('the stored blob really opens with the passphrase', !!unwrapped);
-
-    const other = await e2ee.generateIdentity();
-    const otherPub = await e2ee.exportPublicKey(other.publicKey);
-    const clash = await http('POST', '/e2ee/identity', {
-      token: A.token,
-      body: { publicKey: otherPub, ...(await e2ee.wrapIdentity(other.privateKey, 'x'.repeat(9))) },
-    });
-    check('replacing an identity requires replace:true', clash.status === 409);
-
-    const junk = await http('POST', '/e2ee/identity', {
-      token: C.token,
-      body: { publicKey: 'not base64 !!', wrappedPrivateKey: 'x', kdfSalt: 'x', kdfIterations: 10, wrapIv: 'x' },
-    });
-    check('malformed key material is rejected', junk.status === 400);
-  }
-
-  section('E2EE — enabling a chat');
-  let chatKeyA;
-  {
-    const { data: members } = await http('GET', `/e2ee/chats/${chatId}/members`, { token: A.token });
-    check('member keys are listed', members.members?.length === 2);
-    check('nobody is missing an identity', (members.missing || []).length === 0);
-
-    const { chatKey, keys } = await sealChatKeyFor(members.members);
-    chatKeyA = chatKey;
-
-    const partial = await http('POST', `/e2ee/chats/${chatId}/enable`, { token: A.token, body: { keys: [keys[0]] } });
-    check('enabling with a key for only one member is rejected', partial.status === 400);
-
-    const { status, data } = await http('POST', `/e2ee/chats/${chatId}/enable`, { token: A.token, body: { keys } });
-    check('enable succeeds with a full key set', status === 200);
-    check('key version starts at 1', data.e2ee?.version === 1);
-
-    const again = await http('POST', `/e2ee/chats/${chatId}/enable`, { token: A.token, body: { keys } });
-    check('cannot enable twice', again.status === 409);
-
-    const outsider = await http('GET', `/e2ee/chats/${chatId}/keys`, { token: C.token });
-    check('a non-member cannot fetch chat keys', outsider.status === 403);
-  }
-
-  section('E2EE — sealed messages');
-  const SECRET = 'the vault code is 4815162342 🔐';
-  let sealedId;
-  {
-    const plain = await http('POST', '/messages', { token: A.token, body: { chatId, content: SECRET } });
-    check('plaintext into an encrypted chat is refused', plain.status === 409);
-
-    const payload = await e2ee.encryptText(chatKeyA, SECRET);
-    const stale = await http('POST', '/messages', { token: A.token, body: { chatId, enc: { ...payload, v: 99 } } });
-    check('a stale key version is refused', stale.status === 409);
-
-    const { status, data } = await http('POST', '/messages', { token: A.token, body: { chatId, enc: { ...payload, v: 1 } } });
-    check('encrypted message accepted', status === 201);
-    check('server stores it flagged as encrypted', data.message?.encrypted === true);
-    check('server stores NO plaintext', data.message?.content === '');
-    sealedId = data.message._id;
-  }
-  {
-    // The real proof: read the raw document straight out of MongoDB.
-    const raw = await db.collection('messages').findOne({ _id: new mongoose.Types.ObjectId(sealedId) });
-    check('database row holds no plaintext', !JSON.stringify(raw).includes('4815162342'));
-    check('database row holds ciphertext', typeof raw.enc?.ct === 'string' && raw.enc.ct.length > 0);
-  }
-  {
-    // B fetches their own wrapped copy and reads the message.
-    const { data } = await http('GET', `/e2ee/chats/${chatId}/keys`, { token: B.token });
-    check('B receives a wrapped key copy', data.keys?.length === 1);
-    const bKey = await e2ee.unwrapChatKey(data.keys[0], B.keys.pair.privateKey);
-    const { data: msgs } = await http('GET', `/messages/${chatId}?limit=5`, { token: B.token });
-    const sealed = msgs.messages.find((m) => String(m._id) === String(sealedId));
-    const text = await e2ee.decryptText(bKey, sealed.enc);
-    check('B decrypts what A sent', text === SECRET);
-  }
-  {
-    // Scheduling into a sealed chat would be delivered LATER by the server,
-    // which holds no key — it would arrive in the clear. It must be refused.
-    const later = new Date(Date.now() + 60_000).toISOString();
-    const sched = await http('POST', '/messages/schedule', {
-      token: A.token,
-      body: { chatId, sendAt: later, content: 'would leak', type: 'text' },
-    });
-    check('scheduling is refused in an encrypted chat', sched.status === 409, `got ${sched.status}`);
-    check('and explains why', /encrypt/i.test(sched.data?.message || ''), sched.data?.message);
-  }
-  {
-    const { data } = await http('GET', `/messages/${chatId}/search?q=vault`, { token: A.token });
-    check('server-side search reports it cannot search an encrypted chat', data.encrypted === true && data.messages.length === 0);
-
-    const { data: g } = await http('GET', '/search?q=vault', { token: A.token });
-    check('global search finds no plaintext for a sealed message', (g.messages || []).length === 0);
-    check('global search flags the chat as encrypted instead', (g.encryptedChats || []).includes(String(chatId)));
-  }
-
-  section('E2EE — key rotation on membership change');
-  {
-    const { data: grp } = await http('POST', '/groups', { token: A.token, body: { name: 'Rotation Test', members: [B.id] } });
-    const gid = grp.chat._id;
-    const { data: m1 } = await http('GET', `/e2ee/chats/${gid}/members`, { token: A.token });
-    const sealed1 = await sealChatKeyFor(m1.members);
-    await http('POST', `/e2ee/chats/${gid}/enable`, { token: A.token, body: { keys: sealed1.keys } });
-
-    const p1 = await e2ee.encryptText(sealed1.chatKey, 'before carol joined');
-    await http('POST', '/messages', { token: A.token, body: { chatId: gid, enc: { ...p1, v: 1 } } });
-
-    await setupIdentity(C, 'carol-pass-phrase');
-    await http('POST', `/groups/${gid}/members`, { token: A.token, body: { members: [C.id] } });
-
-    const { data: m2 } = await http('GET', `/e2ee/chats/${gid}/members`, { token: A.token });
-    check('server reports the new member needs a key', m2.needsRotation === true);
-    check('and names who', (m2.unkeyed || []).some((u) => String(u._id) === String(C.id)));
-
-    const sealed2 = await sealChatKeyFor(m2.members);
-    const { data: rot } = await http('POST', `/e2ee/chats/${gid}/rotate`, { token: A.token, body: { keys: sealed2.keys } });
-    check('rotation mints version 2', rot.e2ee?.version === 2);
-
-    const { data: ck } = await http('GET', `/e2ee/chats/${gid}/keys`, { token: C.token });
-    check('the new member gets exactly one key version', ck.keys?.length === 1);
-    check('and it is the CURRENT one, not the old one', ck.keys?.[0]?.version === 2);
-
-    const { data: aKeys } = await http('GET', `/e2ee/chats/${gid}/keys`, { token: A.token });
-    check('an original member keeps both versions', aKeys.keys?.length === 2);
-
-    // Carol cannot read history sealed under v1 — the whole point of rotating.
-    const carolKey = await e2ee.unwrapChatKey(ck.keys[0], C.keys.pair.privateKey);
-    let readOldHistory = false;
-    try {
-      await e2ee.decryptText(carolKey, p1);
-      readOldHistory = true;
-    } catch {
-      /* expected */
-    }
-    check('new member cannot read pre-join history', readOldHistory === false);
-
-    const { data: m3 } = await http('GET', `/e2ee/chats/${gid}/members`, { token: A.token });
-    check('rotation clears the needs-rotation flag', m3.needsRotation === false);
-  }
-
-  section('E2EE — turning it off');
-  {
-    const { status, data } = await http('POST', `/e2ee/chats/${chatId}/disable`, { token: A.token });
-    check('disable succeeds', status === 200 && data.e2ee.enabled === false);
-    const after = await http('POST', '/messages', { token: A.token, body: { chatId, content: 'readable again' } });
-    check('plaintext is accepted once more', after.status === 201);
-    const raw = await db.collection('messages').findOne({ _id: new mongoose.Types.ObjectId(sealedId) });
-    check('previously sealed message stays sealed', raw.encrypted === true && !!raw.enc?.ct);
-  }
-
-  /* ── 5. Per-chat wallpaper ────────────────────────────────────── */
+  /* ── 4. Per-chat wallpaper ────────────────────────────────────── */
   section('Chat wallpaper');
   {
     const { status } = await http('PUT', `/users/me/chats/${chatId}/theme`, { token: A.token, body: { wallpaper: 'aurora' } });
@@ -443,7 +259,6 @@ async function sealChatKeyFor(members) {
     const { data } = await http('GET', '/chats', { token: A.token });
     const mine = data.chats.find((c) => String(c._id) === String(chatId));
     check('wallpaper comes back on the chat row', mine?.wallpaper === 'aurora');
-    check('chat rows do not ship the key material', mine?.e2ee?.keys === undefined);
 
     const { data: bData } = await http('GET', '/chats', { token: B.token });
     const theirs = bData.chats.find((c) => String(c._id) === String(chatId));

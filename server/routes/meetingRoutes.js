@@ -11,9 +11,13 @@ import {
   getMeetingRtc,
 } from '../controllers/meetingController.js';
 import { protect } from '../middleware/auth.js';
+import { requireFeature } from '../utils/appAuth.js';
 
 const router = Router();
 router.use(protect);
+// Embedded tenants only get capabilities their App has been granted; a
+// first-party user has no tenant, so this is a no-op for them.
+router.use(requireFeature('meetings'));
 
 router.get('/', getMeetings);
 router.post('/', createMeeting);

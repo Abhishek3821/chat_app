@@ -11,9 +11,9 @@ import { cn, formatDate } from '../../lib/utils';
  * loaded. The old behaviour filtered `messages` in memory and quietly reported
  * "no messages match" for anything above the current scroll position.
  *
- * `scope === 'local'` means the server couldn't help (an encrypted chat, where
- * it only holds ciphertext) and we fell back to the decrypted cache — the
- * banner says so rather than pretending the result set is complete.
+ * `scope === 'local'` means the server request failed and we fell back to the
+ * messages loaded on this device — the banner says so rather than pretending the
+ * result set is complete.
  */
 export default function ChatSearchResults({ query, results, scope, loading, hasMore, onPick }) {
   if (loading) {
@@ -34,8 +34,7 @@ export default function ChatSearchResults({ query, results, scope, loading, hasM
           <p className="text-sm font-semibold text-content">No messages match “{query}”</p>
           {scope === 'local' && (
             <p className="mx-auto mt-1.5 max-w-xs text-xs text-content-muted">
-              This chat is end-to-end encrypted, so only the messages loaded on this device were searched. Scroll back
-              to load more, then search again.
+              Only the messages loaded on this device were searched. Scroll back to load more, then search again.
             </p>
           )}
         </div>

@@ -3,11 +3,6 @@ import toast from 'react-hot-toast';
 import api, { DEMO_MODE } from '../lib/api';
 import { CHATS, MESSAGES } from '../lib/demoData';
 import { useAuth } from './useAuth';
-import { useE2EE } from './useE2EE';
-
-/** Decrypt any encrypted messages in a batch before they enter the store, so
- *  every consumer (bubbles, search, previews) sees ordinary `content`. */
-const hydrate = (chatId, messages) => useE2EE.getState().hydrate(chatId, messages);
 
 // Safety net for "typing…" that never stops (peer disconnected mid-keystroke,
 // their typing-stop was lost). Each typing flag auto-expires unless renewed.
@@ -22,6 +17,8 @@ export const useChat = create((set, get) => ({
   chats: [],
   activeChatId: null,
   messagesByChat: {},
+  loadingOlder: {}, // chatId -> true while a scroll-back page is in flight
+  noMoreOlder: {}, // chatId -> true once we've reached the start of the conversation
   typing: {}, // chatId -> array of userIds currently typing
   online: {}, // userId -> true, kept live via socket presence events
   loadingChats: false,
@@ -65,7 +62,7 @@ export const useChat = create((set, get) => ({
       await get().loadChats();
       if (activeChatId) {
         const { data } = await api.get(`/messages/${activeChatId}`);
-        const messages = await hydrate(activeChatId, data.messages);
+        const messages = data.messages;
         set((s) => ({ messagesByChat: { ...s.messagesByChat, [activeChatId]: messages } }));
       }
     } catch {
@@ -87,28 +84,73 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
-      // Decrypt before the messages land in the store — everything downstream
-      // (bubbles, previews, in-memory search) then works on plain text and
-      // needs no knowledge of encryption at all.
-      const messages = await hydrate(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
       // Pins ride along on the first page, so the banner is up as the
-      // conversation paints. Their messages need decrypting too.
+      // conversation paints.
       if (data.pins) {
-        const pinned = await hydrate(chatId, data.pins.map((p) => p.message));
+        const pinned = data.pins.map((p) => p.message);
         get().setPins(
           chatId,
           data.pins.map((p, i) => ({ ...p, message: pinned[i] })),
           data.canPin
         );
       }
-      // If someone joined this encrypted group after the key was sealed, mint a
-      // version they can read. Deliberately not awaited: housekeeping must not
-      // hold up painting the conversation.
-      const chat = get().chats.find((c) => c._id === chatId);
-      if (chat?.e2ee?.enabled) useE2EE.getState().ensureMembersKeyed(chatId);
     } finally {
       set({ loadingMessages: false });
+    }
+  },
+
+  /**
+   * Fetch the page of messages OLDER than what's loaded, for scroll-back.
+   *
+   * The server has always paginated (`?before=<iso>&limit=40`) but nothing ever
+   * sent the cursor — every fetch asked for the newest page. So a conversation
+   * with more than 40 messages had no reachable history at all: scrolling up hit
+   * a wall, and the only way to older messages was search-then-jump.
+   *
+   * Returns how many were prepended so the list can keep the viewport anchored
+   * (prepending shifts everything down; without a correction the view jumps).
+   */
+  loadOlderMessages: async (chatId) => {
+    if (DEMO_MODE) return 0;
+    const s0 = get();
+    if (s0.loadingOlder[chatId] || s0.noMoreOlder[chatId]) return 0;
+    const loaded = s0.messagesByChat[chatId] || [];
+    if (!loaded.length) return 0;
+
+    // Cursor = the oldest message we hold. Optimistic sends have no server
+    // timestamp yet, so skip anything without one.
+    const oldest = loaded.find((m) => m.createdAt);
+    if (!oldest) return 0;
+
+    set((s) => ({ loadingOlder: { ...s.loadingOlder, [chatId]: true } }));
+    try {
+      const { data } = await api.get(`/messages/${chatId}`, {
+        params: { before: new Date(oldest.createdAt).toISOString(), limit: 40 },
+      });
+      const older = data.messages || [];
+      if (!older.length) {
+        set((s) => ({ noMoreOlder: { ...s.noMoreOlder, [chatId]: true } }));
+        return 0;
+      }
+      let added = 0;
+      set((s) => {
+        const current = s.messagesByChat[chatId] || [];
+        const seen = new Set(current.map((m) => String(m._id)));
+        const fresh = older.filter((m) => !seen.has(String(m._id)));
+        added = fresh.length;
+        return {
+          messagesByChat: { ...s.messagesByChat, [chatId]: [...fresh, ...current] },
+          // A short page means we've reached the beginning of the conversation.
+          noMoreOlder: { ...s.noMoreOlder, [chatId]: older.length < 40 },
+        };
+      });
+      return added;
+    } catch {
+      return 0;
+    } finally {
+      set((s) => ({ loadingOlder: { ...s.loadingOlder, [chatId]: false } }));
     }
   },
 
@@ -122,7 +164,7 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}/context/${messageId}`);
-      const messages = await hydrate(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
         // A context window is a SLICE of history, so the list must not assume
@@ -163,7 +205,7 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
-      const messages = await hydrate(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
         windowedChats: { ...s.windowedChats, [chatId]: false },
@@ -176,11 +218,9 @@ export const useChat = create((set, get) => ({
   /**
    * Search one conversation's ENTIRE history.
    *
-   * The server does it for ordinary chats (indexed, paginated, covers messages
-   * that were never loaded here). For an encrypted chat it can't — it holds
-   * ciphertext — so it says so and we search the decrypted cache locally
-   * instead. That's a real limitation, not a silent one: the caller gets
-   * `scope: 'local'` and the UI says the search only covers loaded messages.
+   * Server-side and indexed, so it covers messages that were never loaded on
+   * this device. Falls back to a local scan of the loaded window if the request
+   * fails, in which case the caller gets `scope: 'local'`.
    */
   searchInChat: async (chatId, query) => {
     const q = (query || '').trim();
@@ -196,8 +236,7 @@ export const useChat = create((set, get) => ({
 
     try {
       const { data } = await api.get(`/messages/${chatId}/search`, { params: { q } });
-      if (data.encrypted) return { messages: localHits(), scope: 'local', hasMore: false };
-      const messages = await hydrate(chatId, data.messages || []);
+      const messages = data.messages || [];
       return { messages, scope: 'server', hasMore: Boolean(data.hasMore) };
     } catch {
       return { messages: localHits(), scope: 'local', hasMore: false };
@@ -226,36 +265,12 @@ export const useChat = create((set, get) => ({
     }),
 
   /**
-   * A message that arrived over the socket. Goes through decryption first —
-   * `appendMessage` is synchronous and used by optimistic/demo paths, so the
-   * async step lives here rather than being forced onto every caller.
+   * A message that arrived over the socket. Kept as the single entry point the
+   * socket layer calls, so normalisation has one home; `appendMessage` stays the
+   * synchronous path used by the optimistic and demo flows.
    */
   ingestMessage: async (chatId, message) => {
-    const hydrated = message?.encrypted ? await useE2EE.getState().hydrateOne(chatId, message) : message;
-    get().appendMessage(chatId, hydrated);
-  },
-
-  /** Encryption was switched on/off — or rekeyed — for a chat, possibly by
-   *  someone else. Drop the cached key AND re-run decryption over whatever is
-   *  loaded: a member who just received their first key copy is staring at a
-   *  list of "🔒 could not decrypt" placeholders that are now readable. */
-  applyChatE2EE: async (chatId, e2ee) => {
-    useE2EE.getState().invalidateChat(chatId);
-    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, e2ee: { ...(c.e2ee || {}), ...e2ee } } : c)) }));
-
-    const loaded = get().messagesByChat[chatId];
-    if (!loaded?.some((m) => m.encrypted)) return;
-    const rehydrated = await hydrate(chatId, loaded);
-    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: rehydrated } }));
-  },
-
-  /** Re-run decryption for a chat after the identity was unlocked on this
-   *  device (the messages were fetched while it was still locked). */
-  rehydrateChat: async (chatId) => {
-    const loaded = get().messagesByChat[chatId];
-    if (!loaded?.some((m) => m.encrypted)) return;
-    const rehydrated = await hydrate(chatId, loaded);
-    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: rehydrated } }));
+    get().appendMessage(chatId, message);
   },
 
   /** A wallpaper change made on another of my devices. */
@@ -279,7 +294,7 @@ export const useChat = create((set, get) => ({
     }
   },
 
-  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce, retriedAfterRekey = false }) => {
+  sendMessage: async ({ chatId, content, type = 'text', replyTo, attachments, location, viewOnce }) => {
     const me = useAuth.getState().user;
     const clientId = `tmp-${Date.now()}-${tmpSeq++}`;
     const optimistic = {
@@ -305,29 +320,15 @@ export const useChat = create((set, get) => ({
     if (DEMO_MODE) return optimistic;
 
     try {
-      // Encrypted chat → seal the text here and send ciphertext only. The
-      // optimistic bubble above already shows the plaintext locally, and
-      // `rememberPlain` below keeps it readable when the saved copy echoes
-      // back, so the sender never watches their own message decrypt.
-      let encPayload;
-      let outgoingContent = content;
-      const chat = get().chats.find((c) => c._id === chatId);
-      if (chat?.e2ee?.enabled) {
-        encPayload = await useE2EE.getState().encryptForChat(chatId, content || '');
-        outgoingContent = '';
-      }
-
       const { data } = await api.post('/messages', {
         chatId,
-        content: outgoingContent,
-        enc: encPayload,
+        content,
         type,
         attachments,
         location,
         viewOnce,
         replyTo: replyTo?._id,
       });
-      if (encPayload) useE2EE.getState().rememberPlain(data.message._id, content || '');
       set((s) => {
         // The saved message may ALSO have arrived via the socket echo before this
         // response resolved — drop that copy first, then swap the optimistic one,
@@ -345,23 +346,6 @@ export const useChat = create((set, get) => ({
       });
       return data.message;
     } catch (err) {
-      // The chat's key rotated while this message was being composed (someone
-      // joined the group on another device). Drop the stale cached key, pick up
-      // the new version and send once more before giving up — otherwise a
-      // perfectly valid message fails for a reason the user can do nothing about.
-      const status = err?.response?.status;
-      const staleKey = status === 409 && /encryption key/i.test(err.response?.data?.message || '');
-      if (staleKey && !retriedAfterRekey) {
-        useE2EE.getState().invalidateChat(chatId);
-        set((s) => ({
-          messagesByChat: {
-            ...s.messagesByChat,
-            [chatId]: (s.messagesByChat[chatId] || []).filter((m) => m._id !== optimistic._id),
-          },
-        }));
-        return get().sendMessage({ chatId, content, type, replyTo, attachments, location, viewOnce, retriedAfterRekey: true });
-      }
-
       set((s) => ({
         messagesByChat: {
           ...s.messagesByChat,
@@ -527,8 +511,8 @@ export const useChat = create((set, get) => ({
     } catch (err) {
       // Re-throw the SERVER's message. Letting the raw axios error through gave
       // the user "Request failed with status code 409" instead of the actual
-      // reason ("Pick a time at least a few seconds from now", "…not available
-      // in an encrypted chat"), which is most of why this felt broken.
+      // reason ("Pick a time at least a few seconds from now"), which is most
+      // of why this felt broken.
       throw new Error(err?.response?.data?.message || 'Could not schedule that message.');
     }
   },
@@ -697,16 +681,7 @@ export const useChat = create((set, get) => ({
     }));
     if (!DEMO_MODE) {
       try {
-        // Same rule as sending: in an encrypted chat the replacement travels as
-        // ciphertext, and the server refuses a plaintext edit outright.
-        const chat = get().chats.find((c) => c._id === chatId);
-        if (chat?.e2ee?.enabled) {
-          const enc = await useE2EE.getState().encryptForChat(chatId, content);
-          await api.patch(`/messages/${messageId}`, { enc });
-          useE2EE.getState().rememberPlain(messageId, content);
-        } else {
-          await api.patch(`/messages/${messageId}`, { content });
-        }
+        await api.patch(`/messages/${messageId}`, { content });
       } catch (err) {
         // Server refused (e.g. past the 5-minute edit window) — undo the optimistic edit.
         if (original) {
@@ -756,10 +731,9 @@ export const useChat = create((set, get) => ({
     }
   },
 
-  /** Apply an edit that arrived over the socket (decrypting it first if the
-   *  chat is encrypted — an edited ciphertext is a new ciphertext). */
+  /** Apply an edit that arrived over the socket. */
   applyEditedMessage: async (chatId, message) => {
-    const next = message?.encrypted ? await useE2EE.getState().hydrateOne(chatId, message) : message;
+    const next = message;
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,

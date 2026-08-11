@@ -461,8 +461,11 @@ function MeetingListRow({ meeting, me, past }) {
           <Copy size={12} />
         </button>
       )}
+      {/* Was `hidden sm:inline-flex`, which put the attendance report out of
+          reach on a phone for every meeting except the featured one. It's an
+          icon-only button — there is room for it at any width. */}
       {amHost && (
-        <Button variant="ghost" size="icon-sm" onClick={openReport} title="Attendance report" aria-label="Attendance report" className="hidden shrink-0 sm:inline-flex">
+        <Button variant="ghost" size="icon-sm" onClick={openReport} title="Attendance report" aria-label="Attendance report" className="inline-flex shrink-0">
           <ClipboardList size={16} />
         </Button>
       )}

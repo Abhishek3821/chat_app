@@ -1,0 +1,493 @@
+/* ============================================================================
+   Soft-UI (neumorphic / skeuomorphic) theme — portable
+   Extracted from ChatConnect. Tailwind CSS v3 + PostCSS, class-based dark mode.
+
+   HOW IT WORKS
+   Every surface is the same colour family as what it sits on, and gets its shape
+   from a matched shadow pair — dark cast bottom-right, light bloom top-left —
+   under one overhead light source. Three states carry the whole interface:
+
+     .neu-raised{,-sm,-lg}   extruded out of the background   (panels, cards, chips)
+     .neu-inset{,-sm}        pressed into it                  (inputs, wells)
+     .neu-press              raised at rest, sinks while held  (anything clickable)
+
+   Nothing hard-codes a shadow. Every recipe derives from the --neu-* vars below,
+   so light mode, dark mode and all six accent presets re-derive automatically —
+   which is what makes the look consistent instead of drifting per component.
+
+   INSTALL
+   1. npm i -D tailwindcss@^3.4 postcss autoprefixer
+   2. tailwind.config.js →  presets: [require('./theme/soft-ui.preset.js')]
+   3. Import this file AFTER the Tailwind directives:
+        @tailwind base;
+        @tailwind components;
+        @tailwind utilities;
+        @import './theme/soft-ui.css';
+      (or paste this file's contents below the directives)
+   4. Dark mode: toggle `class="dark"` on <html>.
+      Accent:    set `data-accent="violet"` on <html> (omit for the teal default).
+   5. Font (optional — the preset expects it):
+      <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+   All colour values are space-separated "R G B" so Tailwind's
+   rgb(var(--x) / <alpha-value>) syntax works — that's what lets you write
+   `bg-surface/70` and `text-content-muted` against these variables.
+   ========================================================================= */
+
+:root {
+  /* ── Surfaces & ink ─────────────────────────────────────────────── */
+  --surface: 255 255 255;        /* panels lift off the canvas */
+  --surface-2: 240 248 244;      /* inputs / recessed rows */
+  --border: 205 227 219;         /* hairline */
+  --content: 12 44 71;           /* body ink — 14.1:1 on white */
+  --content-muted: 90 122 124;   /* secondary ink — 4.7:1 on white */
+  --app-bg: 228 242 234;         /* page canvas, darker than the panels */
+
+  /* ── Accent ramp (the default: deep teal) ───────────────────────────
+     Swap the whole ramp at runtime with [data-accent] (presets below), or
+     replace these ten values with your own brand and everything follows. */
+  --brand-50: 228 242 234;
+  --brand-100: 208 235 227;
+  --brand-200: 179 224 217;
+  --brand-300: 151 211 205;
+  --brand-400: 108 170 164;
+  --brand-500: 66 125 119;
+  --brand-600: 45 86 82;         /* primary action fill */
+  --brand-700: 34 71 71;
+  --brand-800: 22 57 62;
+  --brand-900: 12 44 71;
+
+  /* Accent fill behind `bg-brand-gradient` (buttons, active pills, badges).
+     Two rules, both learned the hard way:
+       1. It resolves through var(--brand-*), NOT a literal — otherwise the
+          accent picker recolours some call sites and not others.
+       2. --accent-fill-2 is always a DEEPER step, never lighter: white text
+          sits on these fills, so the far end of the gradient must gain
+          contrast, not lose it. */
+  --accent-fill: var(--brand-600);
+  --accent-fill-2: var(--brand-700);
+  /* Specular sheen over accent fills. Deliberately weak — it lightens the fill
+     exactly where white text sits, trading contrast for depth. */
+  --gloss-a: 0.14;
+
+  /* ── Soft-UI depth ──────────────────────────────────────────────────
+     --neu-hi / --neu-lo   the light source and its cast shadow. Tinted toward
+                           the palette (here navy), never neutral grey — grey
+                           shadows are what make neumorphism look cheap.
+     --neu-fill-*-a        the faint lighter-top / darker-bottom wash that makes
+                           a panel look extruded. TRANSLUCENT on purpose, so
+                           these classes compose with any `bg-*` you set.
+     --neu-edge            the 1px inner bevel along a lit top edge. */
+  --neu-hi: 255 255 255;
+  --neu-hi-a: 0.9;
+  --neu-lo: 12 44 71;
+  --neu-lo-a: 0.16;
+  --neu-lo-a-strong: 0.2;
+  --neu-fill-hi-a: 0.6;
+  --neu-fill-lo-a: 0.035;
+  --neu-edge: 255 255 255;
+  --neu-edge-a: 0.9;
+
+  /* Ambient page lighting for .lit-canvas */
+  --canvas-glow-a: 0.55;
+  --canvas-tint-a: 0.07;
+
+  /* Theme-aware data-viz ink. Deliberately NOT --brand-*: that ramp is the same
+     in both themes, so a series drawn from it vanishes on one surface or the
+     other. This flips per theme instead. */
+  --chart-1: 45 118 112;
+}
+
+.dark {
+  --surface: 12 44 71;
+  --surface-2: 18 56 87;
+  --border: 30 72 105;
+  --content: 228 242 234;        /* 12.3:1 on the dark panel */
+  --content-muted: 141 176 178;  /* 6.0:1 */
+  --app-bg: 7 26 43;             /* deeper than the panels so surfaces lift */
+
+  /* One step LIGHTER than light mode. A tight window: white text wants the fill
+     dark, the dark panel wants it light. brand-500 satisfies both (4.75:1 under
+     white, ~3:1 against the panel). */
+  --accent-fill: var(--brand-500);
+  --accent-fill-2: var(--brand-600);
+  --gloss-a: 0.09;               /* less contrast to spend before breaking AA */
+
+  /* THE key difference in dark mode: the light source becomes a pale blue at low
+     opacity (white at light-mode strength reads as a milky haze), and the cast
+     shadow goes near-black and much stronger. That separation is all a dark
+     soft-UI has to work with. */
+  --neu-hi: 129 179 209;
+  --neu-hi-a: 0.1;
+  --neu-lo: 2 10 18;
+  --neu-lo-a: 0.55;
+  --neu-lo-a-strong: 0.68;
+  --neu-fill-hi-a: 0.06;
+  --neu-fill-lo-a: 0.18;
+  --neu-edge: 158 205 228;
+  --neu-edge-a: 0.14;
+
+  --canvas-glow-a: 0.1;
+  --canvas-tint-a: 0.14;
+
+  --chart-1: 60 140 134;
+}
+
+/* ── Accent presets — <html data-accent="violet"> ───────────────────────
+   The default (teal) is :root, so it needs no block. Delete any you don't want. */
+:root[data-accent='indigo'] {
+  --brand-50: 238 242 255; --brand-100: 224 231 255; --brand-200: 199 210 254;
+  --brand-300: 165 180 252; --brand-400: 129 140 248; --brand-500: 99 102 241;
+  --brand-600: 79 70 229; --brand-700: 67 56 202; --brand-800: 55 48 163;
+  --brand-900: 49 46 129;
+}
+:root[data-accent='violet'] {
+  --brand-50: 245 243 255; --brand-100: 237 233 254; --brand-200: 221 214 254;
+  --brand-300: 196 181 253; --brand-400: 167 139 250; --brand-500: 139 92 246;
+  --brand-600: 124 58 237; --brand-700: 109 40 217; --brand-800: 91 33 182;
+  --brand-900: 76 29 149;
+}
+:root[data-accent='cyan'] {
+  --brand-50: 236 254 255; --brand-100: 207 250 254; --brand-200: 165 243 252;
+  --brand-300: 103 232 249; --brand-400: 34 211 238; --brand-500: 6 182 212;
+  --brand-600: 8 145 178; --brand-700: 14 116 144; --brand-800: 21 94 117;
+  --brand-900: 22 78 99;
+}
+:root[data-accent='emerald'] {
+  --brand-50: 236 253 245; --brand-100: 209 250 229; --brand-200: 167 243 208;
+  --brand-300: 110 231 183; --brand-400: 52 211 153; --brand-500: 16 185 129;
+  --brand-600: 5 150 105; --brand-700: 4 120 87; --brand-800: 6 95 70;
+  --brand-900: 6 78 59;
+}
+:root[data-accent='rose'] {
+  --brand-50: 255 241 242; --brand-100: 255 228 230; --brand-200: 254 205 211;
+  --brand-300: 253 164 175; --brand-400: 251 113 133; --brand-500: 244 63 94;
+  --brand-600: 225 29 72; --brand-700: 190 18 60; --brand-800: 159 18 57;
+  --brand-900: 136 19 55;
+}
+:root[data-accent='amber'] {
+  --brand-50: 255 251 235; --brand-100: 254 243 199; --brand-200: 253 230 138;
+  --brand-300: 252 211 77; --brand-400: 251 191 36; --brand-500: 245 158 11;
+  --brand-600: 217 119 6; --brand-700: 180 83 9; --brand-800: 146 64 14;
+  --brand-900: 120 53 15;
+}
+
+/* ── Accent-fill corrections (ACCESSIBILITY — don't delete lightly) ─────
+   --accent-fill defaults to brand-600/500, which is the readable step for the
+   teal, indigo and violet ramps. The warmer, brighter ramps peak higher up, so
+   those steps fall UNDER 4.5:1 with the white text every accent surface carries
+   (amber-600 = 3.2:1, cyan-600 = 3.7:1, emerald-600 = 3.8:1, rose-500 = 3.7:1).
+   Each drops one step to clear AA while still lifting off its own panel.
+   The `.dark[...]` rules come second so they win at equal specificity. */
+:root[data-accent='cyan'],
+:root[data-accent='emerald'],
+:root[data-accent='amber'] {
+  --accent-fill: var(--brand-700);
+  --accent-fill-2: var(--brand-800);
+}
+.dark[data-accent='cyan'],
+.dark[data-accent='emerald'],
+.dark[data-accent='rose'] {
+  --accent-fill: var(--brand-600);
+  --accent-fill-2: var(--brand-700);
+}
+.dark[data-accent='amber'] {
+  --accent-fill: var(--brand-700);
+  --accent-fill-2: var(--brand-800);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%; /* drop this if your app isn't a full-height SPA */
+  }
+  body {
+    @apply bg-[rgb(var(--app-bg))] text-content font-sans antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    @apply bg-brand-500/25;
+  }
+  /* A soft-UI leans on transitions, so honouring the OS setting matters here. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* ══ The three states ═══════════════════════════════════════════════ */
+
+  /* Just the extrusion wash, no shadow — for composing your own recipes. */
+  .neu-fill {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+  }
+
+  .neu-raised,
+  .neu-raised-sm,
+  .neu-raised-lg {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+  }
+  .neu-raised-sm {
+    box-shadow:
+      3px 3px 8px -3px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -2px -2px 6px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  .neu-raised {
+    box-shadow:
+      6px 6px 14px -5px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -4px -4px 12px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+  .neu-raised-lg {
+    box-shadow:
+      14px 16px 34px -12px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      -8px -8px 22px -12px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Recessed. The wash FLIPS (darker at the top) so the surface reads as dished
+     rather than domed under the same overhead light. */
+  .neu-inset,
+  .neu-inset-sm {
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 0%,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 100%
+    );
+  }
+  .neu-inset-sm {
+    box-shadow:
+      inset 2px 2px 5px -2px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -1px -1px 3px -1px rgb(var(--neu-hi) / var(--neu-hi-a));
+  }
+  .neu-inset {
+    box-shadow:
+      inset 4px 4px 9px -3px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -3px -3px 8px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Rises to meet the cursor. Exists because `hover:` cannot compose a .neu-*
+     recipe (they set box-shadow, not one Tailwind-able property) — so use this
+     on rows and nav items instead of `hover:bg-black/5`. */
+  .neu-hover {
+    transition: box-shadow 0.16s ease, background-color 0.16s ease;
+  }
+  .neu-hover:hover {
+    background-color: rgb(var(--surface));
+    box-shadow:
+      3px 3px 8px -3px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -2px -2px 6px -3px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Tactile click — the surface actually sinks under the finger.
+     ⚠ It animates `transform`. Do NOT put it on an element that already has a
+     transform utility (`-translate-x-1/2`) or a framer-motion `whileTap`:
+     transform is replaced, not composed, so the element will jump. */
+  .neu-press {
+    transition: box-shadow 0.16s ease, transform 0.16s ease, background-color 0.16s ease;
+  }
+  .neu-press:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 3px 3px 7px -2px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset -2px -2px 5px -2px rgb(var(--neu-hi) / var(--neu-hi-a));
+  }
+
+  /* For anything sitting ON an accent fill (a pill inside a primary button, a
+     well inside a coloured card). The panel vars are invisible there, so this
+     uses a white-on-colour bevel instead. */
+  .neu-on-accent {
+    background-color: rgb(255 255 255 / 0.14);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.28),
+      inset 0 -1px 0 rgb(var(--neu-lo) / 0.22);
+  }
+
+  /* ══ Ready-made surfaces ════════════════════════════════════════════ */
+
+  .card,
+  .panel {
+    @apply rounded-2xl;
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+    border: 1px solid rgb(var(--border));
+    box-shadow:
+      6px 6px 14px -5px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -4px -4px 12px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Same as .card but flatter — for dense lists of surfaces. */
+  .panel-quiet {
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+    border: 1px solid rgb(var(--border));
+    box-shadow:
+      4px 4px 12px -6px rgb(var(--neu-lo) / var(--neu-lo-a)),
+      -3px -3px 10px -6px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Floating layer — menus, popovers, modals, dropdowns. */
+  .popover {
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(
+      160deg,
+      rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0%,
+      rgb(var(--neu-lo) / var(--neu-fill-lo-a)) 100%
+    );
+    border: 1px solid rgb(var(--border));
+    box-shadow:
+      14px 16px 34px -12px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      -8px -8px 22px -12px rgb(var(--neu-hi) / var(--neu-hi-a)),
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a));
+  }
+
+  /* Full-height rails (sidebars, headers): a sheen along the lit top edge and no
+     cast shadow — a 100vh panel with a drop shadow just dirties the seam. */
+  .rail {
+    background-color: rgb(var(--surface));
+    background-image: linear-gradient(180deg, rgb(var(--neu-hi) / var(--neu-fill-hi-a)) 0, transparent 96px);
+  }
+  /* Edge treatments for a bar that must sit ABOVE the content it shadows.
+     Pair with `relative z-10` or the lift falls behind the next element. */
+  .rail-bottom {
+    box-shadow:
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a)),
+      0 10px 20px -16px rgb(var(--neu-lo) / var(--neu-lo-a-strong));
+  }
+  .rail-top {
+    box-shadow:
+      inset 0 1px 0 rgb(var(--neu-edge) / var(--neu-edge-a)),
+      0 -10px 20px -16px rgb(var(--neu-lo) / var(--neu-lo-a-strong));
+  }
+
+  /* ══ Accent action ══════════════════════════════════════════════════ */
+
+  /* Primary button: gloss on top, deeper stop at the bottom, presses in.
+     Pair with a radius utility (`rounded-full`, `rounded-2xl`). */
+  .btn-accent {
+    @apply bg-brand-gradient text-white;
+    box-shadow:
+      0 6px 14px -7px rgb(var(--neu-lo) / var(--neu-lo-a-strong)),
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      inset 0 -1px 0 rgb(var(--neu-lo) / 0.28);
+    transition: box-shadow 0.16s ease, transform 0.16s ease, filter 0.16s ease;
+  }
+  .btn-accent:hover {
+    filter: brightness(1.07);
+  }
+  .btn-accent:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 3px 7px -2px rgb(var(--neu-lo) / 0.55),
+      inset 0 -1px 0 rgb(255 255 255 / 0.12);
+  }
+
+  .accent-text {
+    @apply text-brand-600 dark:text-brand-300;
+  }
+
+  /* Focus ring for inputs and buttons. Keyboard-only (focus-visible), so a mouse
+     click doesn't leave a ring behind. */
+  .ring-brand {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-0;
+  }
+
+  /* ══ Ambient page lighting ══════════════════════════════════════════ */
+
+  /* Puts content in a lit room instead of on a flat slab: a wide soft light from
+     the top-left plus an accent bloom bottom-right.
+     ⚠ Put this on a NON-SCROLLING wrapper. As the background of a scroll
+     container, these two large radial gradients repaint on every scroll frame. */
+  .lit-canvas {
+    background-color: rgb(var(--app-bg));
+    background-image:
+      radial-gradient(1100px 520px at 18% -8%, rgb(var(--neu-hi) / var(--canvas-glow-a)), transparent 62%),
+      radial-gradient(760px 440px at 104% 108%, rgb(var(--brand-500) / var(--canvas-tint-a)), transparent 60%);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-content-muted/30 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-content-muted/50;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .drag-none {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+  /* Loading placeholder. Pair with .neu-inset-sm so it reads as a hole in the
+     surface rather than a grey block sitting on top of it. */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+  /* iOS/Android safe areas — for fixed bottom bars and full-screen surfaces. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .inset-safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}

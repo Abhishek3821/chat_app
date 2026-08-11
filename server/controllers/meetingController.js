@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Meeting, { generateRoomCode } from '../models/Meeting.js';
 import User from '../models/User.js';
+import { tenantScope } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
@@ -130,7 +131,11 @@ export const createMeeting = asyncHandler(async (req, res) => {
   // pre-invited (matches createGroup). Anyone can still JOIN later via the link.
   const requested = [...new Set(participants.map(String))].filter((id) => id !== String(req.user._id));
   const invited = requested.length
-    ? await User.find({ _id: { $in: requested }, workspace: req.user.workspace }).select('_id email')
+    ? await User.find({
+        _id: { $in: requested },
+        workspace: req.user.workspace,
+        ...tenantScope(req.user), // undefined workspace would drop the filter entirely
+      }).select('_id email')
     : [];
 
   let meeting = await createWithRoomCode({
