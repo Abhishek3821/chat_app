@@ -164,6 +164,7 @@ export function useSocket() {
     // Multi-device: a pin/archive/mute performed on another device of mine.
     socket.on('chat-flag', ({ chatId, action, value }) => useChat.getState().applyChatFlag(chatId, action, value));
     // Encryption turned on/off (by me elsewhere, or by another participant).
+    socket.on('chat-e2ee', ({ chatId, e2ee }) => useChat.getState().applyChatE2EE(chatId, e2ee));
     // Wallpaper changed on another of my devices.
     socket.on('chat-theme', ({ chatId, wallpaper, bubble }) => useChat.getState().applyChatTheme(chatId, wallpaper, bubble));
 

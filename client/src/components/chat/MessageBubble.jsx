@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Check, CheckCheck, Reply, MoreHorizontal, Star, Copy, Trash2, Pin, PinOff, Clock, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X, Eye, EyeOff, ShoppingBag, ExternalLink, Radio } from 'lucide-react';
+import { Check, CheckCheck, Reply, MoreHorizontal, Star, Copy, Trash2, Pin, PinOff, Clock, FileText, Download, Play, Pause, MapPin, Forward, Pencil, Ban, Send, X, Eye, EyeOff, ShoppingBag, ExternalLink, Radio, Lock, Loader2 } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { formatTime, formatBytes, formatDuration, cn } from '../../lib/utils';
 import { mediaUrl } from '../../lib/api';
@@ -10,6 +10,7 @@ import { Rich } from '../../lib/format';
 import PollCard from './PollCard';
 import { useAuth } from '../../store/useAuth';
 import { useChat } from '../../store/useChat';
+import { useE2EE } from '../../store/useE2EE';
 
 const QUICK = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
 // Kept in step with PIN_DURATIONS in server/utils/pins.js, which validates them.
@@ -118,16 +119,19 @@ function MessageBubble({
   const sender = message.sender || {};
   const reactions = message.reactions || [];
   const deleted = Boolean(message.isDeleted);
-  /* Written while the retired per-chat encryption feature existed. Their text
-     only ever existed under a key the server never held, so it cannot be
-     recovered now the feature is gone — say that plainly instead of rendering
-     an empty bubble, which reads as a bug. */
-  const legacySealed = Boolean(message.encrypted) && !message.content;
+  /* Sealed, and this device couldn't open it — either encryption is locked here
+     or the message predates the key we hold (sent before we joined). `hydrate`
+     puts a readable reason in `content`; render THAT rather than an empty bubble,
+     which reads as a bug. */
+  const unreadable = Boolean(message.undecryptable) || (Boolean(message.encrypted) && !message.content);
   const forwarded = Boolean(message.forwardedFrom || message.forwarded);
   // Server rejects edits after this window, so don't offer the option past it.
   const EDIT_WINDOW_MS = 5 * 60 * 1000;
   const withinEditWindow = !message.createdAt || Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
-  const canEdit = isMine && !deleted && withinEditWindow && (message.type === 'text' || !message.type) && message.content;
+  /* `!unreadable` matters: without it the placeholder text is treated as the
+     message body, so editing would overwrite a real (unread) message with the
+     "could not decrypt" string. */
+  const canEdit = isMine && !deleted && !unreadable && withinEditWindow && (message.type === 'text' || !message.type) && message.content;
   // Server rejects "delete for everyone" after this window too — same 5-minute
   // rule as editing. Past it, the sender can still delete the message for
   // themselves, just not retract it from everyone else's chat.
@@ -264,9 +268,9 @@ function MessageBubble({
             <p className={cn('flex items-center gap-1.5 py-0.5 text-sm italic', isMine ? 'text-white/70' : 'text-content-muted')}>
               <Ban size={14} /> This message was deleted
             </p>
-          ) : legacySealed ? (
+          ) : unreadable ? (
             <p className={cn('flex items-center gap-1.5 py-0.5 text-sm italic', isMine ? 'text-white/70' : 'text-content-muted')}>
-              <Ban size={14} /> Message unavailable
+              <Lock size={13} /> {message.content || 'Message unavailable'}
             </p>
           ) : editing ? (
             <div className="flex items-end gap-1.5 py-0.5">
@@ -461,10 +465,70 @@ function ActionSheet({ sheet, actions, onClose, onReact, onPinFor }) {
 }
 
 /** Renders whatever media a message carries (image/video/voice/document/location). */
+/**
+ * Resolve a message's attachments for rendering, decrypting any that are sealed.
+ *
+ * Done here — one hook, at the single point every media branch below reads its
+ * attachments from — rather than per <img>/<video>: those live inside `.map()`
+ * calls, which cannot call hooks, and this is the one place all of them funnel
+ * through. Each sealed file's `url` is swapped for a blob: URL of the decrypted
+ * bytes, which `mediaUrl()` passes through untouched, so every branch below
+ * needs no knowledge of encryption at all.
+ *
+ * Granularity is per MESSAGE, not per file: this only runs for bubbles React has
+ * actually mounted, so scrolling back through a chat doesn't pull down and
+ * decrypt media nobody has looked at. The cost that remains is native
+ * `loading="lazy"` — a blob: URL is already in memory, so within a mounted bubble
+ * the browser can no longer defer it.
+ */
+function useResolvedAttachments(message) {
+  const raw = message.attachments || [];
+  const chatId = message.chat?._id || message.chat;
+  const sealed = raw.some((a) => a?.enc?.iv);
+  const [resolved, setResolved] = useState(null);
+
+  useEffect(() => {
+    if (!sealed || !chatId) return undefined;
+    let alive = true;
+    (async () => {
+      const open = useE2EE.getState().openAttachment;
+      const out = await Promise.all(
+        raw.map(async (a) => {
+          if (!a?.enc?.iv) return a;
+          const url = await open(chatId, a);
+          // Null means the key is gone or the fetch failed. Keep the row (the
+          // bubble still shows the name/size) but with no loadable URL, rather
+          // than pointing an <img> at ciphertext it will render as broken.
+          return url ? { ...a, url } : { ...a, url: '' };
+        })
+      );
+      if (alive) setResolved(out);
+    })();
+    return () => {
+      alive = false;
+    };
+    // Keyed on the sealed URLs: that is what changes when the message changes,
+    // and it keeps this from re-running on every unrelated re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId, sealed, raw.map((a) => a?.url).join('|')]);
+
+  return sealed ? resolved : raw;
+}
+
 function MessageMedia({ message, isMine }) {
-  const atts = message.attachments || [];
+  const atts = useResolvedAttachments(message) || [];
   const meId = useAuth((s) => s.user?._id);
   const consumeViewOnce = useChat((s) => s.consumeViewOnce);
+  // Sealed media that hasn't finished decrypting yet: `atts` is null until the
+  // first pass resolves, and rendering the sealed rows in the meantime would
+  // point every <img> at ciphertext.
+  if ((message.attachments || []).some((a) => a?.enc?.iv) && !atts.length) {
+    return (
+      <div className={cn('mb-1.5 flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm italic', wellClass(isMine), isMine ? 'text-white/80' : 'text-content-muted')}>
+        <Loader2 size={15} className="animate-spin" /> Decrypting…
+      </div>
+    );
+  }
 
   // View-once media: openable exactly once per recipient, then it's gone.
   if (message.viewOnce && (message.type === 'image' || message.type === 'video')) {

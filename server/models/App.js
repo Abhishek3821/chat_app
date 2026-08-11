@@ -37,6 +37,7 @@ export const APP_FEATURES = [
   'receipts', // delivery + read receipts
   'reactions',
   'attachments', // media + document upload
+  'e2ee', // end-to-end encryption (always on; flag kept for parity)
   'voiceNotes',
   'push', // web push to the tenant's end users
 ];

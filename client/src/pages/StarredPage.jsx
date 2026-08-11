@@ -13,6 +13,7 @@ import { cn, formatDate, formatDateSeparator, PAGE_SHELL } from '@/lib/utils';
 import { getChatDisplay } from '@/lib/chat';
 import { useAuth } from '@/store/useAuth';
 import { useChat } from '@/store/useChat';
+import { useE2EE } from '@/store/useE2EE';
 
 /**
  * Starred messages.
@@ -39,6 +40,34 @@ export default function StarredPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+
+  /**
+   * Starred messages span MANY conversations, and a chat key only opens its own
+   * chat — so group the rows by conversation, decrypt each group with that
+   * chat's key, then restore the server's original ordering. Rows from
+   * unencrypted chats pass straight through untouched.
+   */
+  const decrypt = useCallback(async (rows) => {
+    if (!rows.some((m) => m?.encrypted)) return rows;
+    const byChat = new Map();
+    for (const m of rows) {
+      const id = String(m.chat?._id || m.chat || '');
+      if (!byChat.has(id)) byChat.set(id, []);
+      byChat.get(id).push(m);
+    }
+    const { hydrate } = useE2EE.getState();
+    const done = new Map();
+    await Promise.all(
+      [...byChat.entries()].map(async ([chatId, group]) => {
+        try {
+          for (const m of await hydrate(chatId, group)) done.set(String(m._id), m);
+        } catch {
+          /* leave this chat's rows as they came — the row renders the lock */
+        }
+      })
+    );
+    return rows.map((m) => done.get(String(m._id)) || m);
+  }, []);
 
   const load = useCallback(
     async (before) => {

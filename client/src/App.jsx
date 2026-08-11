@@ -5,8 +5,10 @@ import { Toaster, toast, useToasterStore } from 'react-hot-toast';
 import { useUI } from './store/useUI';
 import { useChat } from './store/useChat';
 import { useAuth } from './store/useAuth';
+import { useE2EE } from './store/useE2EE';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import LockScreen from './components/LockScreen.jsx';
+import EncryptionGate from './components/EncryptionGate.jsx';
 import BusyCallBanner from './components/overlays/BusyCallBanner.jsx';
 
 // Eager: the two first-paint entry points (logged-out landing + logged-in home)
@@ -175,6 +177,11 @@ export default function App() {
   // key from memory on sign-out so the next account on this browser starts
   // clean and can never touch the previous one's messages.
   useEffect(() => {
+    if (!userId) {
+      useE2EE.getState().reset();
+      return;
+    }
+    useE2EE.getState().init();
   }, [userId]);
 
   return (
@@ -221,11 +228,17 @@ export default function App() {
             }
           />
 
-          {/* Protected app shell */}
+          {/* Protected app shell. EncryptionGate wraps only this: encryption is
+              mandatory to CHAT, so the gate belongs in front of the chat shell —
+              not in front of a meeting link or an invite landing page, which
+              carry no messages and would be a confusing place to be asked for a
+              passphrase. */}
           <Route
             element={
               <ProtectedRoute>
-                <AppLayout />
+                <EncryptionGate>
+                  <AppLayout />
+                </EncryptionGate>
               </ProtectedRoute>
             }
           >

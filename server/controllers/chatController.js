@@ -61,6 +61,12 @@ export const getChats = asyncHandler(async (req, res) => {
   // document hydration entirely on the single most-hit endpoint in the app.
   const chats = await populateChat(
     Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } })
+      /* `-e2ee.keys` matters: that array holds one wrapped key per member PER
+         key version. On a 100-member group that is a few hundred blobs riding
+         along on the app's hottest endpoint — and into the Redis cache with it.
+         The list only needs to know THAT a chat is encrypted; the keys
+         themselves are fetched per-chat, on demand, when you open it. */
+      .select('-e2ee.keys')
       .sort({ updatedAt: -1 })
       .lean()
   );

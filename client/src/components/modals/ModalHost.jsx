@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Search, Check, Users, Video, Phone, Calendar, Clock, Image as ImageIcon, Type, MessageSquare, UserPlus, Forward, Mail, X, Plus } from 'lucide-react';
 import Modal from '../ui/Modal';
+import E2EESetupModal from './E2EESetupModal.jsx';
 import Avatar from '../ui/Avatar';
 import Button from '../ui/Button';
 import { Input, Field, Textarea } from '../ui/Input';
@@ -39,6 +40,9 @@ export default function ModalHost() {
       <ForwardMessageModal open={activeModal === 'forwardMessage'} onClose={closeModal} message={modalData?.message} />
       {/* Mounted only while open: it holds passphrase state, which should not
           sit in a live component between uses. */}
+      {activeModal === 'e2ee' && (
+        <E2EESetupModal open onClose={closeModal} chatId={modalData?.chatId} />
+      )}
     </>
   );
 }

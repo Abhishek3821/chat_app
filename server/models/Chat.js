@@ -69,11 +69,50 @@ const chatSchema = new mongoose.Schema(
     // the client only surfaces labels belonging to the viewer's own workspace.
     labels: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Label' }],
 
+    /**
+     * End-to-end encryption for this conversation. Enabled for EVERY chat at
+     * creation (encryption is not optional in this product), so `enabled` is
+     * effectively always true — it stays a field because a chat is only sealed
+     * once its members' keys have actually been written, and the window between
+     * the two has to be representable.
+     *
+     * The chat is sealed with a symmetric key that ONLY members hold. The server
+     * stores one copy of that key per member, each already wrapped by the client
+     * under an ECDH secret derived between the enabling member's identity key and
+     * that member's — so what lands here is ciphertext the server cannot open. It
+     * never sees the chat key or any private key.
+     *
+     * `version` exists for membership churn: adding someone to a group mints a
+     * new version they get a copy of, so they can read from that point on but not
+     * the history sealed under earlier versions.
+     */
+    e2ee: {
+      enabled: { type: Boolean, default: false },
+      version: { type: Number, default: 0 },
+      enabledAt: { type: Date },
+      enabledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      keys: [
+        {
+          _id: false,
+          user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+          version: { type: Number, required: true },
+          wrapped: { type: String, required: true }, // base64 AES-GCM-wrapped chat key
+          iv: { type: String, required: true }, // base64 nonce used for the wrap
+          // Ephemeral ECDH public key the wrap was derived against — ephemeral so a
+          // leaked identity key can't retroactively unwrap past chat keys.
+          senderPublicKey: { type: String, required: true },
+          createdAt: { type: Date, default: Date.now },
+        },
+      ],
+    },
+
   },
   { timestamps: true }
 );
 
 chatSchema.index({ 'participants.user': 1, updatedAt: -1 });
+// A member fetching their own wrapped key copies for a chat.
+chatSchema.index({ 'e2ee.keys.user': 1 });
 // The pin sweeper asks "which chats have an expired pin?" every minute. Without
 // this it's a full collection scan on a timer, forever.
 chatSchema.index({ 'pins.expiresAt': 1 });

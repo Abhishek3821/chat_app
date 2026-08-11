@@ -128,7 +128,10 @@ export function clearMediaToken() {
 /** Mirrors server/middleware/upload.js — keep the three in step. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 export const MAX_UPLOAD_FILES = 10;
-const ALLOWED_UPLOAD_EXT = /\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/i;
+// `.enc` is an attachment sealed for an encrypted chat: opaque ciphertext whose
+// real name and type are carried in the message metadata instead (see
+// useE2EE.sealFiles). It has to be listed because the gate is the extension.
+const ALLOWED_UPLOAD_EXT = /\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt|enc)$/i;
 
 const prettyMB = (b) => `${(b / (1024 * 1024)).toFixed(b < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 

@@ -71,6 +71,32 @@ const userSchema = new mongoose.Schema(
     app: { type: mongoose.Schema.Types.ObjectId, ref: 'App', default: null, index: true },
     externalId: { type: String, default: null },
 
+    /**
+     * End-to-end encryption identity (ECDH P-256).
+     *
+     * `publicKey` is public by design — anyone who can message you fetches it to
+     * seal a chat key for you. Everything else is your PRIVATE key, stored here
+     * ALREADY encrypted under a key derived from your passphrase (PBKDF2-SHA256
+     * → AES-GCM) entirely in the browser. The passphrase is never sent, so the
+     * server holds a blob it cannot open; it exists only so you can unlock the
+     * same identity on a second device. `select: false` keeps it off ordinary
+     * user lookups (profile, search, participant population).
+     *
+     * Lose the passphrase and the blob is unrecoverable — that is the point, and
+     * the client says so before you set one.
+     */
+    e2ee: {
+      publicKey: { type: String, default: '' }, // base64 SPKI
+      wrappedPrivateKey: { type: String, default: '', select: false },
+      kdfSalt: { type: String, default: '', select: false },
+      kdfIterations: { type: Number, default: 0 },
+      wrapIv: { type: String, default: '', select: false },
+      // Bumped when the identity itself is replaced (not on a passphrase change),
+      // so clients can tell "re-wrapped" from "different key".
+      generation: { type: Number, default: 0 },
+      updatedAt: { type: Date },
+    },
+
     isVerified: { type: Boolean, default: false },
     otp: { type: String, select: false },
     otpExpires: { type: Date, select: false },
