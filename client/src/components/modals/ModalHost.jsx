@@ -119,8 +119,16 @@ function CreateGroupModal({ open, onClose }) {
     if (members.length === 0) return toast.error('Add at least one member');
     setSaving(true);
     try {
-      await createGroup({ name: name.trim(), description: desc.trim(), members });
+      const { skipped } = await createGroup({ name: name.trim(), description: desc.trim(), members });
       toast.success(`“${name.trim()}” created 🎉`);
+      // Someone's "who can add me to groups" setting (or a block) kept them out.
+      // Saying so beats a group that quietly comes back short of the people you
+      // picked and leaves you wondering why they never replied.
+      if (skipped?.length) {
+        const named = skipped.filter((s) => s.name).map((s) => s.name);
+        const who = named.length ? named.join(', ') : `${skipped.length} ${skipped.length === 1 ? 'person' : 'people'}`;
+        toast(`${who} couldn't be added — their privacy settings don't allow it.`, { icon: '🔒' });
+      }
       setChatListOpen?.(false);
       onClose();
       navigate('/');

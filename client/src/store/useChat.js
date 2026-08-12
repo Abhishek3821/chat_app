@@ -600,7 +600,14 @@ export const useChat = create((set, get) => ({
     }));
   },
 
-  /** Create a group chat with the given members (real API or demo). Returns the chat. */
+  /**
+   * Create a group chat with the given members (real API or demo).
+   *
+   * Returns `{ chat, skipped }` — `skipped` lists anyone the server would not
+   * add and why (their "who can add me to groups" setting, or a block). The
+   * caller must surface it: this used to return only the chat, so a group that
+   * came back with half the people you picked looked like a complete success.
+   */
   createGroup: async ({ name, description = '', members = [] }) => {
     if (DEMO_MODE) {
       const chat = {
@@ -615,12 +622,34 @@ export const useChat = create((set, get) => ({
       };
       get().addChat(chat);
       get().setActiveChat(chat._id);
-      return chat;
+      return { chat, skipped: [] };
     }
     const { data } = await api.post('/groups', { name, description, members });
     get().addChat(data.chat);
     get().setActiveChat(data.chat._id);
-    return data.chat;
+    return { chat: data.chat, skipped: data.skipped || [] };
+  },
+
+  /**
+   * Add people to a group I own or administer. Returns `{ chat, skipped }` on
+   * the same contract as createGroup — `skipped` is anyone the server refused
+   * (their "who can add me to groups" setting, or a block), so the caller can
+   * say who didn't make it rather than showing a roster that quietly came back
+   * shorter than the selection.
+   *
+   * `POST /groups/:id/members` has existed since groups shipped; nothing in the
+   * UI ever called it, so a group's roster was fixed at creation — the only way
+   * to grow one was the invite link.
+   */
+  addGroupMembers: async (chatId, members = []) => {
+    if (!chatId || !members.length) return { chat: null, skipped: [] };
+    if (DEMO_MODE) return { chat: get().chats.find((c) => c._id === chatId) || null, skipped: [] };
+    const { data } = await api.post(`/groups/${chatId}/members`, { members });
+    // The server also emits `group-updated` to the room, but only sockets that
+    // have this chat OPEN are in it — apply the response so the panel updates
+    // even when it isn't the active conversation.
+    get().applyChatUpdate(data.chat);
+    return { chat: data.chat, skipped: data.skipped || [] };
   },
 
   /** Get-or-create the 1:1 chat with a user and make it active. Returns the chat. */

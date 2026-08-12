@@ -1212,7 +1212,7 @@
                 "privacy"
               ]
             },
-            "description": "**Auth:** access token (`protect`)\n\n**Notes:** merges onto the existing `privacy` object; `markModified('privacy')` + `save({ validateBeforeSave: false })`. Unknown keys are dropped. Enforced later by `applyPresencePrivacy`, `markRead` (`readReceipts`) and `addMembers` (`groupAddPermission`).",
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** merges onto the existing `privacy` object; `markModified('privacy')` + `save({ validateBeforeSave: false })`. Unknown keys are dropped, and every known value is validated (an unrecognised audience is a 400, never a silent fail-open). Enforced later by `applyPresencePrivacy` (`lastSeen`, `onlineStatus`, `profilePhoto`, `about`), `markRead` (`readReceipts`) and `resolveInvitees` in the group controller (`groupAddPermission`, on both create-group and add-members).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"status\": \"accepted\"\n}",
@@ -2101,7 +2101,7 @@
                 "groups"
               ]
             },
-            "description": "**Auth:** access token (`protect`)\n\n**Notes:** the creator becomes `role: 'owner'`; requested members are de-duplicated, self-filtered, and **silently dropped unless they share the creator's `workspace`** (tenant isolation — no error for the dropped ones). `groupAddPermission` is **not** honored at creation (only in `addMembers`). `inviteCode` is auto-generated (10 chars, CSPRNG) by the Chat pre-save hook. Posts a `type: 'system'` message `\"<name> created “<group>”\"` (`systemEvent: 'group_created'`) which becomes `lastMessage`, and emits `receive-message` to the chat room plus `chat-updated` `{ chatId }` to every participant's personal room. **Does not invalidate the chat-list cache.**",
+            "description": "**Auth:** access token (`protect`)\n\n**Notes:** the creator becomes `role: 'owner'`; requested members are de-duplicated, self-filtered, then resolved by `resolveInvitees()` — the same gate `POST /groups/:id/members` uses (tenant boundary + the invitee's `privacy.groupAddPermission` + blocks; **no** workspace check). Anyone who can't be added is returned in `skipped[]` (`reason`: `privacy` / `blocked` / `not_found`) instead of vanishing; the group is still created. A group whose members don't all share one workspace is stored with `workspace: null`. `inviteCode` is auto-generated (10 chars, CSPRNG) by the Chat pre-save hook. Posts a `type: 'system'` message `\"<name> created “<group>”\"` (`systemEvent: 'group_created'`) which becomes `lastMessage`, invalidates every participant's chat-list cache, and emits `receive-message` to the chat room plus `chat-updated` `{ chatId }` to every participant's personal room.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Postman Test\"\n}",
@@ -2212,7 +2212,7 @@
                 }
               ]
             },
-            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** existing participants are filtered out; candidates must be in the **group's** `workspace`; each invitee's `privacy.groupAddPermission === 'contacts'` means they're added only if the caller is in their `contacts`. Rejected invitees are dropped silently. New members get `role: 'member'`. If anyone was added: system message `\"<name> added A, B\"` (`systemEvent: 'member_added'`) → `receive-message` to the chat room. Emits `chat-updated` `{ chatId }` to each added user's personal room and `group-updated` `{ chat }` to the chat room. No cache invalidation.",
+            "description": "**Auth:** access token (`protect`) + group `GROUP_MANAGE` (owner/admin)\n\n**Notes:** existing participants are filtered out, then `resolveInvitees()` applies two gates — the embedded-tenant boundary, and the invitee's own `privacy.groupAddPermission` (`'contacts'` = only their contacts may add them; `'everyone'` = anyone). A block in either direction also stops the add. There is deliberately **no workspace check**. Rejected invitees come back in `skipped[]` with a `reason` (`privacy` / `blocked` / `not_found`), not silently. New members get `role: 'member'`; adding someone from outside the group's workspace clears `chat.workspace` to `null`. If anyone was added: system message `\"<name> added A, B\"` (`systemEvent: 'member_added'`) → `receive-message` to the chat room. Invalidates every participant's chat-list cache, then emits `chat-updated` `{ chatId }` to each added user's personal room and `group-updated` `{ chat }` to the chat room.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"members\": [\n    \"{{contactUserId}}\"\n  ]\n}",

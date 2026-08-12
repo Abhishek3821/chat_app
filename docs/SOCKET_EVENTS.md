@@ -160,7 +160,7 @@ All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string
 |---|---|---|---|
 | `chat-updated` | `{ chatId }` | after a message/poll/live-location/broadcast/catalog/auto-reply/webhook send, to every participant **except** the sender; group create/add/remove member (`groupController.js:54,99,122`) | `useSocket.js:154` — refetches the chat list **only** when `chatId` is unknown locally, debounced 400 ms (otherwise `receive-message` already patched the sidebar) |
 | `chat-disappearing` | `{ chatId, seconds }` | `chatController.js:143` (disappearing-messages timer changed) — `emitToChat` | `useSocket.js:160` → `applyDisappearing(chatId, seconds)` |
-| `group-updated` | `{ chat }` — full populated Chat (name/avatar/description/messagingPolicy edit `groupController.js:69`, add members `:100`, remove member `:123`, role change `:142`). **Inconsistency:** `leaveGroup` emits `{ chatId }` with no `chat` (`groupController.js:164`) | group metadata mutations, `emitToChat` | `useSocket.js:163` → `applyChatUpdate(chat)` — guarded by `if (chat)`, so the `leaveGroup` variant is silently dropped |
+| `group-updated` | `{ chat }` — full populated Chat (name/avatar/description/messagingPolicy edit `groupController.js:140`, add members `:157`, remove member `:188`, role change `:214`). **Inconsistency:** `leaveGroup` emits `{ chatId }` with no `chat` (`groupController.js:233`) | group metadata mutations, `emitToChat` | `useSocket.js:163` → `applyChatUpdate(chat)` — guarded by `if (chat)`, so the `leaveGroup` variant is silently dropped |
 
 ### Presence
 

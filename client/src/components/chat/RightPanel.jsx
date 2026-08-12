@@ -1,14 +1,16 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Palette } from 'lucide-react';
+import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Palette, UserPlus, Check, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
+import Button from '../ui/Button';
+import { Input } from '../ui/Input';
 import { ToggleRow } from '../ui/Switch';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useContacts } from '../../store/useContacts';
 import { WALLPAPERS } from '../../lib/wallpapers';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getChatDisplay } from '../../lib/chat';
 import { USER_MAP } from '../../lib/demoData';
 import { cn } from '../../lib/utils';
@@ -40,6 +42,7 @@ export default function RightPanel({ chat, currentUser }) {
   const [reporting, setReporting] = useState(false);
   const [blocking, setBlocking] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const d = getChatDisplay(chat, currentUser);
   // Real API group chats carry `participants: [{ user, role }]` (user is a
   // populated object). Demo data carries `members: [idString]`. Support both.
@@ -50,6 +53,17 @@ export default function RightPanel({ chat, currentUser }) {
           .map((p) => ({ ...(p.user || {}), role: p.role }))
           .filter((m) => m._id)
       : (chat.members || []).map((id) => USER_MAP[id] || currentUser).filter(Boolean);
+
+  /* Who may grow the roster: the same per-chat roles the server's GROUP_MANAGE
+     gate accepts (utils/rbac.js). Demo chats carry no participant roles, so fall
+     back to `createdBy` there rather than hiding the control entirely. */
+  const myRole = (chat?.participants || []).find(
+    (p) => String(p.user?._id || p.user) === String(currentUser?._id)
+  )?.role;
+  const canManageMembers =
+    !!chat?.isGroup &&
+    (myRole === 'owner' || myRole === 'admin' || (!myRole && String(chat?.createdBy) === String(currentUser?._id)));
+  const memberIds = new Set(members.map((m) => String(m._id)));
 
   // Goes to the real screen now. This used to fetch the list purely to count it
   // and report the number in a toast, then throw every row away.
@@ -237,7 +251,20 @@ export default function RightPanel({ chat, currentUser }) {
               <span className="text-sm font-medium text-content">Invite via QR code</span>
               <ChevronRight size={16} className="ml-auto text-content-muted" />
             </button>
-            <Section title={`${members.length} members`} icon={Users}>
+            <Section
+              title={`${members.length} members`}
+              icon={Users}
+              action={
+                canManageMembers ? (
+                  <button
+                    onClick={() => setAddOpen(true)}
+                    className="ring-brand -my-1 flex items-center gap-1 rounded-full px-2 py-1 font-medium text-brand-500 hover:bg-brand-500/10"
+                  >
+                    <UserPlus size={14} /> Add
+                  </button>
+                ) : null
+              }
+            >
               <div className="space-y-1">
                 {members.map((m) => (
                   <div key={m._id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-content/5">
@@ -315,6 +342,14 @@ export default function RightPanel({ chat, currentUser }) {
         )}
       </AnimatePresence>
 
+      <AddMembersModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        chatId={chat?._id}
+        groupName={d.name}
+        memberIds={memberIds}
+      />
+
       <InviteQrModal
         open={qrOpen}
         onClose={() => setQrOpen(false)}
@@ -346,6 +381,109 @@ export default function RightPanel({ chat, currentUser }) {
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * Pick contacts to add to a group the viewer owns or administers.
+ *
+ * People already in the group are filtered out rather than shown greyed, so the
+ * list only ever offers something that will actually do anything. The server can
+ * still refuse an invitee (their "who can add me to groups" setting, or a
+ * block); those come back in `skipped` and are named here — silently returning a
+ * shorter roster is exactly the failure this whole flow exists to avoid.
+ */
+function AddMembersModal({ open, onClose, chatId, groupName, memberIds }) {
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const { contacts, load } = useContacts();
+  const addGroupMembers = useChat((s) => s.addGroupMembers);
+
+  useEffect(() => {
+    if (open) load();
+    else {
+      setQ('');
+      setPicked([]);
+    }
+  }, [open, load]);
+
+  const term = q.trim().toLowerCase();
+  const candidates = contacts.filter(
+    (u) => !memberIds.has(String(u._id)) && `${u.name} ${u.username} ${u.email || ''}`.toLowerCase().includes(term)
+  );
+  const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const submit = async () => {
+    if (!picked.length) return;
+    setSaving(true);
+    try {
+      const { skipped } = await addGroupMembers(chatId, picked);
+      const addedCount = picked.length - (skipped?.length || 0);
+      if (addedCount > 0) toast.success(`Added ${addedCount} to ${groupName}`);
+      if (skipped?.length) {
+        const named = skipped.filter((s) => s.name).map((s) => s.name);
+        const who = named.length ? named.join(', ') : `${skipped.length} of them`;
+        toast(`${who} couldn't be added — their privacy settings don't allow it.`, { icon: '🔒' });
+      }
+      onClose();
+    } catch (err) {
+      toast.error(err?.message || 'Could not add members.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => !saving && onClose()}
+      title="Add members"
+      subtitle={`Pick contacts to add to ${groupName}`}
+      footer={
+        <Button className="w-full" onClick={submit} disabled={saving || picked.length === 0}>
+          <UserPlus size={16} />
+          {saving ? 'Adding…' : picked.length ? `Add ${picked.length}` : 'Add members'}
+        </Button>
+      }
+    >
+      <Input icon={Search} placeholder="Search your contacts" value={q} onChange={(e) => setQ(e.target.value)} className="mb-3" />
+      <div className="scrollbar-thin max-h-72 space-y-0.5 overflow-y-auto pb-2">
+        {candidates.map((u) => {
+          const selected = picked.includes(u._id);
+          return (
+            <button
+              key={u._id}
+              onClick={() => toggle(u._id)}
+              className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-content/5"
+            >
+              <Avatar src={u.avatar} name={u.name} size="md" online={u.isOnline} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-content">{u.name}</p>
+                <p className="truncate text-xs text-content-muted">@{u.username}</p>
+              </div>
+              <span
+                className={cn(
+                  'grid h-6 w-6 place-items-center rounded-full border-2 transition-colors',
+                  selected ? 'border-brand-500 bg-brand-gradient text-white' : 'border-border'
+                )}
+              >
+                {selected && <Check size={14} />}
+              </span>
+            </button>
+          );
+        })}
+        {candidates.length === 0 && (
+          <p className="py-8 text-center text-sm text-content-muted">
+            {term
+              ? 'No contacts match that search.'
+              : contacts.length
+                ? 'Everyone in your contacts is already in this group.'
+                : 'No contacts yet — add people in Contacts first.'}
+          </p>
+        )}
+      </div>
+    </Modal>
   );
 }
 

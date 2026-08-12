@@ -168,6 +168,26 @@ export const useAuth = create((set, get) => ({
     return data.settings;
   },
 
+  /**
+   * Persist privacy choices (who may see last seen / online status / profile
+   * photo / about, and whether read receipts are sent).
+   *
+   * The Settings panel used to hold these in local component state with a success
+   * toast and nothing else — they reset on every reload and the server never
+   * learned about them. This is the missing half; the server both stores them and
+   * enforces them (see utils/privacy.js and the read-receipt gate in
+   * socket/index.js), so once saved they take effect immediately.
+   */
+  updatePrivacy: async (updates) => {
+    if (DEMO_MODE) {
+      set((s) => ({ user: { ...s.user, privacy: { ...(s.user?.privacy || {}), ...updates } } }));
+      return get().user?.privacy;
+    }
+    const { data } = await api.patch('/users/me/privacy', updates);
+    set((s) => ({ user: { ...s.user, privacy: data.privacy } }));
+    return data.privacy;
+  },
+
   /** Download a JSON archive of the account's data. */
   exportMyData: async () => {
     if (DEMO_MODE) return;

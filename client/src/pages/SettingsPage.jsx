@@ -37,6 +37,7 @@ import {
   Terminal,
   ExternalLink,
   Crown,
+  Info,
 } from 'lucide-react';
 
 import Switch, { ToggleRow } from '@/components/ui/Switch';
@@ -167,51 +168,123 @@ function DetailRow({ icon: Icon, label, value }) {
 }
 
 /* ── Privacy ──────────────────────────────────────────────────── */
-function PrivacyPanel() {
-  const [privacy, setPrivacy] = useState({
-    lastSeen: true,
-    onlineStatus: true,
-    readReceipts: true,
-    profilePhoto: true,
-  });
-  const [addToGroups, setAddToGroups] = useState('everyone');
 
-  const toggle = (key, label) => (next) => {
-    setPrivacy((p) => ({ ...p, [key]: next }));
-    toast.success(`${label} ${next ? 'enabled' : 'disabled'}`);
+/** Who may see one field. Matches User.privacy's stored values exactly. */
+const AUDIENCES = [
+  { id: 'everyone', label: 'Everyone' },
+  { id: 'contacts', label: 'My contacts' },
+  { id: 'nobody', label: 'Nobody' },
+];
+
+/**
+ * One audience choice (last seen / online status / profile photo / about).
+ *
+ * These are NOT booleans, which is what the previous version got wrong: the
+ * account stores 'everyone' | 'contacts' | 'nobody' and the server enforces all
+ * three, so rendering a switch both hid the useful middle option and could not
+ * represent what was actually saved.
+ */
+function VisibilityRow({ icon: Icon, title, description, value, saving, onChange }) {
+  return (
+    <div className="flex items-start gap-3 py-3">
+      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
+        <Icon size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-content">{title}</p>
+        <p className="text-xs text-content-muted">{description}</p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {AUDIENCES.map((opt) => (
+            <Chip
+              key={opt.id}
+              active={(value || 'everyone') === opt.id}
+              className="h-11 sm:h-9"
+              onClick={() => !saving && onChange(opt.id)}
+            >
+              {opt.label}
+            </Chip>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrivacyPanel() {
+  /**
+   * Reads from and writes to the ACCOUNT.
+   *
+   * This panel previously kept its four switches in local component state with a
+   * success toast and nothing else: nothing was loaded, nothing was saved, and
+   * every value reset to "on" on reload. The endpoint (PATCH
+   * /users/me/privacy) and the enforcement (utils/privacy.js, plus the
+   * read-receipt gate in socket/index.js) both already existed — only the wiring
+   * was missing, which is why all four appeared broken.
+   */
+  const user = useAuth((s) => s.user);
+  const updatePrivacy = useAuth((s) => s.updatePrivacy);
+  const privacy = user?.privacy || {};
+  const [saving, setSaving] = useState(null);
+
+  const save = async (key, value, label) => {
+    setSaving(key);
+    try {
+      await updatePrivacy({ [key]: value });
+      toast.success(`${label} updated`);
+    } catch (err) {
+      // No optimistic local copy to roll back: the store holds the server's
+      // response, so a failure simply leaves the previous value on screen.
+      toast.error(err?.response?.data?.message || `Could not save ${label.toLowerCase()}.`);
+    } finally {
+      setSaving(null);
+    }
   };
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-      <Section title="Visibility" description="Control what other people can see about you.">
+      <Section title="Visibility" description="Control what other people can see about you. Saved to your account and applied by the server.">
         <Rows>
-          <ToggleRow
+          <VisibilityRow
             icon={Eye}
             title="Last seen"
-            description="Show when you were last active"
-            checked={privacy.lastSeen}
-            onChange={toggle('lastSeen', 'Last seen')}
+            description="Who can see when you were last active."
+            value={privacy.lastSeen}
+            saving={saving === 'lastSeen'}
+            onChange={(v) => save('lastSeen', v, 'Last seen')}
           />
-          <ToggleRow
+          <VisibilityRow
             icon={Activity}
             title="Online status"
-            description="Let others see when you're online"
-            checked={privacy.onlineStatus}
-            onChange={toggle('onlineStatus', 'Online status')}
+            description="Who can see the green dot when you're online."
+            value={privacy.onlineStatus}
+            saving={saving === 'onlineStatus'}
+            onChange={(v) => save('onlineStatus', v, 'Online status')}
           />
+          <VisibilityRow
+            icon={ImageIcon}
+            title="Profile photo"
+            description="Who can see your photo. Others see your initials instead."
+            value={privacy.profilePhoto}
+            saving={saving === 'profilePhoto'}
+            onChange={(v) => save('profilePhoto', v, 'Profile photo')}
+          />
+          <VisibilityRow
+            icon={Info}
+            title="About"
+            description="Who can read your bio."
+            value={privacy.about}
+            saving={saving === 'about'}
+            onChange={(v) => save('about', v, 'About')}
+          />
+          {/* The one genuine boolean here: read receipts are sent or they are not.
+              Turning them off also stops you SEEING others' — the same reciprocity
+              WhatsApp applies, and it is what the server enforces. */}
           <ToggleRow
             icon={CheckCheck}
             title="Read receipts"
-            description="Send and receive read confirmations"
-            checked={privacy.readReceipts}
-            onChange={toggle('readReceipts', 'Read receipts')}
-          />
-          <ToggleRow
-            icon={ImageIcon}
-            title="Profile photo visibility"
-            description="Show your photo to everyone"
-            checked={privacy.profilePhoto}
-            onChange={toggle('profilePhoto', 'Profile photo')}
+            description="Send read confirmations. Turn off and you won't see others' either."
+            checked={privacy.readReceipts !== false}
+            onChange={(v) => save('readReceipts', v, 'Read receipts')}
           />
         </Rows>
       </Section>
@@ -231,12 +304,12 @@ function PrivacyPanel() {
               ].map((opt) => (
                 <Chip
                   key={opt.id}
-                  active={addToGroups === opt.id}
+                  active={(privacy.groupAddPermission || 'everyone') === opt.id}
                   className="h-11 sm:h-9"
-                  onClick={() => {
-                    setAddToGroups(opt.id);
-                    toast.success(`Group invites: ${opt.label}`);
-                  }}
+                  // Same fix as the visibility rows: this was local state with a
+                  // toast. `groupAddPermission` is a real stored field that
+                  // groupController honours when someone tries to add you.
+                  onClick={() => save('groupAddPermission', opt.id, 'Group invites')}
                 >
                   {opt.label}
                 </Chip>

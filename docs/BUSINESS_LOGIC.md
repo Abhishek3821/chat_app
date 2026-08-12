@@ -476,29 +476,41 @@ defaults to `GROUP_MANAGE`, which is the historic "admin" gate.
 
 1. `name` is required; `members` must be an array.
 2. Member ids are de-duplicated and the creator is removed from the list.
-3. **Tenant isolation:** candidates are filtered to `workspace === creator.workspace`. Anyone
-   outside is **silently dropped** — no error.
-4. Participants are `[{creator, role: 'owner'}, ...others as 'member']`; `workspace` is set to
-   the creator's.
+3. Candidates go through `resolveInvitees` — the **same** gate as
+   [§4.3 Add members](#43-adding-removing-leaving): tenant boundary, the invitee's
+   `groupAddPermission`, and blocks. Rejections are returned in `skipped`, not swallowed.
+4. Participants are `[{creator, role: 'owner'}, ...others as 'member']`. `workspace` is the
+   creator's **only if every member shares it**, otherwise `null` — a workspace tag means "all
+   members belong to it", which is what workspace member-removal relies on (§11).
 5. A fallback avatar `https://api.dicebear.com/9.x/shapes/svg?seed=<name>` is generated.
 6. A `pre('save')` hook mints an `inviteCode`: **10 characters** from a 32-character
    ambiguity-free alphabet, using `crypto.randomInt` (not `Math.random`), so codes cannot be
    predicted from one another.
 7. A `system` message `"<name> created “<group>”"` (`systemEvent: 'group_created'`) is created
    and becomes `lastMessage`.
-8. `chat-updated` is emitted to every participant's personal room.
+8. Every participant's chat-list cache is invalidated, **then** `chat-updated` is emitted to their
+   personal room. Order matters: the client refetches within ~400ms of that event, and against a
+   live cache it would otherwise be served the pre-group list and never see the new chat.
 
 ### 4.3 Adding, removing, leaving
 
-**Add members** (`POST /api/groups/:id/members`) — admin-gated. Two filters apply:
+**Add members** (`POST /api/groups/:id/members`) — admin-gated. It shares one resolver with group
+creation (`resolveInvitees`), so both entry points apply the same two gates:
 
-1. Candidates must be in the **group's** workspace.
-2. Each invitee's own `privacy.groupAddPermission` is honoured: `'contacts'` means only their own
-   contacts may pull them in; `'everyone'` (the default) allows anyone.
+1. The embedded-**tenant** boundary (`tenantScope`) — never crossed.
+2. Each invitee's own `privacy.groupAddPermission`: `'contacts'` means only their own contacts may
+   pull them in; `'everyone'` (the default) allows anyone. A block in either direction also stops
+   the add, so `'everyone'` can't be used to route around one.
 
-Filtered-out users are dropped silently. A `member_added` system message names everyone actually
-added; `chat-updated` goes to each new member and `group-updated` (with the populated chat) to
-the room.
+There is deliberately **no workspace filter** — group membership follows the same global
+reachability as contacts, DMs and calls. (It used to have one, and because it was applied silently,
+picking cross-workspace contacts produced a group containing only its creator while the API still
+returned 201.) Everyone who can't be added comes back in `skipped` with a reason
+(`privacy` / `blocked` / `not_found`) for the caller to surface.
+
+A `member_added` system message names everyone actually added; every participant's chat-list cache
+is invalidated, then `chat-updated` goes to each new member and `group-updated` (with the populated
+chat) to the room.
 
 **Remove member** (`DELETE /api/groups/:id/members/:userId`) — admin-gated, and the **owner can
 never be removed** (400). Emits a `member_removed` system message, `chat-updated` to the removed
@@ -823,8 +835,10 @@ own policy rather than by contacts.
 | Title | Provided | Falls back to `"Instant meeting"` |
 
 1. `participants[]` are pre-invited **only if they are real users in the creator's own
-   workspace** (same tenant rule as `createGroup`); anyone else is dropped. Anyone can still
-   **join later via the link** — the tenant rule constrains invitations, not attendance.
+   workspace**; anyone else is dropped, silently. Anyone can still **join later via the link** —
+   the rule constrains invitations, not attendance. (Note this is *stricter* than groups, which
+   dropped their workspace filter in favour of the invitee's own privacy setting — inviting a
+   cross-workspace contact to a meeting still silently loses them.)
 2. `settings` is whitelisted to the four booleans `joinAnytime`, `muteOnEntry`, `autoRecord`,
    `askToJoin` — the raw object is never trusted.
 3. `timezone` is truncated to 64 characters, defaulting to `UTC`.
@@ -1342,9 +1356,9 @@ fields into the schemaless `privacy` object:
 | `lastSeen` | everyone / contacts / nobody | `everyone` | ✅ `applyPresencePrivacy` |
 | `onlineStatus` | everyone / contacts / nobody | `everyone` | ✅ `applyPresencePrivacy` |
 | `readReceipts` | boolean | `true` | ✅ REST `markRead` + socket `message:read` |
-| `groupAddPermission` | everyone / contacts | `everyone` | ✅ `groupController.addMembers` |
-| `profilePhoto` | everyone / contacts / nobody | `everyone` | ❌ **stored but not enforced anywhere** |
-| `about` | everyone / contacts / nobody | `everyone` | ❌ **stored but not enforced** |
+| `groupAddPermission` | everyone / contacts | `everyone` | ✅ `groupController.resolveInvitees` — both `createGroup` and `addMembers` |
+| `profilePhoto` | everyone / contacts / nobody | `everyone` | ✅ `applyPresencePrivacy` (blanks `avatar`) |
+| `about` | everyone / contacts / nobody | `everyone` | ✅ `applyPresencePrivacy` (blanks `bio`) |
 | `status` | everyone / contacts / nobody | `contacts` | ❌ **stored but not enforced** — status visibility comes from the **per-status** `privacy` object instead |
 
 Independently of these settings, `phone` and `email` are **always** stripped for a non-contact.

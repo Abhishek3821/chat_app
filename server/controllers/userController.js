@@ -122,11 +122,47 @@ const THEME_VALUES = ['light', 'dark', 'system'];
 // 'teal' is the brand palette and the default.
 const ACCENT_VALUES = ['teal', 'indigo', 'violet', 'cyan', 'emerald', 'rose', 'amber'];
 
+/* Allowed shapes per privacy key. `privacy` is a free-form Object on the schema
+   (so Mongoose validates nothing), and these values are READ by utils/privacy.js
+   to decide who may see what. */
+const AUDIENCE_VALUES = ['everyone', 'contacts', 'nobody'];
+const AUDIENCE_KEYS = ['lastSeen', 'profilePhoto', 'about', 'status', 'onlineStatus'];
+const BOOLEAN_KEYS = ['readReceipts'];
+const GROUP_ADD_VALUES = ['everyone', 'contacts'];
+
 // PATCH /api/users/me/privacy
 export const updatePrivacy = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   const next = { ...user.privacy };
-  for (const k of PRIVACY_KEYS) if (req.body[k] !== undefined) next[k] = req.body[k];
+
+  /**
+   * Validate every value before storing it.
+   *
+   * This used to accept ANYTHING: `{ lastSeen: 'sometimes' }` was saved verbatim.
+   * That is not merely untidy — `permits()` in utils/privacy.js treats an
+   * unrecognised value as 'everyone' (correct for an UNSET field), so a typo or a
+   * tampered request silently made a user MORE public than they asked to be. A
+   * privacy control that fails open is worse than one that is missing, because
+   * the user believes it worked.
+   */
+  for (const k of PRIVACY_KEYS) {
+    const v = req.body[k];
+    if (v === undefined) continue;
+
+    if (AUDIENCE_KEYS.includes(k)) {
+      if (!AUDIENCE_VALUES.includes(v)) {
+        throw new ApiError(400, `${k} must be one of: ${AUDIENCE_VALUES.join(', ')}.`);
+      }
+    } else if (BOOLEAN_KEYS.includes(k)) {
+      if (typeof v !== 'boolean') throw new ApiError(400, `${k} must be true or false.`);
+    } else if (k === 'groupAddPermission') {
+      if (!GROUP_ADD_VALUES.includes(v)) {
+        throw new ApiError(400, `groupAddPermission must be one of: ${GROUP_ADD_VALUES.join(', ')}.`);
+      }
+    }
+    next[k] = v;
+  }
+
   user.privacy = next;
   user.markModified('privacy');
   await user.save({ validateBeforeSave: false });

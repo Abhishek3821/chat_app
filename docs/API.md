@@ -1106,10 +1106,12 @@ or (`200`, when the target had already sent *you* a pending request):
 - **Body**: `name` (string, required) — max 80 (schema); `description` (string, optional, default `''`) — max 500; `avatar` (string, optional, default `''`) — falls back to a generated DiceBear `shapes` URL; `members` (array of `User._id`, optional, default `[]`)
 - **Success response** (`201`; `participants.user` populated with `name username email avatar bio isOnline lastSeen`):
 ```json
-{ "success": true, "chat": { "...ChatPopulated": true, "isGroup": true, "inviteCode": "K7PQ2M9XZT" } }
+{ "success": true,
+  "chat": { "...ChatPopulated": true, "isGroup": true, "inviteCode": "K7PQ2M9XZT" },
+  "skipped": [ { "user": "66a1...", "name": "Ada", "reason": "privacy" } ] }
 ```
 - **Errors**: `400` → `"Group name is required."`; `400` → `"members must be a list."`
-- **Notes**: the creator becomes `role: 'owner'`; requested members are de-duplicated, self-filtered, and **silently dropped unless they share the creator's `workspace`** (tenant isolation — no error for the dropped ones). `groupAddPermission` is **not** honored at creation (only in `addMembers`). `inviteCode` is auto-generated (10 chars, CSPRNG) by the Chat pre-save hook. Posts a `type: 'system'` message `"<name> created “<group>”"` (`systemEvent: 'group_created'`) which becomes `lastMessage`, and emits `receive-message` to the chat room plus `chat-updated` `{ chatId }` to every participant's personal room. **Does not invalidate the chat-list cache.**
+- **Notes**: the creator becomes `role: 'owner'`; requested members are de-duplicated and self-filtered, then resolved by `resolveInvitees()` — the same gate `addMembers` uses (see below). Anyone who can't be added is reported in `skipped` (`reason`: `'privacy' | 'blocked' | 'not_found'`) rather than dropped silently; the group is still created. **There is no workspace check** — cross-workspace members are allowed (global reachability), and a group whose members don't all share one workspace is stored with `workspace: null` so no workspace member-removal sweep can gut it. `inviteCode` is auto-generated (10 chars, CSPRNG) by the Chat pre-save hook. Posts a `type: 'system'` message `"<name> created “<group>”"` (`systemEvent: 'group_created'`) which becomes `lastMessage`, and emits `receive-message` to the chat room plus `chat-updated` `{ chatId }` to every participant's personal room, after invalidating every participant's chat-list cache.
 
 ### POST /api/groups/join/:inviteCode
 - **Auth**: access token (`protect`)
@@ -1126,7 +1128,7 @@ or (when already a member — note the chat is **not** populated on this branch)
 { "success": true, "chat": { "_id": "66b2...", "isGroup": true, "participants": [ { "user": "66a1...", "role": "owner", "joinedAt": "…" } ], "name": "Team Rocket", "inviteCode": "K7PQ2M9XZT" }, "alreadyMember": true }
 ```
 - **Errors**: `404` → `"Invite is invalid."`; `403` → `"This group belongs to another workspace."`
-- **Notes**: joins with `role: 'member'`; posts a system message `"<name> joined via invite link"` (`systemEvent: 'member_joined'`) which emits `receive-message` to the chat room. Groups with `workspace: null` are joinable from any workspace. No `group-updated` event, no cache invalidation.
+- **Notes**: joins with `role: 'member'`; posts a system message `"<name> joined via invite link"` (`systemEvent: 'member_joined'`) which emits `receive-message` to the chat room, then invalidates every participant's chat-list cache and emits `chat-updated` `{ chatId }` to each participant's personal room. Groups with `workspace: null` are joinable from any workspace — which now includes every mixed-workspace group. No `group-updated` event.
 
 ### PATCH /api/groups/:id
 - **Auth**: access token (`protect`) + group `GROUP_MANAGE` (owner/admin)
@@ -1139,7 +1141,7 @@ or (when already a member — note the chat is **not** populated on this branch)
 { "success": true, "chat": { "...ChatPopulated": true } }
 ```
 - **Errors**: `404` → `"Group not found."` (missing or not `isGroup`); `403` → `"Admin privileges required."`; `400` → Mongoose `ValidationError` text (e.g. bad `messagingPolicy`, over-long `name`)
-- **Notes**: emits socket `group-updated` `{ chat }` (full populated chat) to the chat room. No cache invalidation, so `GET /api/chats` may serve a stale name/avatar until the TTL lapses.
+- **Notes**: emits socket `group-updated` `{ chat }` (full populated chat) to the chat room, and invalidates every participant's chat-list cache (the name/avatar is on their `GET /api/chats` rows).
 
 ### POST /api/groups/:id/members
 - **Auth**: access token (`protect`) + group `GROUP_MANAGE` (owner/admin)
@@ -1149,10 +1151,12 @@ or (when already a member — note the chat is **not** populated on this branch)
 - **Body**: `members` (array of `User._id`, optional) — ids to add
 - **Success response**:
 ```json
-{ "success": true, "chat": { "...ChatPopulated": true } }
+{ "success": true,
+  "chat": { "...ChatPopulated": true },
+  "skipped": [ { "user": "66a1...", "name": "Ada", "reason": "privacy" } ] }
 ```
 - **Errors**: `404` → `"Group not found."`; `403` → `"Admin privileges required."`; `400` → `"members must be a list."`
-- **Notes**: existing participants are filtered out; candidates must be in the **group's** `workspace`; each invitee's `privacy.groupAddPermission === 'contacts'` means they're added only if the caller is in their `contacts`. Rejected invitees are dropped silently. New members get `role: 'member'`. If anyone was added: system message `"<name> added A, B"` (`systemEvent: 'member_added'`) → `receive-message` to the chat room. Emits `chat-updated` `{ chatId }` to each added user's personal room and `group-updated` `{ chat }` to the chat room. No cache invalidation.
+- **Notes**: existing participants are filtered out, then `resolveInvitees()` applies exactly two gates — the embedded-**tenant** boundary (`tenantScope`, never crossed), and the invitee's own `privacy.groupAddPermission`: `'contacts'` means they're added only if the caller is in their `contacts`, `'everyone'` (the default) means anyone may. A block in **either** direction also stops the add. There is deliberately no workspace check. Everyone rejected comes back in `skipped` with a `reason` of `'privacy' | 'blocked' | 'not_found'`; a malformed id is a `not_found` skip, not a cast error. New members get `role: 'member'`. Bringing in someone from outside the group's workspace clears `chat.workspace` to `null` (a tag means "all members are in it" — that's what the workspace member-removal sweep assumes). If anyone was added: system message `"<name> added A, B"` (`systemEvent: 'member_added'`) → `receive-message` to the chat room. Invalidates every participant's chat-list cache, then emits `chat-updated` `{ chatId }` to each added user's personal room and `group-updated` `{ chat }` to the chat room.
 
 ### DELETE /api/groups/:id/members/:userId
 - **Auth**: access token (`protect`) + group `GROUP_MANAGE` (owner/admin)
@@ -1165,7 +1169,7 @@ or (when already a member — note the chat is **not** populated on this branch)
 { "success": true, "chat": { "...ChatPopulated": true } }
 ```
 - **Errors**: `404` → `"Group not found."`; `403` → `"Admin privileges required."`; `400` → `"The group owner can't be removed."`
-- **Notes**: the owner is protected even from themselves (they must use `POST /:id/leave`, which reassigns ownership). Removing a non-member silently succeeds. System message `"<name> was removed"` (`systemEvent: 'member_removed'`) only when the target User doc still exists. Emits `chat-updated` `{ chatId }` to the removed user and `group-updated` `{ chat }` to the chat room. No cache invalidation.
+- **Notes**: the owner is protected even from themselves (they must use `POST /:id/leave`, which reassigns ownership). Removing a non-member silently succeeds. System message `"<name> was removed"` (`systemEvent: 'member_removed'`) only when the target User doc still exists. Invalidates the chat-list cache of the **prior** roster (so the removed user loses the row too), then emits `chat-updated` `{ chatId }` to the removed user and `group-updated` `{ chat }` to the chat room.
 
 ### PATCH /api/groups/:id/members/:userId/role
 - **Auth**: access token (`protect`) + group `GROUP_MANAGE` (owner/admin)
@@ -1189,7 +1193,7 @@ or (when already a member — note the chat is **not** populated on this branch)
 - **Success response**: `{ "success": true }`
   or, when the caller was the last member: `{ "success": true, "deleted": true }`
 - **Errors**: `404` → `"Group not found."`; `403` → `"You are not a member of this group."`
-- **Notes**: if the owner leaves, `participants[0]` (earliest remaining) is promoted to `owner`. Emptying the group deletes the `Chat` (its `Message`s are **not** deleted). Otherwise posts a system message `"<name> left the group"` (`systemEvent: 'member_left'`, emits `receive-message`) and emits `group-updated` `{ chatId }` — note this payload carries `chatId`, not the full `chat` object that the other group endpoints send. No cache invalidation.
+- **Notes**: if the owner leaves, `participants[0]` (earliest remaining) is promoted to `owner`. Emptying the group deletes the `Chat` (its `Message`s are **not** deleted). Otherwise posts a system message `"<name> left the group"` (`systemEvent: 'member_left'`, emits `receive-message`) and emits `group-updated` `{ chatId }` — note this payload carries `chatId`, not the full `chat` object that the other group endpoints send. The prior roster's chat-list caches are invalidated on both branches.
 agentId: a3abf3cfa46efba90 (use SendMessage with to: 'a3abf3cfa46efba90', summary: '<5-10 word recap>' to continue this agent)
 <usage>subagent_tokens: 115545
 tool_uses: 27

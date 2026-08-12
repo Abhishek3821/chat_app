@@ -30,6 +30,13 @@ export function applyPresencePrivacy(obj, viewerIsContact) {
   const privacy = obj.privacy || {};
   if (!permits(privacy.onlineStatus, viewerIsContact)) obj.isOnline = false;
   if (!permits(privacy.lastSeen, viewerIsContact)) obj.lastSeen = null;
+  /* `profilePhoto` was stored and offered in Settings but never applied here, so
+     the avatar went to everyone regardless of what the user chose — a privacy
+     control that silently did nothing. Blanked rather than deleted so the client
+     falls back to its initials placeholder (a missing key would render as a
+     broken image). `about` is the same shape and is handled for the same reason. */
+  if (!permits(privacy.profilePhoto, viewerIsContact)) obj.avatar = '';
+  if (!permits(privacy.about, viewerIsContact)) obj.bio = '';
   if (!viewerIsContact) {
     delete obj.phone;
     delete obj.email;

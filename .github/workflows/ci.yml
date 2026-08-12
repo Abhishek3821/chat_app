@@ -71,6 +71,12 @@ jobs:
       - name: upload-validation suite (11 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/upload-validation.mjs
+      - name: privacy settings save AND are enforced (23 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/privacy-settings.mjs
+      - name: group membership + who-can-add-me-to-groups (27 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/group-membership.mjs
       - name: meeting visibility + post-schedule invites (20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-visibility.mjs
