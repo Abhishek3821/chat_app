@@ -127,15 +127,30 @@ export const createMeeting = asyncHandler(async (req, res) => {
   if (!Array.isArray(inviteEmails)) throw new ApiError(400, 'inviteEmails must be a list.');
   const instant = !startAt;
 
-  // Tenant isolation for INVITES: only real users in the SAME workspace can be
-  // pre-invited (matches createGroup). Anyone can still JOIN later via the link.
+  /**
+   * Who can be pre-invited.
+   *
+   * This used to additionally require `workspace: req.user.workspace`, which
+   * SILENTLY dropped any invitee in a different (or no) workspace — they were
+   * simply absent from `participants`, so the meeting never appeared in their
+   * list and they were never notified. From the host's side the invite looked
+   * like it had worked.
+   *
+   * That restriction also contradicted the rest of the product: 1:1 chats and
+   * contacts are deliberately globally reachable across workspace boundaries
+   * (see chatController's "global reachability" note), so a host could message
+   * someone they were unable to invite to a meeting.
+   *
+   * `tenantScope` is KEPT. That is the embeddable-platform boundary — an
+   * end user provisioned by one tenant must never be addressable by another —
+   * and it is a real isolation guarantee, unlike the workspace check.
+   */
   const requested = [...new Set(participants.map(String))].filter((id) => id !== String(req.user._id));
   const invited = requested.length
     ? await User.find({
         _id: { $in: requested },
-        workspace: req.user.workspace,
-        ...tenantScope(req.user), // undefined workspace would drop the filter entirely
-      }).select('_id email')
+        ...tenantScope(req.user),
+      }).select('_id email name')
     : [];
 
   let meeting = await createWithRoomCode({
@@ -335,6 +350,104 @@ export const updateMeeting = asyncHandler(async (req, res) => {
   if (nextSettings) { meeting.settings = { ...(meeting.settings?.toObject?.() ?? meeting.settings), ...nextSettings }; meeting.markModified('settings'); }
   await meeting.save();
   res.json({ success: true, meeting: await populate(Meeting.findById(meeting._id)) });
+});
+
+/**
+ * POST /api/meetings/:id/invite  { userIds?: [], emails?: [] }
+ *
+ * Invite more people to an ALREADY-SCHEDULED meeting — by contact, by raw email
+ * address, or both in one call. Previously invitees could only be chosen at
+ * creation time, so remembering someone afterwards meant cancelling and
+ * rescheduling.
+ *
+ * Host-only: the participant list drives who sees the meeting and who gets
+ * reminders, so letting any attendee extend it would let a guest quietly add
+ * people to someone else's meeting.
+ *
+ * Contacts and emails are deliberately handled differently, because they are
+ * different things: a `userId` becomes a real participant (the meeting appears in
+ * their list, they are notified in-app, they can RSVP), while a raw email only
+ * receives the invitation with the join link — we have no account to attach it to.
+ */
+export const inviteToMeeting = asyncHandler(async (req, res) => {
+  const { userIds = [], emails = [] } = req.body;
+  if (!Array.isArray(userIds) || !Array.isArray(emails)) {
+    throw new ApiError(400, 'userIds and emails must be lists.');
+  }
+  if (!userIds.length && !emails.length) throw new ApiError(400, 'Nothing to invite — pick a contact or enter an email.');
+
+  const meeting = await Meeting.findById(req.params.id);
+  if (!meeting) throw new ApiError(404, 'Meeting not found.');
+  if (String(meeting.host) !== String(req.user._id)) {
+    throw new ApiError(403, 'Only the host can invite people to this meeting.');
+  }
+  if (meeting.status === 'cancelled') throw new ApiError(409, 'This meeting was cancelled.');
+
+  // Same reachability rule as createMeeting: any real user in this tenant, no
+  // workspace restriction. See the note there.
+  const already = new Set((meeting.participants || []).map((p) => String(p.user)));
+  already.add(String(meeting.host)); // the host is implicitly on their own meeting
+
+  const asked = [...new Set(userIds.map(String))];
+  /* Counted separately so the response can say WHY someone was not added, rather
+     than reporting one opaque number. `requested` deliberately excludes people
+     already on the meeting, so subtracting it from the found users (as an earlier
+     version did) could only ever report zero — the skip count was always wrong. */
+  const alreadyInvited = asked.filter((id) => already.has(id)).length;
+  const requested = asked.filter((id) => !already.has(id));
+  const users = requested.length
+    ? await User.find({ _id: { $in: requested }, ...tenantScope(req.user) }).select('_id email name')
+    : [];
+  // Requested but not found: deleted account, or another tenant's user.
+  const unreachable = requested.length - users.length;
+
+  if (users.length) {
+    meeting.participants.push(...users.map((u) => ({ user: u._id, response: 'pending' })));
+    await meeting.save();
+  }
+
+  const populated = await populate(Meeting.findById(meeting._id));
+
+  // In-app: live event so the meeting appears in their list without a reload,
+  // plus a persisted notification for when they were not connected.
+  users.forEach((u) => {
+    emitToUser(String(u._id), 'meeting-invited', {
+      meetingId: String(populated._id),
+      title: populated.title,
+      startAt: populated.startAt,
+    });
+    notifyUser(u._id, {
+      from: req.user._id,
+      type: 'meeting_reminder',
+      title: 'Meeting invitation',
+      body: `${req.user.name} invited you to "${populated.title}".`,
+      tag: `meeting:${populated._id}`,
+      url: '/meetings',
+      data: { meetingId: String(populated._id) },
+    });
+  });
+
+  /* Email both groups: the newly-added accounts (so it is in their inbox as well
+     as the app) and the raw addresses, which have no other way to hear about it.
+     Best-effort and off the response path — a slow mailer must not delay the UI. */
+  const invitesQueued = sendMeetingInvites({
+    meeting: populated,
+    hostName: req.user.name,
+    emails: [...users.map((u) => u.email), ...emails.map((e) => String(e).trim().toLowerCase())],
+  });
+
+  res.json({
+    success: true,
+    meeting: populated,
+    added: users.map((u) => ({ id: String(u._id), name: u.name })),
+    /* Reported so the UI can say what actually happened instead of claiming
+       success for everything the host selected. `skipped` covers both reasons
+       someone was not added; they are broken out too for a precise message. */
+    skipped: alreadyInvited + unreachable,
+    alreadyInvited,
+    unreachable,
+    invitesQueued,
+  });
 });
 
 // POST /api/meetings/:id/rsvp  { response }

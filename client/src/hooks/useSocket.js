@@ -8,6 +8,7 @@ import { useUI } from '../store/useUI';
 import { useNotifications } from '../store/useNotifications';
 import { useContacts } from '../store/useContacts';
 import { useStatus } from '../store/useStatus';
+import { useMeetings } from '../store/useMeetings';
 import { notifyMessage, messageAlertsAllowed } from '../lib/notify';
 import { playMessageTone } from '../lib/sounds';
 
@@ -209,6 +210,11 @@ export function useSocket() {
     socket.on('meeting-invited', ({ title }) => {
       useNotifications.getState().pushLocal({ type: 'meeting_reminder', title: 'Meeting invitation', body: title ? `You're invited: ${title}` : "You've been invited to a meeting" });
       toast(`📅 Meeting invitation${title ? `: ${title}` : ''}`);
+      /* Pull the meeting into the list as well as announcing it. Without this the
+         invitee got a toast for a meeting that was not yet anywhere on their
+         Meetings page — it only appeared after a manual reload, which read as the
+         invitation not having worked. */
+      useMeetings.getState().load();
     });
 
     // Delivery / read receipts → update tick state for my messages.

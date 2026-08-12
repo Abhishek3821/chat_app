@@ -44,6 +44,29 @@ export const useMeetings = create((set, get) => ({
     return data.meeting;
   },
 
+  /**
+   * Invite more people to a meeting that already exists — contacts, raw email
+   * addresses, or both. Host only (the API enforces it).
+   *
+   * Returns what ACTUALLY happened rather than what was asked for: `added` names
+   * the accounts that became participants, `skipped` counts contacts that were
+   * already invited, and `invitesQueued` is the number of addresses the mailer
+   * accepted after validation and de-duplication. The UI reports those instead of
+   * claiming success for everything the user typed.
+   */
+  invite: async (id, { userIds = [], emails = [] } = {}) => {
+    if (DEMO_MODE) return { added: [], skipped: 0, invitesQueued: 0 };
+    const { data } = await api.post(`/meetings/${id}/invite`, { userIds, emails });
+    set((s) => ({ meetings: s.meetings.map((m) => (m._id === id ? data.meeting : m)) }));
+    return {
+      added: data.added || [],
+      skipped: data.skipped || 0,
+      alreadyInvited: data.alreadyInvited || 0,
+      unreachable: data.unreachable || 0,
+      invitesQueued: data.invitesQueued ?? 0,
+    };
+  },
+
   // Start an instant meeting (no schedule) → a shareable room you can join now.
   createInstant: async (type = 'video') => {
     const { data } = await api.post('/meetings', { type });

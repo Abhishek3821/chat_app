@@ -19,18 +19,22 @@ import {
   LayoutGrid,
   List,
   Radio,
+  UserPlus,
+  Mail,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import Modal from '@/components/ui/Modal';
+import { Input } from '@/components/ui/Input';
 import EmptyState from '@/components/ui/EmptyState';
 import PageHeader, { SegmentedControl } from '@/components/ui/PageHeader';
 import { cn, formatDate, PAGE_SHELL } from '@/lib/utils';
 import { useUI } from '@/store/useUI';
 import { useAuth } from '@/store/useAuth';
 import { useMeetings } from '@/store/useMeetings';
+import { useContacts } from '@/store/useContacts';
 
 /** The shareable room code for a meeting (falls back to parsing the link). */
 const roomCodeOf = (meeting) => meeting.roomCode || (meeting.link || '').split('/meet/')[1] || '';
@@ -260,6 +264,7 @@ function MeetingCard({ meeting, me, past }) {
   const { roomCode, join, copyLink, openReport, reportOpen, setReportOpen, report, loadingReport } =
     useMeetingActions(meeting);
   const { amHost, myEntry, myResponse } = useMyRole(meeting, me);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const start = new Date(meeting.startAt);
   const end = endOf(meeting);
@@ -354,6 +359,12 @@ function MeetingCard({ meeting, me, past }) {
             </button>
           )}
           <Button variant="outline" size="sm" onClick={copyLink} title="Copy meeting link" className="sm:hidden"><Copy size={15} /></Button>
+          {/* Host-only, and pointless once the meeting has ended. */}
+          {amHost && !past && (
+            <Button variant="outline" size="sm" onClick={() => setInviteOpen(true)} title="Invite people">
+              <UserPlus size={15} /> <span className="hidden sm:inline">Invite</span>
+            </Button>
+          )}
           <Button onClick={join} variant={past ? 'outline' : 'primary'}>
             {meeting.type === 'video' ? <Video size={17} /> : <Phone size={17} />}
             {past ? 'Reopen' : 'Join'}
@@ -366,6 +377,11 @@ function MeetingCard({ meeting, me, past }) {
       {amHost && reportOpen && (
         <MeetingReportModal open onClose={() => setReportOpen(false)} report={report} loading={loadingReport} />
       )}
+      {/* Same reasoning as the report dialog: mounted only once opened, so a page
+          of 50 meetings does not portal 50 dormant modals into <body>. */}
+      {amHost && inviteOpen && (
+        <InvitePeopleModal open onClose={() => setInviteOpen(false)} meeting={meeting} />
+      )}
     </motion.article>
   );
 }
@@ -377,6 +393,7 @@ function MeetingListRow({ meeting, me, past }) {
   const { roomCode, join, copyLink, openReport, reportOpen, setReportOpen, report, loadingReport } =
     useMeetingActions(meeting);
   const { amHost, myEntry, myResponse } = useMyRole(meeting, me);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const start = new Date(meeting.startAt);
   const end = endOf(meeting);
@@ -469,6 +486,11 @@ function MeetingListRow({ meeting, me, past }) {
           <ClipboardList size={16} />
         </Button>
       )}
+      {amHost && !past && (
+        <Button variant="ghost" size="icon-sm" onClick={() => setInviteOpen(true)} title="Invite people" aria-label="Invite people" className="shrink-0">
+          <UserPlus size={15} />
+        </Button>
+      )}
       <Button variant="ghost" size="icon-sm" onClick={copyLink} title="Copy meeting link" aria-label="Copy meeting link" className="shrink-0 xl:hidden">
         <Copy size={16} />
       </Button>
@@ -481,6 +503,11 @@ function MeetingListRow({ meeting, me, past }) {
           not portal 50 dormant dialogs into <body>. */}
       {amHost && reportOpen && (
         <MeetingReportModal open onClose={() => setReportOpen(false)} report={report} loading={loadingReport} />
+      )}
+      {/* Same reasoning as the report dialog: mounted only once opened, so a page
+          of 50 meetings does not portal 50 dormant modals into <body>. */}
+      {amHost && inviteOpen && (
+        <InvitePeopleModal open onClose={() => setInviteOpen(false)} meeting={meeting} />
       )}
     </motion.article>
   );
@@ -495,6 +522,197 @@ function ReportStat({ icon: Icon, label, value, accent }) {
       </div>
       <p className="mt-1 truncate text-lg font-bold text-content">{value}</p>
     </div>
+  );
+}
+
+/**
+ * Invite more people to a meeting that already exists.
+ *
+ * Two routes in one dialog, because from the host's point of view it is one job:
+ *  · a CONTACT becomes a real participant — the meeting lands in their list, they
+ *    are notified in-app, and they can RSVP;
+ *  · a raw EMAIL only receives the invitation with the join link, because there is
+ *    no account to attach a participant record to.
+ *
+ * Already-invited contacts are shown as such rather than being silently ignored,
+ * and the result toast reports what the server actually did — not what was typed.
+ */
+function InvitePeopleModal({ open, onClose, meeting }) {
+  const invite = useMeetings((s) => s.invite);
+  const { contacts, load: loadContacts } = useContacts();
+  const [picked, setPicked] = useState([]);
+  const [emails, setEmails] = useState([]);
+  const [emailInput, setEmailInput] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      loadContacts();
+      setPicked([]);
+      setEmails([]);
+      setEmailInput('');
+    }
+  }, [open, loadContacts]);
+
+  // Who is already on the meeting — host included, so they can't be re-invited.
+  const alreadyIn = useMemo(() => {
+    const ids = (meeting.participants || []).map((p) => String(p.user?._id || p.user));
+    ids.push(String(meeting.host?._id || meeting.host));
+    return new Set(ids);
+  }, [meeting]);
+
+  const addEmail = () => {
+    const e = emailInput.trim().toLowerCase();
+    if (!e) return;
+    if (!/^\S+@\S+\.\S+$/.test(e)) {
+      toast.error('That doesn’t look like an email address.');
+      return;
+    }
+    if (!emails.includes(e)) setEmails((list) => [...list, e]);
+    setEmailInput('');
+  };
+
+  const submit = async () => {
+    /* Include an address still sitting in the input. Typing one and pressing
+       "Send invites" without first hitting Enter used to drop it silently, which
+       reads as invite-by-email being broken. */
+    const pending = emailInput.trim().toLowerCase();
+    const allEmails = pending && /^\S+@\S+\.\S+$/.test(pending) && !emails.includes(pending) ? [...emails, pending] : emails;
+    if (pending && !/^\S+@\S+\.\S+$/.test(pending)) {
+      toast.error('Fix or clear the email address first.');
+      return;
+    }
+    if (!picked.length && !allEmails.length) {
+      toast.error('Pick a contact or enter an email address.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { added, alreadyInvited, unreachable, invitesQueued } = await invite(meeting._id, {
+        userIds: picked,
+        emails: allEmails,
+      });
+      /* Report what the SERVER did, not what was selected — and distinguish the
+         two reasons someone was skipped, because they mean different things to
+         the host: already-invited is fine, unreachable is not. */
+      const parts = [];
+      if (added.length) parts.push(`${added.length} added`);
+      if (invitesQueued) parts.push(`${invitesQueued} ${invitesQueued === 1 ? 'email' : 'emails'} sent`);
+      if (alreadyInvited) parts.push(`${alreadyInvited} already invited`);
+      if (unreachable) parts.push(`${unreachable} could not be reached`);
+      toast.success(parts.length ? `Invited — ${parts.join(', ')}` : 'Nothing new to invite');
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || 'Could not send the invitations.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = (id) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Invite people"
+      subtitle={meeting.title}
+      footer={
+        <Button className="w-full" onClick={submit} disabled={busy}>
+          <UserPlus size={16} /> {busy ? 'Sending…' : 'Send invites'}
+        </Button>
+      }
+    >
+      <div className="space-y-4 pb-2">
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-content">
+            <Mail size={15} /> Invite by email
+          </p>
+          <p className="mb-2 text-xs text-content-muted">
+            They don’t need an account — the invitation carries the join link.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="name@example.com"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addEmail();
+                }
+              }}
+            />
+            <Button type="button" variant="subtle" size="md" onClick={addEmail}>
+              <Plus size={16} />
+            </Button>
+          </div>
+          {emails.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {emails.map((e) => (
+                <span
+                  key={e}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 py-1 pl-2.5 pr-1.5 text-xs text-brand-600 dark:text-brand-300"
+                >
+                  {e}
+                  <button
+                    onClick={() => setEmails((list) => list.filter((x) => x !== e))}
+                    className="grid h-4 w-4 place-items-center rounded-full hover:bg-brand-500/20"
+                    aria-label={`Remove ${e}`}
+                  >
+                    <XCircle size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-medium text-content">
+            Invite contacts <span className="text-content-muted">({picked.length})</span>
+          </p>
+          <div className="scrollbar-thin max-h-56 space-y-0.5 overflow-y-auto">
+            {contacts.length === 0 && (
+              <p className="py-4 text-center text-xs text-content-muted">No contacts yet — invite by email instead.</p>
+            )}
+            {contacts.map((u) => {
+              const on = alreadyIn.has(String(u._id));
+              return (
+                <button
+                  key={u._id}
+                  disabled={on}
+                  onClick={() => toggle(u._id)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors',
+                    on ? 'cursor-not-allowed opacity-50' : 'hover:bg-content/5'
+                  )}
+                >
+                  <Avatar src={u.avatar} name={u.name} size="md" online={u.isOnline} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-content">{u.name}</p>
+                    <p className="truncate text-xs text-content-muted">
+                      {on ? 'Already invited' : `@${u.username}`}
+                    </p>
+                  </div>
+                  {!on && (
+                    <span
+                      className={cn(
+                        'grid h-6 w-6 place-items-center rounded-full border-2 transition-colors',
+                        picked.includes(u._id) ? 'border-brand-500 bg-brand-gradient text-white' : 'border-border'
+                      )}
+                    >
+                      {picked.includes(u._id) && <Check size={14} />}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

@@ -4,6 +4,7 @@ import {
   getMeetings,
   updateMeeting,
   rsvp,
+  inviteToMeeting,
   cancelMeeting,
   getMeetingByCode,
   joinMeetingByCode,
@@ -28,6 +29,8 @@ router.post('/code/:code/join', joinMeetingByCode);
 router.get('/:id/report', getMeetingReport); // host-only attendance record
 router.patch('/:id', updateMeeting);
 router.post('/:id/rsvp', rsvp);
+// Invite more people to an already-scheduled meeting (host only).
+router.post('/:id/invite', inviteToMeeting);
 router.delete('/:id', cancelMeeting);
 
 export default router;
