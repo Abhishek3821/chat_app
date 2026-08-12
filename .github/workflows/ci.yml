@@ -28,6 +28,13 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run build
+      # The build alone does NOT catch a reference to something that was deleted:
+      # esbuild/oxc do no scope analysis, so a call to a removed helper compiles
+      # clean and throws at runtime. That is exactly how a deleted block took
+      # RightPanel's `handleDeleteChat` with it and crashed every chat open while
+      # CI stayed green. This does the scope check the bundler won't.
+      - name: undefined-reference scan
+        run: node scan-undefined.mjs
 
   server-tests:
     runs-on: ubuntu-latest
@@ -65,9 +72,9 @@ jobs:
       - name: feature-coverage suite (81 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/feature-coverage.mjs
-      - name: search / E2EE / wallpaper suite
+      - name: search / wallpaper suite
         if: ${{ env.MONGO_URI != '' }}
-        run: node tests/search-e2ee-wallpaper.mjs
+        run: node tests/search-wallpaper.mjs
       # Shares a test database with the suite above, so it must not run in
       # parallel with it (the free Atlas tier caps the cluster at 500
       # collections, and one database per suite is what exhausted it).

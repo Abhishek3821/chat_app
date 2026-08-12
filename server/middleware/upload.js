@@ -30,11 +30,7 @@ const storage = cloudStorageEnabled() ? multer.memoryStorage() : diskStorage;
 
 // Anchored: the WHOLE extension must match — an unanchored list would also pass
 // lookalikes that merely contain an allowed word (".docm", ".fakepdf", ".xmp4").
-// `.enc` is an attachment sealed for an end-to-end encrypted chat. The bytes are
-// AES-GCM ciphertext this server cannot open, and its real name/type live on the
-// message rather than in the filename — so it must be listed here, because the
-// extension is the gate. Keep in step with the client's ALLOWED_UPLOAD_EXT.
-const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt|enc)$/;
+const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/;
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
 export const MAX_FILES = 10;

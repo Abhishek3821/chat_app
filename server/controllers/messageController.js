@@ -48,13 +48,6 @@ function sanitizeAttachments(attachments) {
       width: a.width,
       height: a.height,
       duration: a.duration,
-      /* A sealed attachment: keep the nonce + key version so the recipient can
-         decrypt it. Shape-checked like the message envelope — there is nothing
-         here the server could verify semantically, and it must not try. */
-      enc:
-        a.enc && typeof a.enc.iv === 'string' && a.enc.iv.length > 0 && a.enc.iv.length <= 64 && Number.isInteger(a.enc.v) && a.enc.v > 0
-          ? { iv: a.enc.iv, v: a.enc.v }
-          : undefined,
     }));
 }
 
@@ -120,16 +113,9 @@ export async function deliverMessage({
   mentions,
   forwardedFrom,
   viewOnce = false,
-  enc,
 }) {
   const chatId = String(chat._id);
   if (type !== 'system') await assertNotBlocked(chat, sender);
-
-  /* In an encrypted chat the readable text never reaches this process — only
-     `enc`. Force `content` empty rather than trusting the caller to have done
-     it, so a client bug cannot leak plaintext into an "encrypted" message. */
-  const encrypted = Boolean(enc?.ct);
-  const storedContent = encrypted ? '' : content;
   // Disappearing messages: stamp an expiry so the TTL index self-deletes it.
   const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
 
@@ -137,9 +123,7 @@ export async function deliverMessage({
     chat: chatId,
     sender: sender._id,
     type,
-    content: storedContent,
-    encrypted,
-    enc: encrypted ? { ct: enc.ct, iv: enc.iv, v: enc.v } : undefined,
+    content,
     attachments,
     location,
     replyTo: replyTo || undefined,
@@ -164,9 +148,8 @@ export async function deliverMessage({
   for (const p of chat.participants) {
     emitToUser(String(p.user), 'receive-message', { chatId, message });
   }
-  /* Notification preview. A sealed message has no readable text in this
-     process, so the push says one arrived and nothing about it. */
-  const preview = encrypted ? '🔒 Encrypted message' : storedContent?.slice(0, 120) || `Sent ${type}`;
+  // Notification preview.
+  const preview = content?.slice(0, 120) || `Sent ${type}`;
   for (const p of chat.participants) {
     const uid = String(p.user);
     if (uid === String(sender._id)) continue;
@@ -191,10 +174,7 @@ export async function deliverMessage({
   // without re-loading the chat just to learn who the recipient is — the common
   // case then costs no queries at all. Plain strings: the BullMQ payload must
   // stay JSON-serialisable.
-  /* Skipped for encrypted threads: an auto-reply is a server-composed message
-     and the server has no chat key to seal one with. Sending it in the clear
-     into a sealed conversation would be worse than not sending it. */
-  if (!chat.isGroup && !chat.e2ee?.enabled) {
+  if (!chat.isGroup) {
     enqueue('automsg.maybe', {
       chatId,
       senderId: String(sender._id),
@@ -205,58 +185,19 @@ export async function deliverMessage({
   return message;
 }
 
-/** Ciphertext envelope from an encrypted chat. Shape-checked only — there is
- *  nothing here the server could validate semantically, and it must not try. */
-const MAX_CIPHERTEXT = 20000; // base64 of a MAX_CONTENT message + GCM overhead
-function sanitizeEnc(enc) {
-  if (enc === undefined || enc === null) return undefined;
-  const { ct, iv, v } = enc;
-  const ok =
-    typeof ct === 'string' && ct.length > 0 && ct.length <= MAX_CIPHERTEXT &&
-    typeof iv === 'string' && iv.length > 0 && iv.length <= 64 &&
-    Number.isInteger(v) && v > 0;
-  if (!ok) throw new ApiError(400, 'Malformed encrypted payload.');
-  return { ct, iv, v };
-}
-
-/**
- * Reconcile what the client sent with the chat's encryption state.
- *
- * Both directions fail loudly rather than papering over: plaintext into a sealed
- * chat would silently downgrade the conversation, and ciphertext into a plain one
- * would render as an unreadable blob for everyone. A stale key version is its own
- * case — the client needs to be told to re-fetch keys, not just "400".
- */
-function assertEncryptionMatches(chat, safe) {
-  const chatEncrypted = Boolean(chat.e2ee?.enabled);
-  if (chatEncrypted && !safe.enc) {
-    throw new ApiError(409, 'This chat is end-to-end encrypted — the message must be encrypted before sending.');
-  }
-  if (!chatEncrypted && safe.enc) {
-    throw new ApiError(409, 'This chat is not encrypted.');
-  }
-  if (chatEncrypted && safe.enc.v !== chat.e2ee.version) {
-    throw new ApiError(409, `Stale encryption key (v${safe.enc.v}); this chat is on v${chat.e2ee.version}. Re-fetch the chat keys and retry.`);
-  }
-}
-
 /** Shared validation for a client-supplied message body (live or scheduled). */
-export function validateOutgoing({ type = 'text', content = '', attachments, location, viewOnce, enc }) {
+export function validateOutgoing({ type = 'text', content = '', attachments, location, viewOnce }) {
   if (!USER_MESSAGE_TYPES.includes(type)) throw new ApiError(400, 'Invalid message type.');
   if (typeof content !== 'string' || content.length > MAX_CONTENT) {
     throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
   }
-  const safeEnc = sanitizeEnc(enc);
   const safeAttachments = sanitizeAttachments(attachments);
-  /* An encrypted message carries its text in `enc`, so an empty `content` is
-     exactly what it should look like — it is not an empty message. */
-  if (!content && !safeEnc && (!safeAttachments || safeAttachments.length === 0) && !location) {
+  if (!content && (!safeAttachments || safeAttachments.length === 0) && !location) {
     throw new ApiError(400, 'Message cannot be empty.');
   }
   return {
     type,
     content,
-    enc: safeEnc,
     attachments: safeAttachments,
     // View-once only applies to media.
     viewOnce: Boolean(viewOnce) && (type === 'image' || type === 'video'),
@@ -352,7 +293,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
 
   // Validate client-supplied fields (don't trust type/attachments/content blindly).
   const safe = validateOutgoing({ ...req.body, type, content });
-  assertEncryptionMatches(chat, safe);
   const safeMentions = Array.isArray(mentions) ? mentions.slice(0, 100) : undefined;
 
   const message = await deliverMessage({
@@ -380,14 +320,7 @@ export const editMessage = asyncHandler(async (req, res) => {
 
   // Bound the edit like a send — otherwise an edit could balloon a message far
   // past the send-time cap (limited only by the global body size).
-  if (message.encrypted) {
-    /* A sealed message is edited by replacing its ciphertext; there is no
-       plaintext here to patch, and anything else would downgrade it mid-thread. */
-    const enc = sanitizeEnc(req.body.enc);
-    if (!enc) throw new ApiError(409, 'This message is encrypted — send the replacement as an encrypted payload.');
-    message.enc = enc;
-    message.content = '';
-  } else if (req.body.content !== undefined) {
+  if (req.body.content !== undefined) {
     if (typeof req.body.content !== 'string' || req.body.content.length > MAX_CONTENT) {
       throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
     }
@@ -496,7 +429,7 @@ export const getStarred = asyncHandler(async (req, res) => {
   ).then((rows) =>
     Message.populate(rows, {
       path: 'chat',
-      select: 'name isGroup avatar participants e2ee.enabled',
+      select: 'name isGroup avatar participants',
       populate: { path: 'participants.user', select: 'name username avatar' },
     })
   );
@@ -532,20 +465,15 @@ export const markRead = asyncHandler(async (req, res) => {
  * scan is bounded to one conversation and ordered — no collection-wide sort.
  */
 export const searchMessages = asyncHandler(async (req, res) => {
-  /* Membership gate. This used to ride along on an assertMemberFields() call
-     that ALSO fetched the chat's encryption flag; removing encryption removed
-     the fetch, and with it — silently — the authorisation check, letting any
-     authenticated user search any conversation. Restored explicitly with the
-     yes/no variant, which is what this handler actually needs. */
-  const chat = await assertMemberFields(req.params.chatId, req.user._id, 'e2ee.enabled');
+  /* Membership gate. Keep this EXPLICIT: it used to ride along on an
+     assertMemberFields() call that also fetched the chat's encryption flag, and
+     removing encryption removed the fetch — and with it, silently, the
+     authorisation check, letting any authenticated user search any conversation.
+     This handler only needs the yes/no answer, so ask for exactly that. */
+  await assertIsMember(req.params.chatId, req.user._id);
 
   const q = (req.query.q || '').trim().slice(0, 128);
-  if (!q) return res.json({ success: true, messages: [], hasMore: false, encrypted: false });
-  if (chat.e2ee?.enabled) {
-    /* Tell the client WHY it got nothing, so it can fall back to its own
-       decrypted cache instead of reporting "no results" for a chat full of them. */
-    return res.json({ success: true, messages: [], hasMore: false, encrypted: true });
-  }
+  if (!q) return res.json({ success: true, messages: [], hasMore: false });
 
   const limit = Math.min(Number(req.query.limit) || 30, 100);
   const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -559,7 +487,7 @@ export const searchMessages = asyncHandler(async (req, res) => {
 
   const rows = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit + 1).lean());
   const hasMore = rows.length > limit;
-  res.json({ success: true, messages: hasMore ? rows.slice(0, limit) : rows, hasMore, encrypted: false });
+  res.json({ success: true, messages: hasMore ? rows.slice(0, limit) : rows, hasMore });
 });
 
 /**
@@ -803,13 +731,6 @@ export const scheduleMessage = asyncHandler(async (req, res) => {
   const chat = await assertMember(chatId, req.user._id);
   assertMayPost(chat, req.user._id);
 
-  /* An encrypted chat cannot hold a scheduled message: the dispatcher sends it
-     later, from the server, which has no chat key — so it would arrive as
-     plaintext in a conversation the user believes is sealed. */
-  if (chat.e2ee?.enabled) {
-    throw new ApiError(409, 'Scheduling is not available in an end-to-end encrypted chat — the server would have to send it unencrypted.');
-  }
-
   const when = new Date(sendAt);
   if (Number.isNaN(when.getTime())) throw new ApiError(400, 'sendAt must be a valid date.');
   if (when.getTime() - Date.now() < MIN_SCHEDULE_LEAD_MS) {
@@ -819,7 +740,6 @@ export const scheduleMessage = asyncHandler(async (req, res) => {
   // Same validation as a live send, so a scheduled message can never carry a
   // payload the live path would have rejected.
   const safe = validateOutgoing({ ...req.body, type, content });
-  assertEncryptionMatches(chat, safe);
 
   const pending = await ScheduledMessage.countDocuments({ chat: chatId, sender: req.user._id, status: 'pending' });
   if (pending >= MAX_PENDING_PER_CHAT) {

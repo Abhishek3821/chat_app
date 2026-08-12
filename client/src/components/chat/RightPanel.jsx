@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Palette } from 'lucide-react';
+import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Palette } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
@@ -58,8 +58,39 @@ export default function RightPanel({ chat, currentUser }) {
     navigate('/starred');
   };
 
-  /* ── Encryption ── */
-  const openModal = useUI((s) => s.openModal);
+  /* ── Wallpaper ── */
+  const setChatTheme = useChat((s) => s.setChatTheme);
+  const theme = useUI((s) => s.theme);
+  const isDark =
+    theme === 'dark' ||
+    (theme === 'system' && typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches);
+
+  // Was `${origin}/join/${chat._id}` — a dead link twice over: there is no /join
+  // route, and the server's join endpoint keys off `inviteCode`, not the chat id.
+  const inviteUrl = inviteUrlForGroup(chat?.inviteCode);
+
+  const copyInvite = async () => {
+    if (!inviteUrl) {
+      toast.error('This group has no invite code yet.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      toast.success('Invite link copied');
+    } catch {
+      toast(inviteUrl);
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    const group = chat?.isGroup;
+    if (!window.confirm(group ? 'Leave and remove this group from your list?' : 'Delete this conversation?')) return;
+    await deleteChat(chat._id);
+    toast.success(group ? 'You left the group' : 'Chat deleted');
+    setRightPanel(false);
+    navigate('/');
+  };
+
   const handleMute = (v) => {
     setMuted(v);
     toggleMuteChat(chat._id); // persists to the account

@@ -183,7 +183,6 @@ function PrivacyPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-
       <Section title="Visibility" description="Control what other people can see about you.">
         <Rows>
           <ToggleRow

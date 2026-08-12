@@ -3,8 +3,6 @@ import toast from 'react-hot-toast';
 import api, { DEMO_MODE } from '../lib/api';
 import { CHATS, MESSAGES } from '../lib/demoData';
 import { useAuth } from './useAuth';
-import { useE2EE } from './useE2EE';
-import { useUI } from './useUI';
 
 // Safety net for "typing…" that never stops (peer disconnected mid-keystroke,
 // their typing-stop was lost). Each typing flag auto-expires unless renewed.
@@ -14,74 +12,6 @@ const TYPING_TTL_MS = 7000;
 // Monotonic counter so two optimistic sends in the same millisecond can never
 // collide on the same temp id (a collision made appendMessage drop the second).
 let tmpSeq = 0;
-
-/** Sending into a sealed chat with no key in memory. Distinct from an API failure
- *  because the fix is a passphrase, not a retry. */
-class EncryptionLockedError extends Error {
-  constructor() {
-    super('Encryption is locked on this device.');
-    this.name = 'EncryptionLockedError';
-  }
-}
-
-/**
- * Is this conversation sealed?
- *
- * Two sources, in priority order: useE2EE's `chatState` is authoritative once the
- * chat has been opened (it comes from the keys endpoint), and the chat row's own
- * `e2ee.enabled` covers the window before that — `getChats` strips only the key
- * material, not the flag, precisely so this is answerable without a round-trip.
- */
-function isEncrypted(chatId) {
-  const known = useE2EE.getState().chatState[chatId];
-  if (known) return Boolean(known.enabled);
-  return Boolean(useChat.getState().chats.find((c) => c._id === chatId)?.e2ee?.enabled);
-}
-
-/**
- * Decrypt whatever needs it before the messages reach the store, so every
- * consumer downstream (bubbles, previews, in-chat search, starred, reply quotes)
- * reads `content` and neither knows nor cares that it arrived sealed.
- *
- * Never throws: `hydrate` substitutes a readable placeholder for anything it
- * can't open, because a chat that renders empty bubbles is worse than one that
- * says why it can't read them.
- */
-/**
- * Encryption is always on, so opening a chat is also the moment to ensure it IS
- * sealed. Chats that existed before encryption became mandatory have no key, and
- * sealing them the first time someone opens them is the whole migration — no
- * script to run, no downtime, and the server never handles a key.
- *
- * Best-effort and quiet by design. It fails when a member hasn't signed in since
- * this shipped and so has no published public key to seal for; there is nothing
- * the opener can do about that, and a toast on every open would be pure noise.
- * Already-sent plaintext stays plaintext — re-sealing it would mean the server
- * reading it first, which is exactly what must not happen.
- */
-async function autoSeal(chatId) {
-  const e2ee = useE2EE.getState();
-  if (e2ee.status !== 'unlocked') return;
-  if (isEncrypted(chatId)) {
-    e2ee.ensureMembersKeyed(chatId);
-    return;
-  }
-  try {
-    const state = await e2ee.enableForChat(chatId);
-    useChat.setState((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, e2ee: state } : c)) }));
-  } catch {
-    /* a member has no identity yet — see above */
-  }
-}
-
-async function decrypted(chatId, messages) {
-  if (!Array.isArray(messages) || !messages.length) return messages;
-  try {
-    return await useE2EE.getState().hydrate(chatId, messages);
-  } catch {
-    return messages;
-  }
-}
 
 export const useChat = create((set, get) => ({
   chats: [],
@@ -154,13 +84,8 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
-      const messages = await decrypted(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
-      /* Seal it if it isn't yet, and re-key it if a member joined after the
-         current version was minted — either way, opening a chat is the moment
-         that gets its encryption into the right state. Not awaited: it must not
-         hold up the paint of a conversation that is already readable. */
-      autoSeal(chatId);
       // Pins ride along on the first page, so the banner is up as the
       // conversation paints.
       if (data.pins) {
@@ -204,7 +129,7 @@ export const useChat = create((set, get) => ({
       const { data } = await api.get(`/messages/${chatId}`, {
         params: { before: new Date(oldest.createdAt).toISOString(), limit: 40 },
       });
-      const older = await decrypted(chatId, data.messages || []);
+      const older = data.messages || [];
       if (!older.length) {
         set((s) => ({ noMoreOlder: { ...s.noMoreOlder, [chatId]: true } }));
         return 0;
@@ -239,7 +164,7 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}/context/${messageId}`);
-      const messages = await decrypted(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
         // A context window is a SLICE of history, so the list must not assume
@@ -280,7 +205,7 @@ export const useChat = create((set, get) => ({
     set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
-      const messages = await decrypted(chatId, data.messages);
+      const messages = data.messages;
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
         windowedChats: { ...s.windowedChats, [chatId]: false },
@@ -311,10 +236,6 @@ export const useChat = create((set, get) => ({
 
     try {
       const { data } = await api.get(`/messages/${chatId}/search`, { params: { q } });
-      /* The server cannot match ciphertext, and says so rather than returning an
-         empty list — otherwise a sealed chat full of hits reads as "no results".
-         Fall back to the decrypted window this device already holds. */
-      if (data.encrypted) return { messages: localHits(), scope: 'encrypted-local', hasMore: false };
       const messages = data.messages || [];
       return { messages, scope: 'server', hasMore: Boolean(data.hasMore) };
     } catch {
@@ -349,39 +270,7 @@ export const useChat = create((set, get) => ({
    * synchronous path used by the optimistic and demo flows.
    */
   ingestMessage: async (chatId, message) => {
-    get().appendMessage(chatId, await useE2EE.getState().hydrateOne(chatId, message));
-  },
-
-  /** Encryption was switched on/off for a chat (possibly on another device). */
-  applyChatE2EE: async (chatId, e2ee) => {
-    set((s) => ({ chats: s.chats.map((c) => (c._id === chatId ? { ...c, e2ee } : c)) }));
-    // The cached key set is for the OLD version — drop it so the next read
-    // re-fetches rather than failing every unwrap against a superseded key.
-    useE2EE.getState().invalidateChat(chatId);
-    if (get().messagesByChat[chatId]) await get().rehydrateChat(chatId);
-  },
-
-  /**
-   * Re-run decryption over a chat's loaded window. Called after the identity is
-   * unlocked (every bubble is showing the locked placeholder and needs a second
-   * pass) and after a key rotation.
-   */
-  rehydrateChat: async (chatId) => {
-    const loaded = get().messagesByChat[chatId];
-    if (!loaded?.length) return;
-    /* Reset the previous failure before retrying: the placeholder text has to go
-       (it is not the message) and so does the flag, or a bubble that decrypts
-       fine on the second pass still renders as unreadable. */
-    const messages = await decrypted(
-      chatId,
-      loaded.map((m) => (m.undecryptable ? { ...m, content: '', undecryptable: false } : m))
-    );
-    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
-  },
-
-  /** Unlocking applies to every conversation already on screen, not just the open one. */
-  rehydrateAll: async () => {
-    await Promise.all(Object.keys(get().messagesByChat).map((id) => get().rehydrateChat(id)));
+    get().appendMessage(chatId, message);
   },
 
   /** A wallpaper change made on another of my devices. */
@@ -431,53 +320,15 @@ export const useChat = create((set, get) => ({
     if (DEMO_MODE) return optimistic;
 
     try {
-      /**
-       * Seal the text before it leaves the device.
-       *
-       * The optimistic bubble above keeps the plaintext — this is the device that
-       * typed it, and it can obviously read it. What goes over the wire is the
-       * `enc` envelope plus an EMPTY `content`, which is the whole point: the
-       * server stores what it is given and cannot open this.
-       *
-       * `sealed` is retried once on a stale-version 409, because a rotation on
-       * another device is a normal race, not an error worth showing anyone.
-       */
-      let sealed = null;
-      if (isEncrypted(chatId)) {
-        if (useE2EE.getState().status !== 'unlocked') {
-          throw new EncryptionLockedError();
-        }
-        sealed = await useE2EE.getState().encryptForChat(chatId, content || '');
-      }
-
-      const post = () =>
-        api.post('/messages', {
-          chatId,
-          content: sealed ? '' : content,
-          enc: sealed || undefined,
-          type,
-          attachments,
-          location,
-          viewOnce,
-          replyTo: replyTo?._id,
-        });
-
-      let data;
-      try {
-        ({ data } = await post());
-      } catch (err) {
-        const stale = sealed && err?.response?.status === 409 && /stale encryption key/i.test(err.response?.data?.message || '');
-        if (!stale) throw err;
-        useE2EE.getState().invalidateChat(chatId);
-        sealed = await useE2EE.getState().encryptForChat(chatId, content || '');
-        ({ data } = await post());
-      }
-
-      /* The echo of this message carries ciphertext, and re-decrypting it would
-         be pointless work for a string already in hand — hand the plaintext to
-         the cache so the sender's own bubble never flickers through a decrypt. */
-      if (sealed) useE2EE.getState().rememberPlain(data.message._id, content || '');
-
+      const { data } = await api.post('/messages', {
+        chatId,
+        content,
+        type,
+        attachments,
+        location,
+        viewOnce,
+        replyTo: replyTo?._id,
+      });
       set((s) => {
         // The saved message may ALSO have arrived via the socket echo before this
         // response resolved — drop that copy first, then swap the optimistic one,
@@ -485,15 +336,11 @@ export const useChat = create((set, get) => ({
         const list = (s.messagesByChat[chatId] || []).filter(
           (m) => m._id !== data.message._id || m._id === optimistic._id
         );
-        /* The saved copy comes back with `content: ''` for a sealed message —
-           that is what the database holds. Keep the plaintext we just typed, or
-           swapping the optimistic bubble for the server's would blank it. */
-        const saved = sealed ? { ...data.message, content: content || '' } : data.message;
         return {
           messagesByChat: {
             ...s.messagesByChat,
             // Carry `clientId` across so the React key stays stable through the swap.
-            [chatId]: list.map((m) => (m._id === optimistic._id ? { ...saved, clientId } : m)),
+            [chatId]: list.map((m) => (m._id === optimistic._id ? { ...data.message, clientId } : m)),
           },
         };
       });
@@ -505,18 +352,9 @@ export const useChat = create((set, get) => ({
           [chatId]: (s.messagesByChat[chatId] || []).map((m) => (m._id === optimistic._id ? { ...m, status: 'failed' } : m)),
         },
       }));
-      if (err instanceof EncryptionLockedError) {
-        // Actionable rather than a dead end: the message is still there, marked
-        // failed, and unlocking lets them retry it.
-        toast.error('Unlock encryption to send in this chat.');
-        useUI.getState().openModal('e2ee');
-        return undefined;
-      }
       const message = err?.response?.data?.message;
       if (message) toast.error(message);
-      else if (err?.message) toast.error(err.message);
     }
-    return undefined;
   },
 
   // Mark a specific message delivered to a user (adds them to deliveredTo).
@@ -781,11 +619,6 @@ export const useChat = create((set, get) => ({
     }
     const { data } = await api.post('/groups', { name, description, members });
     get().addChat(data.chat);
-    /* AWAITED, unlike the seal on open: a brand-new chat is one the user is about
-       to type into immediately, and an unawaited seal would race that first send
-       — which would then land as plaintext in a conversation that becomes sealed
-       a moment later. Sealing before the chat is even active removes the race. */
-    await autoSeal(data.chat._id);
     get().setActiveChat(data.chat._id);
     return data.chat;
   },
@@ -807,7 +640,6 @@ export const useChat = create((set, get) => ({
     }
     const { data } = await api.post(`/chats/direct/${userId}`);
     get().addChat(data.chat);
-    await autoSeal(data.chat._id); // awaited — see createGroup
     get().setActiveChat(data.chat._id);
     return data.chat;
   },
@@ -849,16 +681,7 @@ export const useChat = create((set, get) => ({
     }));
     if (!DEMO_MODE) {
       try {
-        /* A sealed message is edited by REPLACING its ciphertext — there is no
-           plaintext on the server to patch. Same envelope shape as a send, so the
-           edit stays as unreadable to the server as the original was. */
-        if (original?.encrypted) {
-          const enc = await useE2EE.getState().encryptForChat(chatId, content);
-          await api.patch(`/messages/${messageId}`, { enc });
-          useE2EE.getState().rememberPlain(messageId, content);
-        } else {
-          await api.patch(`/messages/${messageId}`, { content });
-        }
+        await api.patch(`/messages/${messageId}`, { content });
       } catch (err) {
         // Server refused (e.g. past the 5-minute edit window) — undo the optimistic edit.
         if (original) {

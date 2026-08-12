@@ -9,20 +9,6 @@ const attachmentSchema = new mongoose.Schema(
     width: Number,
     height: Number,
     duration: Number, // seconds, for audio/video/voice
-
-    /**
-     * Set when the file at `url` is AES-GCM ciphertext rather than the media
-     * itself (an attachment in an end-to-end encrypted chat).
-     *
-     * Only the nonce and the chat-key version are here — the key is not, and
-     * never reaches this server. `name`/`mime`/`size` above describe the ORIGINAL
-     * file, because that is what the recipient gets back after decrypting and
-     * what the UI needs in order to know it has an image rather than a download.
-     */
-    enc: {
-      iv: { type: String }, // base64 nonce
-      v: { type: Number }, // chat-key version the file was sealed under
-    },
   },
   { _id: false }
 );
@@ -67,25 +53,17 @@ const messageSchema = new mongoose.Schema(
     content: { type: String, default: '' },
 
     /**
-     * End-to-end encrypted payload. When `encrypted` is true, `content` is
-     * ALWAYS the empty string — the readable text exists only as `enc.ct`,
-     * sealed with the chat key, which the server never holds. `enc.v` records
-     * which chat-key version sealed it, so a chat can rotate its key (on a
-     * membership change) without orphaning history sealed under the old one.
+     * LEGACY, read-only. Marks a message written while the app was end-to-end
+     * encrypted: its `content` is empty and its text existed only as ciphertext
+     * sealed with a chat key the server never held.
      *
-     * Consequences the rest of the codebase depends on:
-     *  • the `content` text index can't see these, so server-side message search
-     *    cannot work for encrypted chats — the client searches locally instead;
-     *  • push/notification previews cannot show the text;
-     *  • scheduled messages and business auto-replies are impossible (the server
-     *    would have to compose or send them without a key).
+     * Encryption has been removed, so nothing sets this any more and no key
+     * exists to open those messages — their text is gone for good. The flag is
+     * KEPT (and the dead `enc` blob left where it lies in existing documents) so
+     * the client can render "Message unavailable" instead of an empty bubble,
+     * which reads as a bug. Drop this field only after those rows are purged.
      */
     encrypted: { type: Boolean, default: false },
-    enc: {
-      ct: { type: String }, // base64 AES-256-GCM ciphertext
-      iv: { type: String }, // base64 96-bit nonce, unique per message
-      v: { type: Number }, // chat-key version this was sealed with
-    },
 
     attachments: [attachmentSchema],
     location: { lat: Number, lng: Number, label: String },

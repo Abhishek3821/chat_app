@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import { Plus, Smile, Mic, SendHorizontal, X, Image, FileText, MapPin, Camera, Reply, Trash2, Loader2, BarChart3, Eye, Radio, ShoppingBag, RotateCcw, Video, CalendarClock, Check } from 'lucide-react';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
-import { useE2EE } from '../../store/useE2EE';
 import { useBusiness } from '../../store/useBusiness';
 import { useWorkspace } from '../../store/useWorkspace';
 import { emitSocket } from '../../hooks/useSocket';
@@ -27,9 +26,6 @@ const VIDEO_NOTE_MAX_SECONDS = 60;
 
 export default function MessageComposer({ chatId, replyTo, onClearReply, onSend, mentionables = [] }) {
   const theme = useUI((s) => s.theme);
-  // Reactive, not a getState() read: this drives which controls exist, and the
-  // chat gets sealed asynchronously just after it opens (see autoSeal).
-  const encrypted = useE2EE((s) => Boolean(s.chatState[chatId]?.enabled));
   const createPoll = useChat((s) => s.createPoll);
   const startLiveLocation = useChat((s) => s.startLiveLocation);
   const updateLiveLocation = useChat((s) => s.updateLiveLocation);
@@ -208,27 +204,6 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     }
   };
 
-  /**
-   * Upload files for this chat, sealing them first if the chat is encrypted.
-   *
-   * Every attachment path in this composer goes through here — photos,
-   * documents, voice notes, video notes, camera captures — because "encrypt
-   * attachments" has to mean all of them. A single one left on the raw
-   * `uploadFiles` would put plaintext media in the database for a conversation
-   * whose text is sealed, which is the kind of gap that reads as encryption
-   * while not being it.
-   *
-   * The returned rows carry the server's `url` but the ORIGINAL name/mime/size,
-   * so the bubble still knows it is rendering an image and not a `.enc` blob.
-   */
-  const putFiles = async (files) => {
-    if (!encrypted) return uploadFiles(files);
-
-    const { files: sealedFiles, meta } = await useE2EE.getState().sealFiles(chatId, files);
-    const uploaded = await uploadFiles(sealedFiles);
-    return uploaded.map((a, i) => ({ ...a, ...meta[i] }));
-  };
-
   // ── Files (photo / document) ──────────────────────────────────
   const handleFiles = async (e, type) => {
     const files = [...(e.target.files || [])];
@@ -237,7 +212,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     if (!files.length) return;
     setUploading(true);
     try {
-      const attachments = await putFiles(files);
+      const attachments = await uploadFiles(files);
       if (!attachments.length) throw new Error('Upload failed. Please try again.');
       onSend({ content: '', type, attachments, viewOnce: viewOnceNext && type === 'image' });
       setViewOnceNext(false);
@@ -329,7 +304,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         const file = new File([new Blob(chunksRef.current, { type: mime })], `voice-${Date.now()}.${ext}`, { type: mime });
         setUploading(true);
         try {
-          const attachments = await putFiles([file]);
+          const attachments = await uploadFiles([file]);
           onSend({ content: '', type: 'voice', attachments: attachments.map((a) => ({ ...a, duration: seconds })) });
         } catch {
           toast.error('Could not send voice note.');
@@ -390,7 +365,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         const file = new File([new Blob(chunksRef.current, { type: mime })], `videonote-${Date.now()}.webm`, { type: mime });
         setUploading(true);
         try {
-          const attachments = await putFiles([file]);
+          const attachments = await uploadFiles([file]);
           onSend({ content: '', type: 'videoNote', attachments: attachments.map((a) => ({ ...a, duration: seconds })) });
         } catch {
           toast.error('Could not send video note.');
@@ -467,7 +442,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     closeCamera();
     setUploading(true);
     try {
-      const attachments = await putFiles([file]);
+      const attachments = await uploadFiles([file]);
       onSend({ content: '', type: 'image', attachments, viewOnce: viewOnceNext });
       setViewOnceNext(false);
     } catch {
@@ -485,14 +460,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     { icon: MapPin, label: 'Location', color: 'text-emerald-500 bg-emerald-500/10', onClick: shareLocation },
     { icon: Radio, label: 'Live location', color: 'text-rose-500 bg-rose-500/10', onClick: shareLiveLocation },
     { icon: BarChart3, label: 'Poll', color: 'text-amber-500 bg-amber-500/10', onClick: () => { setShowAttach(false); setPollOpen(true); } },
-    /* No scheduling in a sealed chat. A scheduled message is sent LATER, by the
-       server, which holds no chat key — so it could only go out unencrypted into
-       a conversation the user believes is sealed. The API refuses it (409); the
-       button is dropped here rather than left to fail, because an action that
-       always errors is worse than an action that isn't offered. */
-    ...(encrypted
-      ? []
-      : [{ icon: CalendarClock, label: 'Schedule', color: 'text-cyan-500 bg-cyan-500/10', onClick: () => { setShowAttach(false); setScheduleOpen(true); } }]),
+    { icon: CalendarClock, label: 'Schedule', color: 'text-cyan-500 bg-cyan-500/10', onClick: () => { setShowAttach(false); setScheduleOpen(true); } },
     ...(isTeamWorkspace ? [{ icon: ShoppingBag, label: 'Catalog', color: 'text-brand-500 bg-brand-500/10', onClick: () => { setShowAttach(false); setCatalogOpen(true); } }] : []),
   ];
 
