@@ -14,6 +14,7 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 | [**DATABASE_MODELS.md**](DATABASE_MODELS.md) | All 20 Mongoose schemas — fields, types, defaults, indexes, hooks/methods, and how the models reference each other. |
 | [**SOCKET_EVENTS.md**](SOCKET_EVENTS.md) | Every Socket.IO event in both directions, plus the exact call-signaling sequences (accept/reject/cancel/busy/group mesh). |
 | [**FILE_UPLOADS.md**](FILE_UPLOADS.md) | Upload endpoints, size/type limits, storage drivers, and how uploaded/protected media is accessed. |
+| [**PLATFORM.md**](PLATFORM.md) | Embedding ChatConnect in another product: App-as-tenant, the app-secret/user-token split, the `/v1/platform` API, capability flags, and the current gaps. **Hand this to an integrating customer.** |
 | [**ENVIRONMENT.md**](ENVIRONMENT.md) | Every environment variable actually read by the app — non-secret, by design. Base URL / Socket URL resolution. |
 | [**BUSINESS_LOGIC.md**](BUSINESS_LOGIC.md) | Feature flows and the business rules behind them — the "why", not just the "what". |
 | [**ARCHITECTURE_REVIEW.md**](ARCHITECTURE_REVIEW.md) | Staff-level review: current topology, findings ranked by blast radius, monolith→services plan, queue design, fault tolerance, and a triggered roadmap. |

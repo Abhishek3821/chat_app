@@ -35,6 +35,11 @@ jobs:
       # CI stayed green. This does the scope check the bundler won't.
       - name: undefined-reference scan
         run: node scan-undefined.mjs
+      # Dead buttons, empty handlers, hardcoded dev URLs, debug output shipped to
+      # users, and route imports that don't resolve. None of these fail a build;
+      # all of them are visible to the first person who clicks the wrong thing.
+      - name: UI / production audit
+        run: node audit-ui.mjs
 
   server-tests:
     runs-on: ubuntu-latest
@@ -81,3 +86,22 @@ jobs:
       - name: pinned-messages suite (43 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/pinned-messages.mjs
+
+      # Static audits — no database needed, so they run even without MONGO_URI
+      # and give a fast signal on the two things that break a deploy rather than
+      # a test: a client call to a route that doesn't exist, and a config gap.
+      - name: API route coverage (client calls vs server routes)
+        run: node tests/route-coverage.mjs
+      - name: deployment readiness (env vars, secrets, prod guards)
+        run: node tests/deploy-readiness.mjs
+      # Catches a socket event renamed on one side only, and a getState().method()
+      # that no longer exists. Both present to a user as "real time is broken"
+      # while the build passes and the server logs nothing.
+      - name: real-time wiring (socket event names, store methods, WebRTC flow)
+        run: node tests/realtime-wiring.mjs
+      # Connects the way the BROWSER does (Origin header, auth callback, transport
+      # order) and asserts presence, live delivery, typing, receipts and the full
+      # WebRTC offer/answer/ICE relay.
+      - name: real-time behaviour, browser-shaped client (17 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/realtime-browser.mjs

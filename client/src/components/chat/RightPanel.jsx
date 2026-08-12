@@ -355,7 +355,11 @@ function Section({ title, icon: Icon, action, children }) {
       <div className="mb-2 flex items-center gap-2 px-2">
         {Icon && <Icon size={15} className="text-content-muted" />}
         <p className="text-xs font-semibold uppercase tracking-wider text-content-muted">{title}</p>
-        {action && <button className="ml-auto text-xs font-medium text-brand-500">{action}</button>}
+        {/* Rendered as-is rather than wrapped in a <button>: this used to wrap it
+            in a button with no onClick, so any caller passing `action` would get
+            a control that looks clickable and does nothing. Callers pass their
+            own interactive element (or plain text) and own its behaviour. */}
+        {action && <span className="ml-auto text-xs font-medium text-brand-500">{action}</span>}
       </div>
       {children}
     </div>

@@ -216,6 +216,12 @@ export function useSocket() {
       if (status === 'delivered') useChat.getState().markDelivered(chatId, messageId, uid);
     });
     socket.on('message:read', ({ chatId, userId: uid }) => useChat.getState().markReadBy(chatId, uid));
+    /* The server emits read receipts under TWO names and only one was handled.
+       `message:read` (colon) comes from the socket path; `message-read` (hyphen)
+       comes from the REST path (PATCH /messages/.../read) and from the chat-room
+       broadcast — so marking a conversation read outside the socket never turned
+       the sender's ticks blue until they reloaded. Same handler, both names. */
+    socket.on('message-read', ({ chatId, userId: uid }) => useChat.getState().markReadBy(chatId, uid));
 
     // Live edit / delete / reaction sync (WhatsApp-style).
     socket.on('message-edited', ({ chatId, message }) => useChat.getState().applyEditedMessage(chatId, message));
@@ -228,6 +234,13 @@ export function useSocket() {
     socket.on('presence-snapshot', ({ online }) => useChat.getState().setPresenceSnapshot(online));
     socket.on('user-online', ({ userId }) => useChat.getState().setUserOnline(userId));
     socket.on('user-offline', ({ userId }) => useChat.getState().setUserOffline(userId));
+    /* Manual presence (available / away / busy / dnd) changed on another of MY
+       devices. The server echoes it to my own room; without this listener the
+       other tabs kept showing the old state until reloaded. Absolute value, not a
+       toggle — the device that made the change also receives this echo. */
+    socket.on('presence-state', ({ userId: uid, state }) => {
+      if (String(uid) === String(userId)) useAuth.setState((s) => ({ user: { ...s.user, presenceState: state } }));
+    });
 
     // Incoming WebRTC call → pop the call screen in "incoming" mode.
     // (The SDP offer arrives later, only after we accept — see useWebRTC.)
