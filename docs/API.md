@@ -1182,7 +1182,7 @@ or (when already a member — note the chat is **not** populated on this branch)
 { "success": true, "chat": { "...ChatPopulated": true } }
 ```
 - **Errors**: `404` → `"Group not found."`; `403` → `"Admin privileges required."`; `400` → `"Invalid role."`; `404` → `"Member not found."`; `400` → `"Owner's role can't be changed."`
-- **Notes**: an admin can promote/demote other admins (including the one who promoted them); only the owner role is protected. Emits `group-updated` `{ chat }` to the chat room. No system message, no cache invalidation.
+- **Notes**: an admin can promote/demote other admins (including the one who promoted them); only the owner role is protected. A group `admin` holds `GROUP_MANAGE` + `GROUP_MEMBERS`, i.e. promotion is what lets someone other than the owner add members and edit the group. Invalidates every participant's chat-list cache (roles ride on `participants[].role` in `GET /api/chats`, and the client gates its group controls on them), then emits `group-updated` `{ chat }` to the chat room. No system message.
 
 ### POST /api/groups/:id/leave
 - **Auth**: access token (`protect`) — must be a participant; no role required

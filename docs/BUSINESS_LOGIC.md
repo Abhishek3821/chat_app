@@ -518,7 +518,10 @@ user, `group-updated` to the room.
 
 **Change role** (`PATCH /api/groups/:id/members/:userId/role`) — admin-gated; `role` must be
 `admin` or `member`; the **owner's role can never be changed** (400). There is no "promote to
-owner" for groups — ownership only moves when the owner leaves.
+owner" for groups — ownership only moves when the owner leaves. Promotion is what lets anyone
+other than the owner manage the group: an `admin` holds `GROUP_MEMBERS`, so they can add and
+remove members. Every participant's chat-list cache is invalidated, since roles travel on
+`participants[].role` in `GET /api/chats` and the client gates its group controls on them.
 
 **Leave** (`POST /api/groups/:id/leave`):
 

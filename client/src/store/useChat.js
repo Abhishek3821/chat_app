@@ -652,6 +652,30 @@ export const useChat = create((set, get) => ({
     return { chat: data.chat, skipped: data.skipped || [] };
   },
 
+  /**
+   * Promote a member to group admin, or demote them back (`role`: 'admin' |
+   * 'member').
+   *
+   * Group admins hold GROUP_MEMBERS/GROUP_MANAGE server-side and always have —
+   * but nothing in the UI called this endpoint, so a group's only manager was
+   * ever its owner and "group admin" was a role no one could reach.
+   * The owner's own role is protected by the server; don't offer it.
+   */
+  setGroupMemberRole: async (chatId, userId, role) => {
+    if (DEMO_MODE) return null;
+    const { data } = await api.patch(`/groups/${chatId}/members/${userId}/role`, { role });
+    get().applyChatUpdate(data.chat);
+    return data.chat;
+  },
+
+  /** Remove someone from a group (admin/owner only; the owner can't be removed). */
+  removeGroupMember: async (chatId, userId) => {
+    if (DEMO_MODE) return null;
+    const { data } = await api.delete(`/groups/${chatId}/members/${userId}`);
+    get().applyChatUpdate(data.chat);
+    return data.chat;
+  },
+
   /** Get-or-create the 1:1 chat with a user and make it active. Returns the chat. */
   openDirectChat: async (userId) => {
     if (!userId) return null;

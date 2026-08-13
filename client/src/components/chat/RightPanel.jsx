@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Palette, UserPlus, Check, Search } from 'lucide-react';
+import { X, Bell, Star, Image as ImageIcon, Ban, Flag, Trash2, LogOut, Users, ChevronRight, Link2, Clock, QrCode as QrCodeIcon, Lock, Palette, UserPlus, UserMinus, Check, Search, MoreVertical, ShieldCheck, ShieldOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
@@ -43,6 +43,14 @@ export default function RightPanel({ chat, currentUser }) {
   const [blocking, setBlocking] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  // The member whose actions sheet is open. A MODAL rather than a per-row
+  // dropdown on purpose: this list lives inside the panel's scroller, and an
+  // absolutely-positioned menu in there gets clipped and scrolls away from its
+  // trigger.
+  const [memberAction, setMemberAction] = useState(null);
+  const [savingRole, setSavingRole] = useState(false);
+  const setGroupMemberRole = useChat((s) => s.setGroupMemberRole);
+  const removeGroupMember = useChat((s) => s.removeGroupMember);
   const d = getChatDisplay(chat, currentUser);
   // Real API group chats carry `participants: [{ user, role }]` (user is a
   // populated object). Demo data carries `members: [idString]`. Support both.
@@ -64,6 +72,11 @@ export default function RightPanel({ chat, currentUser }) {
     !!chat?.isGroup &&
     (myRole === 'owner' || myRole === 'admin' || (!myRole && String(chat?.createdBy) === String(currentUser?._id)));
   const memberIds = new Set(members.map((m) => String(m._id)));
+  const isOwner = (m) => m.role === 'owner' || String(m._id) === String(chat?.createdBy);
+  /* The server protects the owner's role and refuses to remove them, and you
+     leave a group via "Exit group" rather than removing yourself — so neither
+     row has an action worth offering. */
+  const canActOn = (m) => canManageMembers && !isOwner(m) && String(m._id) !== String(currentUser?._id);
 
   // Goes to the real screen now. This used to fetch the list purely to count it
   // and report the number in a toast, then throw every row away.
@@ -123,6 +136,37 @@ export default function RightPanel({ chat, currentUser }) {
       toast.error(err?.message || 'Could not block this user.');
     } finally {
       setBlocking(false);
+    }
+  };
+
+  /* Promote/demote and remove. A promoted member gains GROUP_MEMBERS, so they
+     can add people to the group too — which is the whole point of the role. */
+  const changeRole = async (role) => {
+    const m = memberAction;
+    setSavingRole(true);
+    try {
+      await setGroupMemberRole(chat._id, m._id, role);
+      toast.success(role === 'admin' ? `${m.name} is now a group admin` : `${m.name} is no longer an admin`);
+      setMemberAction(null);
+    } catch (err) {
+      toast.error(err?.message || 'Could not change their role.');
+    } finally {
+      setSavingRole(false);
+    }
+  };
+
+  const removeMember = async () => {
+    const m = memberAction;
+    if (!window.confirm(`Remove ${m.name} from ${d.name}?`)) return;
+    setSavingRole(true);
+    try {
+      await removeGroupMember(chat._id, m._id);
+      toast.success(`${m.name} was removed`);
+      setMemberAction(null);
+    } catch (err) {
+      toast.error(err?.message || 'Could not remove them.');
+    } finally {
+      setSavingRole(false);
     }
   };
 
@@ -273,10 +317,19 @@ export default function RightPanel({ chat, currentUser }) {
                       <p className="truncate text-sm font-medium text-content">{m.name}</p>
                       <p className="truncate text-xs text-content-muted">@{m.username}</p>
                     </div>
-                    {(m.role === 'owner' || m.role === 'admin' || m._id === chat.createdBy) && (
+                    {(isOwner(m) || m.role === 'admin') && (
                       <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-500">
-                        {m.role === 'owner' || m._id === chat.createdBy ? 'admin' : m.role}
+                        {isOwner(m) ? 'owner' : 'admin'}
                       </span>
+                    )}
+                    {canActOn(m) && (
+                      <button
+                        onClick={() => setMemberAction(m)}
+                        aria-label={`Manage ${m.name}`}
+                        className="ring-brand grid h-8 w-8 shrink-0 place-items-center rounded-lg text-content-muted hover:bg-content/10"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
                     )}
                   </div>
                 ))}
@@ -342,6 +395,30 @@ export default function RightPanel({ chat, currentUser }) {
         )}
       </AnimatePresence>
 
+      {/* Member actions */}
+      <Modal
+        open={!!memberAction}
+        onClose={() => !savingRole && setMemberAction(null)}
+        title={memberAction?.name || ''}
+        subtitle={memberAction?.role === 'admin' ? 'Group admin' : 'Member'}
+        size="sm"
+      >
+        <div className="space-y-2 pb-4 pt-1">
+          {memberAction?.role === 'admin' ? (
+            <ActionRow icon={ShieldOff} label="Dismiss as admin" disabled={savingRole} onClick={() => changeRole('member')} />
+          ) : (
+            <ActionRow
+              icon={ShieldCheck}
+              label="Make group admin"
+              hint="They'll be able to add members and edit the group."
+              disabled={savingRole}
+              onClick={() => changeRole('admin')}
+            />
+          )}
+          <ActionRow icon={UserMinus} label="Remove from group" danger disabled={savingRole} onClick={removeMember} />
+        </div>
+      </Modal>
+
       <AddMembersModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
@@ -381,6 +458,26 @@ export default function RightPanel({ chat, currentUser }) {
         </div>
       </Modal>
     </>
+  );
+}
+
+/** One row in the member-actions sheet — matches the report-reason rows above. */
+function ActionRow({ icon: Icon, label, hint, danger, disabled, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'neu-raised-sm neu-press flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left disabled:opacity-60',
+        danger ? 'text-red-500' : 'text-content'
+      )}
+    >
+      <Icon size={18} className="shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{label}</span>
+        {hint && <span className="block text-xs text-content-muted">{hint}</span>}
+      </span>
+    </button>
   );
 }
 

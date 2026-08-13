@@ -74,7 +74,7 @@ jobs:
       - name: privacy settings save AND are enforced (23 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/privacy-settings.mjs
-      - name: group membership + who-can-add-me-to-groups (27 checks)
+      - name: group membership, admins + who-can-add-me-to-groups (38 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/group-membership.mjs
       - name: meeting visibility + post-schedule invites (20 checks)

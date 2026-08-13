@@ -258,6 +258,42 @@ const setGroupPrivacy = (user, value) =>
   check('you cannot add someone you blocked yourself', !memberIds(iBlocked.data?.chat).includes(C.id), JSON.stringify(iBlocked.data?.skipped));
   await http('POST', `/users/me/block/${C.id}`, { token: D.token }); // toggle back off
 
+  /* ── Group admins, and what the role is actually FOR ────────────── */
+  section('A promoted group admin can add members too');
+  const E = await makeUser('echo');
+  const roleUrl = (uid) => `/groups/${group?._id}/members/${uid}/role`;
+
+  const promote = await http('PATCH', roleUrl(B.id), { token: A.token, body: { role: 'admin' } });
+  check('the owner can promote a member to group admin', promote.status === 200, `${promote.status} ${promote.data?.message}`);
+  check(
+    "the new role is on the returned roster",
+    (promote.data?.chat?.participants || []).some((p) => String(p.user?._id) === String(B.id) && p.role === 'admin'),
+    JSON.stringify((promote.data?.chat?.participants || []).map((p) => `${p.user?.name}:${p.role}`))
+  );
+
+  // The whole point of the role: an admin who is NOT the owner can grow the group.
+  const adminAdds = await http('POST', `/groups/${group?._id}/members`, { token: B.token, body: { members: [E.id] } });
+  check('the promoted admin can now add a member', adminAdds.status === 200 && memberIds(adminAdds.data?.chat).includes(E.id), `${adminAdds.status} ${JSON.stringify(adminAdds.data?.skipped)}`);
+  check('the person they added sees the group', await seesChat(E, group?._id));
+
+  section('Owner protections hold against a group admin');
+  const ownerRole = await http('PATCH', roleUrl(A.id), { token: B.token, body: { role: 'member' } });
+  check("an admin cannot demote the owner", ownerRole.status === 400, `${ownerRole.status} ${ownerRole.data?.message}`);
+  const ownerKick = await http('DELETE', `/groups/${group?._id}/members/${A.id}`, { token: B.token });
+  check('an admin cannot remove the owner', ownerKick.status === 400, `${ownerKick.status} ${ownerKick.data?.message}`);
+  const badRole = await http('PATCH', roleUrl(E.id), { token: A.token, body: { role: 'owner' } });
+  check('the owner role cannot be handed out via this endpoint', badRole.status === 400, `${badRole.status}`);
+
+  section('Demote and remove');
+  const demote = await http('PATCH', roleUrl(B.id), { token: A.token, body: { role: 'member' } });
+  check('the owner can dismiss an admin', demote.status === 200, `${demote.status} ${demote.data?.message}`);
+  const afterDemote = await http('POST', `/groups/${group?._id}/members`, { token: B.token, body: { members: [E.id] } });
+  check('a dismissed admin loses the ability to add', afterDemote.status === 403, `${afterDemote.status}`);
+
+  const kick = await http('DELETE', `/groups/${group?._id}/members/${E.id}`, { token: A.token });
+  check('the owner can remove a member', kick.status === 200 && !memberIds(kick.data?.chat).includes(E.id), `${kick.status}`);
+  check('the removed member loses the group from their own list', !(await seesChat(E, group?._id)));
+
   /* ── Regressions the resolver must not introduce ────────────────── */
   section('Robustness');
   const sameWs = await http('POST', '/groups', { token: B.token, body: { name: 'Personal Pals', members: [C.id] } });

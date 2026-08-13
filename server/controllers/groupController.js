@@ -225,6 +225,10 @@ export const setMemberRole = asyncHandler(async (req, res) => {
   await chat.save();
 
   const populated = await Chat.findById(chat._id).populate('participants.user', USER_FIELDS);
+  /* Roles ride along on every chat-list row (`participants[].role`), and the
+     client gates its group-management controls on them — so a promotion that
+     isn't invalidated leaves the new admin reloading into the old member view. */
+  await invalidateChatListCache(chat.participants.map((p) => p.user));
   emitToChat(String(chat._id), 'group-updated', { chat: populated });
   res.json({ success: true, chat: populated });
 });
