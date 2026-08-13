@@ -13,7 +13,7 @@ import { asyncHandler, ApiError } from './asyncHandler.js';
  *                 tenant only. Must never reach a browser.
  *   USER TOKEN  — minted from the secret, short-lived, scoped to ONE end user.
  *                 This is what a browser holds, and it is just a normal
- *                 ChatConnect access token (see mintUserSession), so every
+ *                 ChatKonect access token (see mintUserSession), so every
  *                 existing protected route works with it unchanged.
  *
  * Secrets are compared as SHA-256 digests using a timing-safe comparison, and
@@ -82,7 +82,7 @@ export function requireFeature(feature) {
     throw new Error(`requireFeature: unknown feature "${feature}"`);
   }
   return asyncHandler(async (req, _res, next) => {
-    // First-party ChatConnect users have no tenant and are not feature-gated.
+    // First-party ChatKonect users have no tenant and are not feature-gated.
     const tenant = req.app_ || (req.user?.app ? await App.findById(req.user.app) : null);
     if (!tenant) return next();
     if (!tenant.hasFeature(feature)) {

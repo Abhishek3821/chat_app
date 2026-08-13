@@ -415,7 +415,7 @@ function NotificationsPanel() {
                     ? 'Blocked — enable notifications for this site in your browser settings.'
                     : pushState === 'subscribed'
                       ? 'This device will receive push notifications.'
-                      : 'Turn on to receive messages while ChatConnect is closed.'}
+                      : 'Turn on to receive messages while ChatKonect is closed.'}
               </p>
             </div>
           </div>
@@ -507,7 +507,7 @@ function AppearancePanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-      <Section title="Theme" description="Choose how ChatConnect looks to you.">
+      <Section title="Theme" description="Choose how ChatKonect looks to you.">
         <div className="mt-2 grid grid-cols-1 gap-3 xs:grid-cols-3">
           {THEME_CARDS.map(({ id, label, icon: Icon, swatch, dots }) => {
             const active = theme === id;
@@ -651,7 +651,7 @@ function WorkspacePanel() {
   if (workspace.type === 'personal') {
     return (
       <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-        <Section title="Personal account" description="You're using ChatConnect for personal use.">
+        <Section title="Personal account" description="You're using ChatKonect for personal use.">
           <div className="mt-2 flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
               <User size={18} />
@@ -887,7 +887,7 @@ function DeveloperPanel() {
   if (DEMO_MODE) {
     return (
       <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-        <Section title="Developer / API keys" description="Integrate ChatConnect into another platform.">
+        <Section title="Developer / API keys" description="Integrate ChatKonect into another platform.">
           <p className="mt-2 text-sm text-content-muted">API keys require the live backend. Turn off demo mode to create keys.</p>
         </Section>
       </motion.div>
@@ -896,7 +896,7 @@ function DeveloperPanel() {
 
   return (
     <motion.div variants={stagger} initial="initial" animate="animate" className="space-y-5">
-      <Section title="Developer / API keys" description="Create keys to use the ChatConnect API (v1) from another platform. A key acts as your account, limited to the scopes you grant.">
+      <Section title="Developer / API keys" description="Create keys to use the ChatKonect API (v1) from another platform. A key acts as your account, limited to the scopes you grant.">
         {newKey && (
           <div className="mt-3 rounded-2xl border border-brand-500/40 bg-brand-500/5 p-4">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-content"><AlertTriangle size={15} className="text-amber-500" /> Copy this key now — it won't be shown again.</p>
@@ -1200,7 +1200,7 @@ function AccountPanel() {
         </form>
       </Section>
 
-      <Section title="Two-step verification" description="Require a PIN to open ChatConnect on a device.">
+      <Section title="Two-step verification" description="Require a PIN to open ChatKonect on a device.">
         <div className="flex items-center gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">
             <ShieldCheck size={18} />
@@ -1305,7 +1305,7 @@ function AccountPanel() {
         )}
       </Section>
 
-      <Section title="Your data" description="Download a copy of your ChatConnect data.">
+      <Section title="Your data" description="Download a copy of your ChatKonect data.">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl neu-inset bg-brand-500/10 text-brand-600 dark:text-brand-300">

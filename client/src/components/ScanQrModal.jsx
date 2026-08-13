@@ -8,7 +8,7 @@ import QrScanner, { canScanQr } from './QrScanner';
 import { parseInvite } from '../lib/invite';
 
 /**
- * Scan a ChatConnect QR (or paste the code) to open the group / person it points at.
+ * Scan a ChatKonect QR (or paste the code) to open the group / person it points at.
  *
  * Manual entry is always offered, not just as a fallback: `BarcodeDetector` is
  * missing on Safari/iOS, and a link someone sent over another app is pasted far
@@ -22,7 +22,7 @@ export default function ScanQrModal({ open, onClose }) {
     (text) => {
       const path = parseInvite(text);
       if (!path) {
-        toast.error("That doesn't look like a ChatConnect invite.");
+        toast.error("That doesn't look like a ChatKonect invite.");
         return;
       }
       onClose?.();

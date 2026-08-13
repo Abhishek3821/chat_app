@@ -39,7 +39,7 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
     avatar: { type: String, default: '' },
-    bio: { type: String, default: 'Available on ChatConnect', maxlength: 160 },
+    bio: { type: String, default: 'Available on ChatKonect', maxlength: 160 },
     // Normalized phone (optional "+" then 7–15 digits). UNIQUE across accounts —
     // enforced by the partial index below. Empty is allowed (e.g. Google signups)
     // so missing phones never collide with each other.
@@ -54,7 +54,7 @@ const userSchema = new mongoose.Schema(
 
     /* ── Embedded-platform tenancy ──────────────────────────────────
        Set only for END USERS provisioned by a third-party product through the
-       /v1 platform API. `null` means a first-party ChatConnect account, and the
+       /v1 platform API. `null` means a first-party ChatKonect account, and the
        distinction is what every isolation filter keys off (see scopeToTenant):
        a tenant's users must never see, search or message users of another
        tenant, nor our own.
@@ -81,7 +81,7 @@ const userSchema = new mongoose.Schema(
     // Bumped on password change / reset to invalidate all previously-issued JWTs.
     tokenVersion: { type: Number, default: 0 },
 
-    // Two-step verification: an app-lock PIN required to open ChatConnect on a
+    // Two-step verification: an app-lock PIN required to open ChatKonect on a
     // device. Stored bcrypt-hashed; never returned to the client.
     twoStepEnabled: { type: Boolean, default: false },
     twoStepPin: { type: String, select: false },

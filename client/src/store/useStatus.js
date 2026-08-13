@@ -70,4 +70,37 @@ export const useStatus = create((set, get) => ({
   /** Optimistically mark a user's whole story as seen (moves it to "Viewed"). */
   markSeen: (userId) =>
     set((s) => ({ feed: s.feed.map((e) => (String(e.user?._id) === String(userId) ? { ...e, seenAll: true } : e)) })),
+
+  /**
+   * Someone just viewed one of MY statuses (socket `status-viewed`).
+   *
+   * Patches the viewer straight into the item so the count and the avatar row
+   * move while the owner is looking at them. The server only sends this for a
+   * NEW viewer, but the guard here is still needed: the owner may have the story
+   * open when a refetch lands, and applying the same viewer twice would inflate
+   * the count the fix was meant to correct.
+   */
+  applyStatusViewed: ({ statusId, viewer, at }) =>
+    set((s) => ({
+      feed: s.feed.map((entry) => {
+        if (!entry.isMe) return entry;
+        let touched = false;
+        const items = entry.items.map((it) => {
+          if (String(it._id) !== String(statusId)) return it;
+          const viewers = it.viewers || [];
+          if (viewers.some((v) => String(v.user?._id || v.user) === String(viewer?._id))) return it;
+          touched = true;
+          return { ...it, viewers: [...viewers, { user: viewer, at: at || new Date().toISOString() }] };
+        });
+        return touched ? { ...entry, items } : entry;
+      }),
+    })),
+
+  /** A status was deleted (socket `status-updated` with removedId) — drop it now. */
+  removeStatus: (statusId) =>
+    set((s) => ({
+      feed: s.feed
+        .map((e) => ({ ...e, items: (e.items || []).filter((it) => String(it._id) !== String(statusId)) }))
+        .filter((e) => e.items.length > 0),
+    })),
 }));

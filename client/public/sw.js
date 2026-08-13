@@ -1,10 +1,12 @@
-/* ChatConnect service worker — Web Push notifications + offline app shell.
+/* ChatKonect service worker — Web Push notifications + offline app shell.
    Dependency-free; handles push display/click routing AND caches the app so it
    opens (installed, like a native app) without a network connection. */
 
-// Bumped to v3: the shell list gained the raster icons, and an old cache would
-// keep serving a manifest that still pointed only at the SVG.
-const CACHE = 'cc-shell-v3';
+// Bumped to v4: the rename to ChatKonect changed the precached shell
+// (index.html's title, the manifest's name). Installed PWAs hold the old shell
+// until the cache KEY changes, so without this bump a returning user keeps
+// booting into a window still carrying the previous product name.
+const CACHE = 'cc-shell-v4';
 const APP_SHELL = ['/', '/index.html', '/logo.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
 // Chrome will NOT render an SVG as a notification icon — it silently falls back
 // to a generic browser glyph, which is what every push used to show.
@@ -69,7 +71,7 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { body: event.data && event.data.text() };
   }
-  const title = data.title || 'ChatConnect';
+  const title = data.title || 'ChatKonect';
   const options = {
     body: data.body || '',
     icon: data.icon || ICON,

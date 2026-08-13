@@ -430,6 +430,6 @@ export const exportData = asyncHandler(async (req, res) => {
   };
 
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', 'attachment; filename="chatconnect-export.json"');
+  res.setHeader('Content-Disposition', 'attachment; filename="chatkonect-export.json"');
   res.status(200).send(JSON.stringify(archive, null, 2));
 });

@@ -60,10 +60,10 @@ export default function NavRail() {
       <button
         onClick={() => navigate('/')}
         className="mb-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition-transform hover:scale-105 2xl:h-12 2xl:w-full 2xl:justify-start 2xl:gap-2.5 2xl:px-2"
-        aria-label="ChatConnect home"
+        aria-label="ChatKonect home"
       >
         <LogoMark size={34} />
-        <span className="hidden text-lg font-extrabold tracking-tight text-content 2xl:block">ChatConnect</span>
+        <span className="hidden text-lg font-extrabold tracking-tight text-content 2xl:block">ChatKonect</span>
       </button>
 
       {/* min-h-0 + overflow lets the list scroll instead of squashing/overflowing

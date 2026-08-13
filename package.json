@@ -1,8 +1,8 @@
 {
-  "name": "chatconnect",
+  "name": "chatkonect",
   "version": "1.0.0",
   "private": true,
-  "description": "ChatConnect — a modern, original real-time messaging platform (MERN + Socket.IO + WebRTC).",
+  "description": "ChatKonect — a modern, original real-time messaging platform (MERN + Socket.IO + WebRTC).",
   "scripts": {
     "install:all": "npm install && npm --prefix server install && npm --prefix client install",
     "dev": "concurrently -n server,client -c magenta,cyan \"npm:dev:server\" \"npm:dev:client\"",

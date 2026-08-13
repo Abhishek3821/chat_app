@@ -78,9 +78,9 @@ async function startServer() {
 let phoneSeq = 0;
 const nextPhone = () => `+1888${String(Date.now()).slice(-6)}${String(phoneSeq++).padStart(2, '0')}`;
 
-/** A normal first-party ChatConnect account (the one that owns tenants). */
+/** A normal first-party ChatKonect account (the one that owns tenants). */
 async function makeOwner(tag) {
-  const u = { name: `PF ${tag}`, email: `pf.${tag}.${uniq()}@chatconnect.app`, password: 'PasswordP1!', phone: nextPhone() };
+  const u = { name: `PF ${tag}`, email: `pf.${tag}.${uniq()}@chatkonect.app`, password: 'PasswordP1!', phone: nextPhone() };
   const s = await http('POST', '/auth/signup', { body: { ...u, confirmPassword: u.password } });
   if (s.status >= 400) throw new Error(`signup: ${s.status} ${JSON.stringify(s.data)}`);
   const l = await http('POST', '/auth/login', { body: { identifier: u.email, password: u.password } });

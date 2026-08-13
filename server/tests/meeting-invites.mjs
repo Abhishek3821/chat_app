@@ -53,7 +53,7 @@ async function start() {
 
 async function signup(tag) {
   const u = {
-    name: `Host ${tag}`, email: `inv.${tag}.${Date.now()}@chatconnect.app`,
+    name: `Host ${tag}`, email: `inv.${tag}.${Date.now()}@chatkonect.app`,
     password: 'PasswordI1!', phone: `+1555${String(Date.now()).slice(-7)}`,
   };
   await fetch(`${API}/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...u, confirmPassword: u.password }) });

@@ -30,7 +30,7 @@ privacy/notification settings, contacts and per-chat state.
 | `email` | String | — | `required`, `unique`, `lowercase`, `trim`, `match: /^\S+@\S+\.\S+$/` |
 | `password` | String | — | `required`, `minlength: 8`, **`select: false`** |
 | `avatar` | String | `''` | |
-| `bio` | String | `'Available on ChatConnect'` | `maxlength: 160` |
+| `bio` | String | `'Available on ChatKonect'` | `maxlength: 160` |
 | `phone` | String | `''` | `trim`; unique via the partial index below — empty allowed |
 | `role` | String | `'user'`; enum `user \| admin` | Platform level; `admin` = super-admin |
 | `accountStatus` | String | `'active'`; enum `active \| suspended \| banned` | |

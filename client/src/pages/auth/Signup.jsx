@@ -193,7 +193,7 @@ export default function Signup() {
           : {}),
         ...(avatar ? { avatar } : {}),
       });
-      toast.success('Your ChatConnect account is ready!');
+      toast.success('Your ChatKonect account is ready!');
       navigate('/');
     } catch (err) {
       toast.error(err?.message || 'Could not create your account. Please try again.');
@@ -207,7 +207,7 @@ export default function Signup() {
   return (
     <motion.div {...pageMotion} className="flex min-h-[100dvh] w-full">
       <AuthShowcase
-        eyebrow="Join ChatConnect"
+        eyebrow="Join ChatKonect"
         headline={
           <>
             Start something
@@ -228,7 +228,7 @@ export default function Signup() {
 
         <motion.div variants={rise}>
           <h2 className="font-display text-2xl font-extrabold tracking-tight text-content">Create your account</h2>
-          <p className="mt-1.5 text-sm text-content-muted">Join ChatConnect and connect in a whole new way.</p>
+          <p className="mt-1.5 text-sm text-content-muted">Join ChatKonect and connect in a whole new way.</p>
         </motion.div>
 
         {inviteCode && (

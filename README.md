@@ -1,6 +1,6 @@
 <div align="center">
 
-# 💬 ChatConnect
+# 💬 ChatKonect
  
 **A modern, premium real-time messaging platform — built on the MERN stack with an entirely original UI.**
 
@@ -12,7 +12,7 @@ Talk · Meet · Connect — one-to-one chat, groups, audio/video calls, schedule
 
 ---
 
-> **Original branding.** ChatConnect is **not** a WhatsApp clone. It has its own name, logo, palette (deep navy · soft purple · electric blue), glassmorphism design language, SaaS-style dashboard layout, and component system. It only shares the *category* of features common to modern messengers.
+> **Original branding.** ChatKonect is **not** a WhatsApp clone. It has its own name, logo, palette (deep navy · soft purple · electric blue), glassmorphism design language, SaaS-style dashboard layout, and component system. It only shares the *category* of features common to modern messengers.
 
 ## ✨ Highlights
 
@@ -41,7 +41,7 @@ Talk · Meet · Connect — one-to-one chat, groups, audio/video calls, schedule
 ## 📁 Project structure
 
 ```
-chatconnect/
+chatkonect/
 ├── package.json              # root scripts (run both apps together)
 ├── client/                   # React frontend (Vite)
 │   ├── src/
@@ -93,9 +93,9 @@ Creates demo users, a group, and messages. **All demo users share the password `
 
 | Email | Role |
 |-------|------|
-| `aria@chatconnect.app` | user |
-| `leo@chatconnect.app` | user |
-| `admin@chatconnect.app` | **admin** |
+| `aria@chatkonect.app` | user |
+| `leo@chatkonect.app` | user |
+| `admin@chatkonect.app` | **admin** |
 
 ### 4. Run
 ```bash
@@ -104,7 +104,7 @@ npm run dev            # runs backend (:5000) + frontend (:5290) together
 npm run dev:server
 npm run dev:client
 ```
-Open **http://localhost:5290** (ChatConnect uses this fixed, unique port so it never collides with other dev servers).
+Open **http://localhost:5290** (ChatKonect uses this fixed, unique port so it never collides with other dev servers).
 
 ## 🧪 Demo mode (no backend needed)
 

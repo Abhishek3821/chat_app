@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     // eslint-disable-next-line no-console
-    console.error('ChatConnect render error:', error, info);
+    console.error('ChatKonect render error:', error, info);
   }
 
   render() {

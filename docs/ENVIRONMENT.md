@@ -8,7 +8,7 @@ Compiled by grepping all `process.env.` / `import.meta.env.` references in `serv
 ## 2.0 Secrets policy
 
 ### 🔴 Secrets — never commit, never log, rotate if exposed
-`MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
+`MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `SUPER_ADMIN_PASSWORD` (the platform admin's login) · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
 
 ### 🟡 Public-by-construction — safe in the bundle, but still access-controlled resources
 Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. `client/.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` is therefore *exposed by design* — prefer short-lived TURN credentials (`VITE_TURN_CREDENTIALS_URL`). **Never** put a real secret behind a `VITE_` prefix.
@@ -18,7 +18,9 @@ Every `VITE_*` var is **baked into the client JS at build time and is world-read
 
 ### Keys present in `server/.env` (⚠️ **names only — no values read or reproduced**)
 ```
-PORT · NODE_ENV · CLIENT_URL · MONGO_URI · JWT_SECRET · JWT_EXPIRES_IN ·
+PORT · NODE_ENV · CLIENT_URL · MONGO_URI ·
+SUPER_ADMIN_EMAIL · SUPER_ADMIN_PASSWORD · SUPER_ADMIN_NAME ·
+JWT_SECRET · JWT_EXPIRES_IN ·
 JWT_COOKIE_EXPIRES_DAYS · REFRESH_TOKEN_DAYS · SESSION_IDLE_DAYS ·
 SMTP_HOST · SMTP_PORT · SMTP_USER · SMTP_PASS · EMAIL_FROM ·
 STORAGE_DRIVER · CLOUDINARY_URL · CLOUDINARY_CLOUD_NAME · CLOUDINARY_API_KEY ·
@@ -55,6 +57,24 @@ Three vars are used in code but **missing from `server/.env.example`**: `TWILIO_
 |---|---|---|---|---|
 | `MONGO_URI` 🔴 | server — `config/db.js:10`; tests `e2e.mjs:30`, `new-features.mjs:31`, `push-pipeline.mjs:29` | **Yes** (fatal in prod) | *(none — `process.exit(1)` in prod; boots DB-less with a warning in dev)* | MongoDB/Atlas connection string. **Include the `/chatconnect` database name** — omitting it silently uses `test`. Embeds the DB password → secret. |
 
+## 2.2b The single super admin
+
+Reconciled on **every boot** by `utils/superAdmin.js`, called from `server.js` right after
+`ensureWorkspaces()`. This is what makes repointing `MONGO_URI` at an empty database survivable:
+signup only ever creates a plain `user`, so without it a fresh database has **no admin and no way
+to make one** short of running `utils/createAdmin.js` by hand.
+
+| Variable | Where used | Required? | Default if unset | What it does |
+|---|---|---|---|---|
+| `SUPER_ADMIN_EMAIL` | server — `superAdmin.js` | Strongly recommended | *(none — boots with a warning and no guaranteed admin)* | The one account allowed to hold `role: 'admin'`. Created if absent, promoted + re-activated if present, and **every other admin is demoted to `user`** so there is exactly one. |
+| `SUPER_ADMIN_PASSWORD` 🔴 | server — `superAdmin.js` | Yes, to create **or** to keep authoritative | *(none — an absent account is not created; <8 chars is treated as unspecified)* | **This file wins.** If the value differs from what's stored, the stored hash is replaced at boot and `tokenVersion` is bumped, signing the admin out of every device. An *unchanged* value is a no-op (bcrypt compare first) so restarts don't churn sessions. Consequences: a password changed in the Settings UI is reverted on the next restart — and on a hosted deploy, every deploy is a restart. Blank/short means "unspecified", never "reset to blank", so a cleared line can't lock you out. |
+| `SUPER_ADMIN_NAME` | server — `superAdmin.js` | No | `Super Admin` | Display name used at creation only. |
+
+Boot log tells you which branch ran: `Super admin created from .env: …` /
+`… repaired (role, status, password) — password reset from .env, all previous admin sessions signed out` /
+`… ✓` / `demoted N other admin(s)`, or a warning when unconfigured. Provisioning failure is caught —
+the API still serves.
+
 ## 2.3 Auth / JWT / sessions
 
 | Variable | Where used | Required? | Default if unset | What it does |
@@ -76,7 +96,7 @@ Three vars are used in code but **missing from `server/.env.example`**: `TWILIO_
 | `EMAIL_PORT` / `SMTP_PORT` | server — `sendEmail.js:16` | No | **`587`** | Port. `465` → implicit TLS (`secure: true`); `587`/`2525` → STARTTLS. |
 | `EMAIL_USER` / `SMTP_USER` | server — `sendEmail.js:17` | No | *(unset)* | SMTP username. |
 | `EMAIL_PASS` / `SMTP_PASS` 🔴 | server — `sendEmail.js:18` | No | *(unset)* | SMTP password / app password. **Secret.** |
-| `EMAIL_FROM` | server — `sendEmail.js:144` | No | code fallback | `From:` header, e.g. `ChatConnect <no-reply@chatconnect.app>`. Must be a verified sender on Brevo/SES. |
+| `EMAIL_FROM` | server — `sendEmail.js:144` | No | code fallback | `From:` header, e.g. `ChatKonect <no-reply@chatkonect.app>`. Must be a verified sender on Brevo/SES. |
 | `BREVO_API_KEY` 🔴 | server — `sendEmail.js:24` | No | *(unset → SMTP path)* | HTTPS email via Brevo's API. **Takes priority over SMTP** and is effectively **required on Render's free plan, which blocks outbound ports 25/465/587 entirely** — an HTTP API on 443 always gets through. |
 
 ## 2.5 SMS
@@ -109,7 +129,7 @@ Three vars are used in code but **missing from `server/.env.example`**: `TWILIO_
 |---|---|---|---|---|
 | `VAPID_PUBLIC_KEY` | server — `push.js:11` | No | `''` → push disabled | VAPID public key. Generate the pair once: `node -e "console.log(require('web-push').generateVAPIDKeys())"`. |
 | `VAPID_PRIVATE_KEY` 🔴 | server — `push.js:12` | No | `''` → push disabled | VAPID private key. **Secret.** |
-| `VAPID_SUBJECT` | server — `push.js:13` | No | `mailto:support@chatconnect.app` | Contact URI required by the Web Push spec (`mailto:` or `https:`). |
+| `VAPID_SUBJECT` | server — `push.js:13` | No | `mailto:support@chatkonect.app` | Contact URI required by the Web Push spec (`mailto:` or `https:`). |
 
 Push activates only when **both** keys are set; bad keys are caught and logged (`⚠️ Web Push disabled — bad VAPID keys`) rather than crashing boot. Without push, in-app and socket notifications still work — push is what reaches a user whose tab is closed (a UX *and* scaling win, since no socket need be held). Subscription endpoints are restricted to a **host allowlist of known push services to eliminate SSRF**.
 

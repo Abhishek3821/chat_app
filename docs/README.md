@@ -1,6 +1,6 @@
-# ChatConnect — Documentation
+# ChatKonect — Documentation
 
-Backend + realtime documentation for the ChatConnect server. Every fact in these documents was
+Backend + realtime documentation for the ChatKonect server. Every fact in these documents was
 extracted directly from the source (`server/`, `client/src/`) and cross-checked against the
 route/model/socket definitions — nothing here is guessed. Where the code and a doc ever disagree,
 the code wins; please open an issue (or fix the doc) if you find a drift.
@@ -9,22 +9,22 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 
 | Doc | What it covers |
 |---|---|
-| [**API.md**](API.md) | Full REST reference — **158 endpoints** across 24 routers. Method, auth, params, body, exact success/error JSON, side effects. |
+| [**API.md**](API.md) | Full REST reference — **182 endpoints** across 27 routers, generated from source. Method, auth, params, body, exact success/error JSON, side effects. |
 | [**AUTHENTICATION.md**](AUTHENTICATION.md) | JWT + session flow: signup, login (email/username/phone), refresh/rotation, logout, RBAC, two-step PIN, Socket.IO handshake auth. |
 | [**DATABASE_MODELS.md**](DATABASE_MODELS.md) | All 20 Mongoose schemas — fields, types, defaults, indexes, hooks/methods, and how the models reference each other. |
 | [**SOCKET_EVENTS.md**](SOCKET_EVENTS.md) | Every Socket.IO event in both directions, plus the exact call-signaling sequences (accept/reject/cancel/busy/group mesh). |
 | [**FILE_UPLOADS.md**](FILE_UPLOADS.md) | Upload endpoints, size/type limits, storage drivers, and how uploaded/protected media is accessed. |
-| [**PLATFORM.md**](PLATFORM.md) | Embedding ChatConnect in another product: App-as-tenant, the app-secret/user-token split, the `/v1/platform` API, capability flags, and the current gaps. **Hand this to an integrating customer.** |
+| [**PLATFORM.md**](PLATFORM.md) | Embedding ChatKonect in another product: App-as-tenant, the app-secret/user-token split, the `/v1/platform` API, capability flags, and the current gaps. **Hand this to an integrating customer.** |
 | [**ENVIRONMENT.md**](ENVIRONMENT.md) | Every environment variable actually read by the app — non-secret, by design. Base URL / Socket URL resolution. |
 | [**BUSINESS_LOGIC.md**](BUSINESS_LOGIC.md) | Feature flows and the business rules behind them — the "why", not just the "what". |
 | [**ARCHITECTURE_REVIEW.md**](ARCHITECTURE_REVIEW.md) | Staff-level review: current topology, findings ranked by blast radius, monolith→services plan, queue design, fault tolerance, and a triggered roadmap. |
-| [`../postman/`](../postman/) | A Postman collection (159 requests) + environment, generated from `API.md`. |
+| [`../postman/`](../postman/) | A Postman collection + environment. Import both, run Auth → login, and the token is captured for every later request. |
 
 ## Quick start for a new integration
 
 1. Read [ENVIRONMENT.md](ENVIRONMENT.md) to find the base URL for your environment.
-2. Import [`postman/ChatConnect.postman_collection.json`](../postman/ChatConnect.postman_collection.json)
-   and [`postman/ChatConnect.postman_environment.json`](../postman/ChatConnect.postman_environment.json)
+2. Import [`postman/ChatKonect.postman_collection.json`](../postman/ChatKonect.postman_collection.json)
+   and [`postman/ChatKonect.postman_environment.json`](../postman/ChatKonect.postman_environment.json)
    into Postman.
 3. Run **Auth → POST login** (or the send-code → verify-code → signup sequence) — the collection's
    test scripts capture `accessToken` automatically for every subsequent request.

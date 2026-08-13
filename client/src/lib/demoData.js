@@ -15,19 +15,19 @@ export const ME = {
   username: 'abhishek',
   email: 'abhisheksingh@capyngen.com',
   avatar: av('abhishek'),
-  bio: 'Building ChatConnect ✨',
+  bio: 'Building ChatKonect ✨',
   isOnline: true,
   role: 'admin',
 };
 
 export const USERS = [
-  { _id: 'u1', name: 'Aria Vance', username: 'aria', email: 'aria@chatconnect.app', avatar: av('aria'), bio: 'Product designer • coffee first ☕', isOnline: true },
-  { _id: 'u2', name: 'Leo Marsh', username: 'leo', email: 'leo@chatconnect.app', avatar: av('leo'), bio: 'Building things on the web', isOnline: true },
-  { _id: 'u3', name: 'Maya Chen', username: 'maya', email: 'maya@chatconnect.app', avatar: av('maya'), bio: 'Photographer & traveller 📷', isOnline: false, lastSeen: hrs(2) },
-  { _id: 'u4', name: 'Noah Reed', username: 'noah', email: 'noah@chatconnect.app', avatar: av('noah'), bio: 'Runner. Reader. Realist.', isOnline: false, lastSeen: hrs(5) },
-  { _id: 'u5', name: 'Sofia Diaz', username: 'sofia', email: 'sofia@chatconnect.app', avatar: av('sofia'), bio: 'Music is life 🎧', isOnline: true },
-  { _id: 'u6', name: 'Kai Tanaka', username: 'kai', email: 'kai@chatconnect.app', avatar: av('kai'), bio: 'iOS dev 🦄', isOnline: false, lastSeen: days(1) },
-  { _id: 'u7', name: 'Elena Popova', username: 'elena', email: 'elena@chatconnect.app', avatar: av('elena'), bio: 'Ballet & backend', isOnline: true },
+  { _id: 'u1', name: 'Aria Vance', username: 'aria', email: 'aria@chatkonect.app', avatar: av('aria'), bio: 'Product designer • coffee first ☕', isOnline: true },
+  { _id: 'u2', name: 'Leo Marsh', username: 'leo', email: 'leo@chatkonect.app', avatar: av('leo'), bio: 'Building things on the web', isOnline: true },
+  { _id: 'u3', name: 'Maya Chen', username: 'maya', email: 'maya@chatkonect.app', avatar: av('maya'), bio: 'Photographer & traveller 📷', isOnline: false, lastSeen: hrs(2) },
+  { _id: 'u4', name: 'Noah Reed', username: 'noah', email: 'noah@chatkonect.app', avatar: av('noah'), bio: 'Runner. Reader. Realist.', isOnline: false, lastSeen: hrs(5) },
+  { _id: 'u5', name: 'Sofia Diaz', username: 'sofia', email: 'sofia@chatkonect.app', avatar: av('sofia'), bio: 'Music is life 🎧', isOnline: true },
+  { _id: 'u6', name: 'Kai Tanaka', username: 'kai', email: 'kai@chatkonect.app', avatar: av('kai'), bio: 'iOS dev 🦄', isOnline: false, lastSeen: days(1) },
+  { _id: 'u7', name: 'Elena Popova', username: 'elena', email: 'elena@chatkonect.app', avatar: av('elena'), bio: 'Ballet & backend', isOnline: true },
 ];
 
 const U = Object.fromEntries(USERS.map((u) => [u._id, u]));
@@ -96,7 +96,7 @@ export const MESSAGES = {
   ],
   c2: [
     { _id: 'g1', sender: U.u1, content: 'Welcome to the Design Guild everyone! 🎨', type: 'text', createdAt: hrs(4), status: 'read' },
-    { _id: 'g2', sender: U.u2, content: 'Excited to collaborate on ChatConnect.', type: 'text', createdAt: hrs(3), status: 'read' },
+    { _id: 'g2', sender: U.u2, content: 'Excited to collaborate on ChatKonect.', type: 'text', createdAt: hrs(3), status: 'read' },
     { _id: 'g3', sender: U.u5, content: 'So happy to be here 💜', type: 'text', createdAt: mins(12), status: 'read', reactions: [{ emoji: '🎉', user: 'u1' }, { emoji: '💜', user: 'u2' }] },
   ],
   c3: [
@@ -114,7 +114,7 @@ export const CALLS = [
 ];
 
 export const MEETINGS = [
-  { _id: 'mt1', title: 'Design Review — ChatConnect v2', description: 'Walk through the new glassmorphism system and dark mode.', type: 'video', startAt: inHrs(3), durationMinutes: 45, host: ME, participants: [U.u1, U.u2, U.u3], recurrence: 'none' },
+  { _id: 'mt1', title: 'Design Review — ChatKonect v2', description: 'Walk through the new glassmorphism system and dark mode.', type: 'video', startAt: inHrs(3), durationMinutes: 45, host: ME, participants: [U.u1, U.u2, U.u3], recurrence: 'none' },
   { _id: 'mt2', title: 'Weekly Standup', description: 'Team sync', type: 'video', startAt: inDays(1), durationMinutes: 30, host: U.u2, participants: [ME, U.u1, U.u5, U.u7], recurrence: 'weekly' },
   { _id: 'mt3', title: '1:1 with Maya', description: 'Portfolio & roadmap', type: 'audio', startAt: inDays(2), durationMinutes: 30, host: ME, participants: [U.u3], recurrence: 'none' },
   { _id: 'mt4', title: 'Marketing Brainstorm', description: 'Launch campaign ideas', type: 'video', startAt: inDays(4), durationMinutes: 60, host: U.u5, participants: [ME, U.u1, U.u4], recurrence: 'none' },
@@ -178,10 +178,10 @@ export const ADMIN_STATS = {
 };
 
 export const ADMIN_USERS = [
-  { _id: 'au1', name: 'Aria Vance', username: 'aria', email: 'aria@chatconnect.app', avatar: av('aria'), accountStatus: 'active', createdAt: days(120) },
-  { _id: 'au2', name: 'Leo Marsh', username: 'leo', email: 'leo@chatconnect.app', avatar: av('leo'), accountStatus: 'active', createdAt: days(90) },
+  { _id: 'au1', name: 'Aria Vance', username: 'aria', email: 'aria@chatkonect.app', avatar: av('aria'), accountStatus: 'active', createdAt: days(120) },
+  { _id: 'au2', name: 'Leo Marsh', username: 'leo', email: 'leo@chatkonect.app', avatar: av('leo'), accountStatus: 'active', createdAt: days(90) },
   { _id: 'au3', name: 'Spammy McSpam', username: 'spammy', email: 'spam@x.com', avatar: av('spam'), accountStatus: 'suspended', createdAt: days(12) },
-  { _id: 'au4', name: 'Maya Chen', username: 'maya', email: 'maya@chatconnect.app', avatar: av('maya'), accountStatus: 'active', createdAt: days(60) },
+  { _id: 'au4', name: 'Maya Chen', username: 'maya', email: 'maya@chatkonect.app', avatar: av('maya'), accountStatus: 'active', createdAt: days(60) },
   { _id: 'au5', name: 'Bad Actor', username: 'bad', email: 'bad@x.com', avatar: av('bad'), accountStatus: 'banned', createdAt: days(5) },
 ];
 

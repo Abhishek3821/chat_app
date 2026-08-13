@@ -10,7 +10,7 @@ import User from '../models/User.js';
  */
 const PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
-const SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@chatconnect.app';
+const SUBJECT = process.env.VAPID_SUBJECT || 'mailto:support@chatkonect.app';
 
 let configured = false;
 if (PUBLIC && PRIVATE) {

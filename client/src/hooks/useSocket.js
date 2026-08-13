@@ -31,7 +31,7 @@ function notifyIncomingCallDesktop(caller, type) {
     if (settings?.notifications?.calls === false) return;
     if (document.visibilityState === 'visible' && document.hasFocus()) return;
     const n = new Notification(`Incoming ${type === 'video' ? 'video' : 'voice'} call`, {
-      body: `${caller?.name || 'Someone'} is calling you on ChatConnect`,
+      body: `${caller?.name || 'Someone'} is calling you on ChatKonect`,
       icon: caller?.avatar || '/logo.svg',
       tag: 'cc-incoming-call', // one call notification at a time
       requireInteraction: true,
@@ -98,6 +98,12 @@ export function useSocket() {
       const { activeChatId } = useChat.getState();
       if (activeChatId) socket.emit('join-chat', activeChatId);
       useChat.getState().resync();
+      /* Status was NOT resynced here, and that is the "I have to refresh"
+         report: `status-updated` is a fire-and-forget nudge, so every status
+         posted while this tab was disconnected (sleep, wifi blip, server
+         restart) was lost for good and the feed stayed stale until a manual
+         reload. Chats recovered via resync(); status had no equivalent. */
+      useStatus.getState().load().catch(() => {});
     });
     socket.on('connect_error', async () => {
       if (refreshedForAuth) return;
@@ -199,9 +205,18 @@ export function useSocket() {
     // A contact posted/removed a status → refresh the Status feed live.
     // Debounced: a multi-image status post fires one refetch, not five.
     let statusRefetchTimer = null;
-    socket.on('status-updated', () => {
+    socket.on('status-updated', ({ removedId } = {}) => {
+      // A delete can be applied immediately — the item is simply gone, and
+      // waiting for the debounced refetch leaves a story on screen that 404s
+      // when opened.
+      if (removedId) useStatus.getState().removeStatus(removedId);
       clearTimeout(statusRefetchTimer);
-      statusRefetchTimer = setTimeout(() => useStatus.getState().load().catch(() => {}), 500);
+      statusRefetchTimer = setTimeout(() => useStatus.getState().load().catch(() => {}), 400);
+    });
+    // Someone viewed MY status — patch the count/avatars in place rather than
+    // refetching: the owner is often staring at that exact screen.
+    socket.on('status-viewed', (payload) => {
+      if (payload?.statusId) useStatus.getState().applyStatusViewed(payload);
     });
     socket.on('status-reply', ({ from, text }) => {
       useNotifications.getState().pushLocal({ type: 'status_reply', title: 'Status reply', body: `${from || 'Someone'}: ${text || ''}` });

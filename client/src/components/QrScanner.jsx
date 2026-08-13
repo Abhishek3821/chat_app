@@ -104,7 +104,7 @@ export default function QrScanner({ onResult, className }) {
         <div className="h-2/3 w-2/3 rounded-2xl border-2 border-white/70" />
       </div>
       <span className="pointer-events-none absolute inset-x-0 bottom-2 flex items-center justify-center gap-1.5 text-[11px] font-medium text-white/80">
-        <Camera size={12} /> Point at a ChatConnect QR code
+        <Camera size={12} /> Point at a ChatKonect QR code
       </span>
     </div>
   );

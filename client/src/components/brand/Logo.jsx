@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { cn } from '../../lib/utils';
 
-/** ChatConnect mark — two interlocking speech bubbles forming a "C". */
+/** ChatKonect mark — two interlocking speech bubbles forming a "C". */
 export function LogoMark({ size = 36, className }) {
   // The gradient id MUST be unique per instance. It was the literal "ccGrad",
   // and the app renders two marks at once (NavRail + TopBar), so the document
@@ -42,9 +42,12 @@ export function LogoFull({ className, markSize = 34 }) {
   return (
     <div className={cn('flex items-center gap-2.5', className)}>
       <LogoMark size={markSize} />
+      {/* Split so the second half carries the brand gradient. Keep the two
+          halves spelling the product name exactly — a rename that only looks
+          for the whole word "ChatKonect" will not find it here. */}
       <span className="text-xl font-extrabold tracking-tight">
         <span className="text-content">Chat</span>
-        <span className="gradient-text">Connect</span>
+        <span className="gradient-text">Konect</span>
       </span>
     </div>
   );

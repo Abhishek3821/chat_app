@@ -81,7 +81,7 @@ export default function TopBar() {
       <div className="flex items-center gap-2 md:hidden">
         <LogoMark size={30} />
       </div>
-      <h1 className="hidden text-xl font-bold text-content md:block">{titles[pathname] || 'ChatConnect'}</h1>
+      <h1 className="hidden text-xl font-bold text-content md:block">{titles[pathname] || 'ChatKonect'}</h1>
 
       {/* Inline field from md up (there's room, and it grows with the viewport);
           below that it renders as an icon that opens a full-screen sheet. */}
@@ -94,12 +94,12 @@ export default function TopBar() {
             only from the chat list's + button — so from any other page on a
             phone you couldn't start one. They collapse to icons instead. */}
         {installable && (
-          <Button variant="outline" size="icon-sm" className="sm:hidden" onClick={promptInstall} aria-label="Install ChatConnect as an app" title="Install ChatConnect as an app">
+          <Button variant="outline" size="icon-sm" className="sm:hidden" onClick={promptInstall} aria-label="Install ChatKonect as an app" title="Install ChatKonect as an app">
             <Download size={17} />
           </Button>
         )}
         {installable && (
-          <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={promptInstall} title="Install ChatConnect as an app">
+          <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={promptInstall} title="Install ChatKonect as an app">
             <Download size={16} /> Install app
           </Button>
         )}

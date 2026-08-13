@@ -49,7 +49,7 @@ export default function LockScreen({ onUnlock }) {
                 <Lock size={13} />
               </span>
             </div>
-            <h1 className="font-display text-lg font-bold text-content">ChatConnect is locked</h1>
+            <h1 className="font-display text-lg font-bold text-content">ChatKonect is locked</h1>
             <p className="mt-1 text-sm text-content-muted">
               Hi {user?.name?.split(' ')[0] || 'there'} — enter your PIN to open your chats.
             </p>

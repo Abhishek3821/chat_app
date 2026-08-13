@@ -435,7 +435,7 @@ export default function AdminDashboard() {
               <span className="gradient-text">Admin Dashboard</span>
             </h1>
             <p className="mt-1 text-sm text-content-muted">
-              A live pulse of everything happening across ChatConnect.
+              A live pulse of everything happening across ChatKonect.
             </p>
           </div>
           <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-500">

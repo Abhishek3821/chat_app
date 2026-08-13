@@ -97,7 +97,7 @@ export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
 if (import.meta.env.PROD && !DEMO_MODE && !import.meta.env.VITE_API_URL) {
   // eslint-disable-next-line no-console
   console.error(
-    '[ChatConnect] VITE_API_URL is not set in this production build — API calls will fail. ' +
+    '[ChatKonect] VITE_API_URL is not set in this production build — API calls will fail. ' +
       'Set VITE_API_URL (e.g. https://your-backend.onrender.com/api) and VITE_SOCKET_URL in your host\'s env vars, then rebuild/redeploy.'
   );
 }

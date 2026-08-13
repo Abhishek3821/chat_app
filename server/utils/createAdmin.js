@@ -4,7 +4,7 @@
  *
  * Usage (from /server, uses MONGO_URI from .env):
  *   node utils/createAdmin.js <email> <password> [name]
- *   node utils/createAdmin.js admin@chatconnect.app "StrongPass123!" "Site Admin"
+ *   node utils/createAdmin.js admin@chatkonect.app "StrongPass123!" "Site Admin"
  *
  * If the email already exists, the account is promoted to admin and the
  * password is reset to the one you passed (all old sessions are revoked).

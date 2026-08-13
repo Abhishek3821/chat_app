@@ -121,7 +121,7 @@ async function cleanupAndExit(code) {
 }
 
 async function main() {
-  console.log('\nChatConnect new-features check — isolated DB\n');
+  console.log('\nChatKonect new-features check — isolated DB\n');
   if (TEST_URI.includes('+srv')) { try { dns.setServers(['8.8.8.8', '1.1.1.1']); } catch { /* noop */ } }
   await mongoose.connect(TEST_URI, { serverSelectionTimeoutMS: 20000 });
   await mongoose.connection.dropDatabase();
@@ -130,8 +130,8 @@ async function main() {
   console.log('Server is up. Running tests…\n');
 
   // ── users: the email must be verified BEFORE signup succeeds ──
-  const A = { name: 'Busy A', email: 'busy.a@chatconnect.app', password: 'PasswordA1!', phone: '+15551110001' };
-  const B = { name: 'Busy B', email: 'busy.b@chatconnect.app', password: 'PasswordB1!', phone: '+15551110002' };
+  const A = { name: 'Busy A', email: 'busy.a@chatkonect.app', password: 'PasswordA1!', phone: '+15551110001' };
+  const B = { name: 'Busy B', email: 'busy.b@chatkonect.app', password: 'PasswordB1!', phone: '+15551110002' };
 
   // Get the signed email proof the way the Verify button does: send → confirm.
   async function verifyEmailFirst(email) {
@@ -173,19 +173,19 @@ async function main() {
   // ── phone rules at signup ──
   {
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'Clone', email: 'clone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: A.phone },
+      body: { name: 'Clone', email: 'clone@chatkonect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: A.phone },
     });
     check('duplicate phone number rejected (409)', r.status === 409, `status ${r.status}: ${r.data?.message}`);
   }
   {
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'NoPhone', email: 'nophone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!' },
+      body: { name: 'NoPhone', email: 'nophone@chatkonect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!' },
     });
     check('signup without phone rejected (400)', r.status === 400, `status ${r.status}`);
   }
   {
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'BadPhone', email: 'badphone@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: 'abc123' },
+      body: { name: 'BadPhone', email: 'badphone@chatkonect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', phone: 'abc123' },
     });
     check('invalid phone rejected (400)', r.status === 400, `status ${r.status}`);
   }

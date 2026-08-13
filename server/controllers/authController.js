@@ -90,9 +90,9 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
   // than holding the request open for seconds.
   const { state, error: sendErr } = await sendEmailWithin({
     to: email,
-    subject: 'Verify your email for ChatConnect',
+    subject: 'Verify your email for ChatKonect',
     html: otpEmailTemplate('there', otp),
-    text: `Your ChatConnect verification code is ${otp}. It expires in 10 minutes.`,
+    text: `Your ChatKonect verification code is ${otp}. It expires in 10 minutes.`,
   });
   // SMTP is set up but the send was REJECTED → surface an ACTIONABLE error
   // (which of credentials / connectivity broke), not a mystery.
@@ -289,9 +289,9 @@ export const resendOtp = asyncHandler(async (req, res) => {
   const emailConfigured = isEmailConfigured();
   await sendEmailWithin({
     to: user.email,
-    subject: 'Your new ChatConnect code',
+    subject: 'Your new ChatKonect code',
     html: otpEmailTemplate(user.name, otp),
-    text: `Your ChatConnect verification code is ${otp}`,
+    text: `Your ChatKonect verification code is ${otp}`,
   });
   res.json({
     success: true,
@@ -453,7 +453,7 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
     await sendEmailWithin({
       to: user.email,
-      subject: 'Reset your ChatConnect password',
+      subject: 'Reset your ChatKonect password',
       html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
       text: `Reset your password: ${resetUrl}`,
     });
@@ -499,7 +499,7 @@ export const changePassword = asyncHandler(async (req, res) => {
 });
 
 // ── Two-step verification (app-lock PIN) ─────────────────────────
-// A 4–8 digit PIN required to open ChatConnect on a device, stored bcrypt-hashed.
+// A 4–8 digit PIN required to open ChatKonect on a device, stored bcrypt-hashed.
 
 // POST /api/auth/two-step/enable  { pin }
 export const enableTwoStep = asyncHandler(async (req, res) => {
@@ -578,9 +578,9 @@ export const requestTwoStepReset = asyncHandler(async (req, res) => {
   const emailConfigured = isEmailConfigured();
   const { state } = await sendEmailWithin({
     to: user.email,
-    subject: 'Reset your ChatConnect PIN',
+    subject: 'Reset your ChatKonect PIN',
     html: otpEmailTemplate(user.name, otp),
-    text: `Your ChatConnect PIN reset code is ${otp}. It expires in 10 minutes.`,
+    text: `Your ChatKonect PIN reset code is ${otp}. It expires in 10 minutes.`,
   });
   if (state === 'failed') securityEvent('twostep.reset.email.failed', req, { userId: String(user._id) });
   securityEvent('twostep.reset.requested', req, { userId: String(user._id) });

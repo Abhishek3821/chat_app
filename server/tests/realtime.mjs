@@ -91,7 +91,7 @@ const nextPhone = () => `+1999${String(Date.now()).slice(-6)}${String(phoneSeq++
 async function makeUser(tag) {
   const u = {
     name: `RT ${tag}`,
-    email: `rt.${tag}.${uniq()}@chatconnect.app`,
+    email: `rt.${tag}.${uniq()}@chatkonect.app`,
     password: 'PasswordR1!',
     phone: nextPhone(),
   };

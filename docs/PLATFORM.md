@@ -1,6 +1,6 @@
-# ChatConnect — Embeddable Platform
+# ChatKonect — Embeddable Platform
 
-How to put ChatConnect's chat, calls and meetings **inside another product**.
+How to put ChatKonect's chat, calls and meetings **inside another product**.
 
 Every fact below was extracted from the source (`server/routes/platformRoutes.js`,
 `server/controllers/platformController.js`, `server/utils/appAuth.js`, `server/models/App.js`,
@@ -11,8 +11,8 @@ There are two audiences here, and they need different halves of this document:
 
 | You are… | Read |
 |---|---|
-| The **ChatConnect operator** — you own the admin console and create the apps | §1 – §3 |
-| A **third-party developer** integrating ChatConnect into your own product | §4 – §8 |
+| The **ChatKonect operator** — you own the admin console and create the apps | §1 – §3 |
+| A **third-party developer** integrating ChatKonect into your own product | §4 – §8 |
 
 > **Read §9 before you promise anything to a customer.** Two parts of this platform are not finished:
 > there is no embed SDK yet, and most capability toggles are not enforced. §9 says exactly which.
@@ -22,7 +22,7 @@ There are two audiences here, and they need different halves of this document:
 ## 1. The mental model
 
 **One "App" = one tenant.** An App is an isolated world: its end users can only see, search and
-message other users of the same App. They cannot see your first-party ChatConnect users, and those
+message other users of the same App. They cannot see your first-party ChatKonect users, and those
 users cannot see them. Isolation is enforced server-side by `tenantScope()` on every user-facing
 query, not by the UI hiding things.
 
@@ -46,7 +46,7 @@ your backend  ──[App ID + App secret]──►  POST /api/v1/platform/tokens
                                                     │
                                           returns a user token (default 60 min)
                                                     ▼
-your frontend ──[user token]───────────►  the rest of the ChatConnect API
+your frontend ──[user token]───────────►  the rest of the ChatKonect API
 ```
 
 **Why the split matters:** a leaked user token exposes one person for minutes. A leaked app secret
@@ -153,10 +153,10 @@ A caller only ever sees apps they own; users with `role: 'admin'` see every app.
 
 ## 4. Integrator quickstart
 
-Everything from here is for the developer embedding ChatConnect. You need two things from the
+Everything from here is for the developer embedding ChatKonect. You need two things from the
 operator: an **App ID** and an **App secret**.
 
-Base URL for all platform calls: `https://<chatconnect-host>/api/v1/platform`
+Base URL for all platform calls: `https://<chatkonect-host>/api/v1/platform`
 
 ### Step 0 — verify your credentials
 
@@ -195,7 +195,7 @@ curl -X POST https://<host>/api/v1/platform/users \
   -d '{"externalId":"your-user-42","name":"Ada Lovelace"}'
 ```
 
-`externalId` is **your** primary key for that person. You never have to store a ChatConnect ID —
+`externalId` is **your** primary key for that person. You never have to store a ChatKonect ID —
 address users by the ID you already have.
 
 ```json
@@ -233,7 +233,7 @@ Your frontend calls your endpoint; your app secret never leaves your backend.
 
 ### Step 3 — use the token from the browser
 
-The minted token is an **ordinary ChatConnect access token**. There is no special embed API: every
+The minted token is an **ordinary ChatKonect access token**. There is no special embed API: every
 protected REST route and the Socket.IO handshake accept it unchanged.
 
 ```js
@@ -376,9 +376,9 @@ A minimal Express backend exposing exactly one endpoint to its own frontend:
 
 ```js
 // server-side only — APP_SECRET never leaves this process
-const HOST = process.env.CHATCONNECT_HOST;   // https://chat.example.com
-const APP_ID = process.env.CHATCONNECT_APP_ID;
-const APP_SECRET = process.env.CHATCONNECT_APP_SECRET;
+const HOST = process.env.CHATKONECT_HOST;   // https://chat.example.com
+const APP_ID = process.env.CHATKONECT_APP_ID;
+const APP_SECRET = process.env.CHATKONECT_APP_SECRET;
 
 const ccHeaders = {
   'X-CC-App-Id': APP_ID,
@@ -450,14 +450,14 @@ first-party users correctly. Until then, treat the nine as labels.
 
 ### 9.2 There is no embed SDK or widget
 
-The Integrate snippet's step 3 — "hand that token to the embed" — refers to a `@chatconnect/react`
+The Integrate snippet's step 3 — "hand that token to the embed" — refers to a `@chatkonect/react`
 package and a `<script>` widget that were designed but **never built**. Nothing in the repo ships
 them.
 
 So a customer integrating today must **build their own UI** against the REST API and Socket.IO
 events, using the token as shown in §4. That is entirely workable — [API.md](API.md) and
 [SOCKET_EVENTS.md](SOCKET_EVENTS.md) document the whole surface — but it is a real frontend project,
-not a drop-in `<ChatConnect />` component. Set expectations accordingly.
+not a drop-in `<ChatKonect />` component. Set expectations accordingly.
 
 ### 9.3 `allowedOrigins` is stored but never checked
 

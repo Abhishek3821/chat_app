@@ -56,7 +56,7 @@ async function startServer(prod) {
 const stopServer = async () => { if (proc && !proc.killed) proc.kill(); await sleep(400); };
 
 async function getToken() {
-  const u = { name: 'Up Test', email: `up.${Date.now()}@chatconnect.app`, password: 'PasswordU1!', phone: `+1555${String(Date.now()).slice(-7)}` };
+  const u = { name: 'Up Test', email: `up.${Date.now()}@chatkonect.app`, password: 'PasswordU1!', phone: `+1555${String(Date.now()).slice(-7)}` };
   await fetch(`${API}/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...u, confirmPassword: u.password }) });
   const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: u.email, password: u.password }) });
   return (await r.json()).token;

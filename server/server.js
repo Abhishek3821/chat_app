@@ -11,6 +11,7 @@ import mongoose from 'mongoose';
 
 import { connectDB } from './config/db.js';
 import { ensureWorkspaces } from './utils/workspaceService.js';
+import { ensureSuperAdmin, describeSuperAdmin } from './utils/superAdmin.js';
 import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -101,7 +102,7 @@ app.get('/uploads/:filename', serveUpload);
 // ── API ─────────────────────────────────────────────────────────
 // csrfGuard rejects cross-site cookie-borne mutations (Origin verification).
 app.use('/api', apiLimiter, csrfGuard, apiRoutes);
-app.get('/', (req, res) => res.json({ success: true, message: 'ChatConnect API is running 🚀' }));
+app.get('/', (req, res) => res.json({ success: true, message: 'ChatKonect API is running 🚀' }));
 
 // ── Error handling ──────────────────────────────────────────────
 app.use(notFound);
@@ -146,6 +147,16 @@ async function start() {
     console.warn('⚠️  Workspace migration skipped:', err?.message || err);
   }
 
+  /* The single super admin, declared in .env and reconciled here. This runs
+     AFTER ensureWorkspaces so a freshly created admin lands in a real workspace,
+     and on every boot — which is what makes pointing MONGO_URI at an empty
+     database self-provisioning instead of a locked-out one. */
+  try {
+    console.log(describeSuperAdmin(await ensureSuperAdmin()));
+  } catch (err) {
+    console.warn('⚠️  Super-admin provisioning failed:', err?.message || err);
+  }
+
   // Report SMTP status at boot so "why isn't the OTP email arriving?" is obvious.
   if (process.env.ENABLE_EMAIL_VERIFICATION === 'true') {
     const r = await verifyEmailTransport();
@@ -167,7 +178,7 @@ async function start() {
   startPinSweeper();
 
   server.listen(PORT, () => {
-    console.log(`\n🚀 ChatConnect API listening on http://localhost:${PORT}`);
+    console.log(`\n🚀 ChatKonect API listening on http://localhost:${PORT}`);
     console.log(`🔌 Socket.IO ready • CORS origin: ${CLIENT_URL}\n`);
   });
 }

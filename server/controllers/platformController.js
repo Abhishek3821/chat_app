@@ -148,7 +148,7 @@ export const issueUserToken = asyncHandler(async (req, res) => {
 
 /* ───────────────────────── Admin-side (dashboard) ─────────────────────────
    These are session-authenticated (`protect`), not app-secret authenticated —
-   they're what the ChatConnect admin console uses to create and manage tenants.
+   they're what the ChatKonect admin console uses to create and manage tenants.
    A caller only ever sees the apps they own; platform admins see all of them. */
 
 const adminScope = (user) => (user.role === 'admin' ? {} : { owner: user._id });

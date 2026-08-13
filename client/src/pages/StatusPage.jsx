@@ -105,6 +105,16 @@ function StoryViewer({ feed, index, onClose, onChangeIndex }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, nextItem, prevItem]);
 
+  /* Count a view when the item actually comes ON SCREEN — one per item, as the
+     story advances. Opening a story used to fire a view for every item it
+     contained at once, so a 5-item story scored 5 views from someone who saw
+     only the first. Own stories are skipped (the server ignores self-views too,
+     this just saves the round trip). */
+  const markViewed = useStatus((s) => s.view);
+  useEffect(() => {
+    if (item?._id && !entry?.isMe) markViewed(item._id);
+  }, [item?._id, entry?.isMe, markViewed]);
+
   const sendReply = (e) => {
     e.preventDefault();
     if (!reply.trim()) return;
@@ -349,7 +359,7 @@ function Metric({ value, label }) {
    ───────────────────────────────────────────────────────────── */
 export default function StatusPage() {
   const openModal = useUI((s) => s.openModal);
-  const { feed, load, view, markSeen } = useStatus();
+  const { feed, load, markSeen } = useStatus();
   const me = useAuth((s) => s.user);
   const [viewerIndex, setViewerIndex] = useState(null); // index into `feed` or null
 
@@ -368,7 +378,8 @@ export default function StatusPage() {
     const idx = feed.indexOf(entry);
     if (idx >= 0) {
       setViewerIndex(idx);
-      entry.items?.forEach((it) => view(it._id));
+      // Views are recorded per item by the viewer as each one is shown, not in
+      // a batch here — see the effect in StoryViewer.
       if (!entry.isMe) markSeen(entry.user?._id);
     }
   };

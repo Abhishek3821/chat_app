@@ -79,14 +79,14 @@ function KeyIntegration({ k, plaintext }) {
   // A reusable helper is the shape almost everyone actually wants, and it puts
   // the key in an env var — which is the habit worth teaching.
   const step2 = `// Node 18+ · keep this on your SERVER. Never ship a key to a browser.
-const CC_KEY = process.env.CHATCONNECT_API_KEY; // ${k.prefix}…
+const CC_KEY = process.env.CHATKONECT_API_KEY; // ${k.prefix}…
 
 async function cc(path, init = {}) {
   const res = await fetch('${API_BASE}' + path, {
     ...init,
     headers: { 'X-API-Key': CC_KEY, 'Content-Type': 'application/json', ...init.headers },
   });
-  if (!res.ok) throw new Error('ChatConnect ' + res.status + ': ' + (await res.text()));
+  if (!res.ok) throw new Error('ChatKonect ' + res.status + ': ' + (await res.text()));
   return res.json();
 }`;
 
@@ -387,7 +387,7 @@ export default function DevelopersPage() {
         </div>
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-content">Developers</h1>
-          <p className="text-xs text-content-muted">Build chat, calls & meetings into your own product with the ChatConnect API.</p>
+          <p className="text-xs text-content-muted">Build chat, calls & meetings into your own product with the ChatKonect API.</p>
         </div>
       </motion.header>
 

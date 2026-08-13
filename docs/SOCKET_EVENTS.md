@@ -177,8 +177,9 @@ All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string
 |---|---|---|---|
 | `contact-request` | `{ from: { _id, name, avatar } }` | `POST /api/users/me/contacts/:id` (`userController.js:186`), `contactController.js:59` | `useSocket.js:173` → bell entry + toast + `useContacts.load()` |
 | `contact-accepted` | `{ by: <name string> }` | `contactController.js:36` (auto-accept of a reciprocal pending request) and `:94` (explicit accept) | `useSocket.js:178` → bell + success toast + `useContacts.load()` |
-| `status-updated` | `{ userId }` (hint only, no content) | status post/delete → `notifyStatusAudience()` fans out to the owner's contacts filtered by the status audience (`selected`/`except`) — `statusController.js:31` | `useSocket.js:186` → debounced 500 ms `useStatus.load()` (server re-applies privacy) |
-| `status-reply` | `{ from: <name>, text }` | replying to a status (`statusController.js:125`) | `useSocket.js:190` → bell + toast |
+| `status-updated` | `{ userId, statusId? }` on post, `{ userId, removedId? }` on delete — hint only, no content | status post/delete → `notifyStatusAudience()` fans out to the owner's contacts filtered by the status audience (`selected`/`except`) — `statusController.js:28` | `useSocket.js:208` → applies `removedId` immediately, then a debounced 400 ms `useStatus.load()` (server re-applies privacy). Also refetched on socket **reconnect**, since this event is fire-and-forget and anything sent while the tab was disconnected is otherwise lost |
+| `status-viewed` | `{ statusId, viewer: {_id,name,username,avatar}, at, viewerCount }` | sent to the status OWNER only, and only for a **new** viewer — a re-view or a self-view emits nothing (`statusController.js:136`) | `useSocket.js:218` → `useStatus.applyStatusViewed()` patches the viewer into the item in place, so the count and avatar row move while the owner is looking at them |
+| `status-reply` | `{ from: <name>, text }` | replying to a status (`statusController.js:158`) | `useSocket.js:221` → bell + toast |
 | `meeting-invited` | `{ meetingId, title, startAt }` | meeting created/invitees added (`meetingController.js:133`) | `useSocket.js:194` → bell + `📅` toast (only reads `title`) |
 
 ### Live location

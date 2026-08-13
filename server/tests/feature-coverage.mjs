@@ -94,7 +94,7 @@ async function makeUser(tag) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const u = {
       name: `FC ${tag}`,
-      email: `fc.${tag}.${uniq()}@chatconnect.app`,
+      email: `fc.${tag}.${uniq()}@chatkonect.app`,
       password: 'PasswordF1!',
       phone: nextPhone(),
     };
@@ -124,7 +124,7 @@ async function befriend(A, B) {
 }
 
 async function main() {
-  console.log('\nChatConnect feature-coverage smoke test — isolated DB');
+  console.log('\nChatKonect feature-coverage smoke test — isolated DB');
   if (TEST_URI.includes('+srv')) { try { dns.setServers(['8.8.8.8', '1.1.1.1']); } catch { /* noop */ } }
   await mongoose.connect(TEST_URI, { serverSelectionTimeoutMS: 20000 });
   await startServer();
@@ -336,7 +336,7 @@ async function main() {
   const T = await makeUser('t');
   const mkWs = await http('POST', '/auth/signup', {
     body: {
-      name: 'Owner W', email: `fc.w.${uniq()}@chatconnect.app`, password: 'PasswordW1!',
+      name: 'Owner W', email: `fc.w.${uniq()}@chatkonect.app`, password: 'PasswordW1!',
       confirmPassword: 'PasswordW1!', phone: `+1${String(7000000000n + BigInt(Math.floor(Math.random() * 9e8)))}`,
       accountType: 'workspace', workspaceName: 'FC Team',
     },

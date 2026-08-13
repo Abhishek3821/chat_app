@@ -1,5 +1,5 @@
 /**
- * ChatConnect end-to-end test suite.
+ * ChatKonect end-to-end test suite.
  *
  * Boots the real server against an ISOLATED test database (chatconnect_t_e2e),
  * then drives two real users (A, B) + one seeded admin through:
@@ -24,6 +24,10 @@ const SERVER_DIR = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(SERVER_DIR, '.env') });
 
 const PORT = 5101;
+// Declared up here because BOTH the seeding below and the spawned server's
+// SUPER_ADMIN_* environment have to agree on them.
+const ADMIN_EMAIL = 'admin.e2e@chatkonect.app';
+const ADMIN_PASSWORD = 'AdminPass123!';
 const BASE = `http://127.0.0.1:${PORT}`;
 const API = `${BASE}/api`;
 
@@ -117,6 +121,12 @@ async function startServer() {
       NODE_ENV: 'development',
       ENABLE_EMAIL_VERIFICATION: 'false',
       CLIENT_URL: 'http://localhost:5290',
+      /* Name THIS suite's admin as the super admin. Boot reconciles the single
+         super admin from the environment and demotes every other `role: 'admin'`
+         account, so without this the inherited real .env would win and the admin
+         seeded below would be stripped of its role before the first test ran. */
+      SUPER_ADMIN_EMAIL: ADMIN_EMAIL,
+      SUPER_ADMIN_PASSWORD: ADMIN_PASSWORD,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -158,7 +168,7 @@ async function cleanupAndExit(code) {
 
 // ── the suite ─────────────────────────────────────────────────────
 async function main() {
-  console.log('\nChatConnect E2E — isolated DB:', TEST_URI.replace(/\/\/[^@]*@/, '//***@'), '\n');
+  console.log('\nChatKonect E2E — isolated DB:', TEST_URI.replace(/\/\/[^@]*@/, '//***@'), '\n');
 
   // Fresh database + out-of-band admin (simulates the seed script path).
   if (TEST_URI.includes('+srv')) {
@@ -171,21 +181,25 @@ async function main() {
   await mongoose.connect(TEST_URI, { serverSelectionTimeoutMS: 20000 });
   await mongoose.connection.dropDatabase();
   const { default: User } = await import('../models/User.js');
-  const ADMIN = { email: 'admin.e2e@chatconnect.app', password: 'AdminPass123!' };
+  const ADMIN = { email: ADMIN_EMAIL, password: ADMIN_PASSWORD };
+  /* Seeded directly, then ALSO named as SUPER_ADMIN_* in the spawned server's
+     env (see startServer). That combination exercises the "account already
+     exists → promote it, don't duplicate it" branch of boot-time provisioning,
+     while keeping this suite's admin from being demoted as a stray. */
   await User.create({
     name: 'E2E Admin',
     username: 'admin_e2e',
     email: ADMIN.email,
     password: ADMIN.password,
-    role: 'admin', // created directly in the DB — the ONLY sanctioned way
+    role: 'admin',
     isVerified: true,
   });
 
   await startServer();
   console.log('Server is up. Running tests…\n');
 
-  const A = { name: 'User A', email: 'a.e2e@chatconnect.app', password: 'PasswordA1!', phone: '+15550000001' };
-  const B = { name: 'User B', email: 'b.e2e@chatconnect.app', password: 'PasswordB1!', phone: '+15550000002' };
+  const A = { name: 'User A', email: 'a.e2e@chatkonect.app', password: 'PasswordA1!', phone: '+15550000001' };
+  const B = { name: 'User B', email: 'b.e2e@chatkonect.app', password: 'PasswordB1!', phone: '+15550000002' };
 
   // ── 1. Signup & role security ──────────────────────────────────
   console.log('— Auth & role security');
@@ -212,19 +226,19 @@ async function main() {
   }
   {
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'Shorty', email: 'short.e2e@chatconnect.app', password: 'short', confirmPassword: 'short', phone: '+15550000003' },
+      body: { name: 'Shorty', email: 'short.e2e@chatkonect.app', password: 'short', confirmPassword: 'short', phone: '+15550000003' },
     });
     check('short password rejected (400)', r.status === 400, `status ${r.status}`);
   }
   {
-    const r = await http('POST', '/auth/signup', { body: { email: 'x.e2e@chatconnect.app' } });
+    const r = await http('POST', '/auth/signup', { body: { email: 'x.e2e@chatkonect.app' } });
     check('missing fields rejected (400)', r.status === 400);
   }
   {
     const png =
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     const r = await http('POST', '/auth/signup', {
-      body: { name: 'Ava Photo', email: 'c.e2e@chatconnect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', avatar: png, phone: '+15550000004' },
+      body: { name: 'Ava Photo', email: 'c.e2e@chatkonect.app', password: 'PasswordC1!', confirmPassword: 'PasswordC1!', avatar: png, phone: '+15550000004' },
     });
     check('signup with optional profile photo stores it', r.status === 201 && r.data?.user?.avatar?.startsWith('data:image/'), `avatar=${String(r.data?.user?.avatar).slice(0, 24)}…`);
   }
@@ -235,7 +249,7 @@ async function main() {
     check('login with wrong password fails (401)', r.status === 401);
   }
   {
-    const r = await http('POST', '/auth/login', { body: { email: 'nobody.e2e@chatconnect.app', password: A.password } });
+    const r = await http('POST', '/auth/login', { body: { email: 'nobody.e2e@chatkonect.app', password: A.password } });
     check('login with wrong email fails (401)', r.status === 401);
   }
   {

@@ -34,8 +34,8 @@ const waitFor = (socket, event, timeout = 8000) =>
   });
 
 // ── logins ──
-const la = await http('POST', '/auth/login', { body: { identifier: 'aria@chatconnect.app', password: 'password123' } });
-const lb = await http('POST', '/auth/login', { body: { identifier: 'leo@chatconnect.app', password: 'password123' } });
+const la = await http('POST', '/auth/login', { body: { identifier: 'aria@chatkonect.app', password: 'password123' } });
+const lb = await http('POST', '/auth/login', { body: { identifier: 'leo@chatkonect.app', password: 'password123' } });
 console.log('login aria:', la.status, la.data?.token ? 'token ok' : JSON.stringify(la.data)?.slice(0, 120));
 console.log('login leo :', lb.status, lb.data?.token ? 'token ok' : JSON.stringify(lb.data)?.slice(0, 120));
 if (!la.data?.token || !lb.data?.token) { console.log('RESULT: cannot test — demo accounts unavailable on deployed DB'); process.exit(1); }

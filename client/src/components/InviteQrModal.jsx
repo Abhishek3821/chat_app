@@ -27,7 +27,7 @@ export default function InviteQrModal({ open, onClose, title, description, url }
     // Web Share is the nicer path on mobile; silently fall back to copy elsewhere.
     if (navigator.share) {
       try {
-        await navigator.share({ title: title || 'ChatConnect invite', url });
+        await navigator.share({ title: title || 'ChatKonect invite', url });
         return;
       } catch {
         return; // user dismissed the sheet — not an error worth surfacing

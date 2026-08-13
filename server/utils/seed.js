@@ -27,12 +27,12 @@ const ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url'); // strong, p
 const CONFIRMED = process.env.SEED_CONFIRM === 'yes' || process.argv.includes('--yes');
 
 const demoUsers = [
-  { name: 'Aria Vance', username: 'aria', email: 'aria@chatconnect.app', bio: 'Product designer • coffee first ☕' },
-  { name: 'Leo Marsh', username: 'leo', email: 'leo@chatconnect.app', bio: 'Building things on the web' },
-  { name: 'Maya Chen', username: 'maya', email: 'maya@chatconnect.app', bio: 'Photographer & traveller 📷' },
-  { name: 'Noah Reed', username: 'noah', email: 'noah@chatconnect.app', bio: 'Runner. Reader. Realist.' },
-  { name: 'Sofia Diaz', username: 'sofia', email: 'sofia@chatconnect.app', bio: 'Music is life 🎧' },
-  { name: 'Admin', username: 'admin', email: 'admin@chatconnect.app', bio: 'ChatConnect operations', role: 'admin' },
+  { name: 'Aria Vance', username: 'aria', email: 'aria@chatkonect.app', bio: 'Product designer • coffee first ☕' },
+  { name: 'Leo Marsh', username: 'leo', email: 'leo@chatkonect.app', bio: 'Building things on the web' },
+  { name: 'Maya Chen', username: 'maya', email: 'maya@chatkonect.app', bio: 'Photographer & traveller 📷' },
+  { name: 'Noah Reed', username: 'noah', email: 'noah@chatkonect.app', bio: 'Runner. Reader. Realist.' },
+  { name: 'Sofia Diaz', username: 'sofia', email: 'sofia@chatkonect.app', bio: 'Music is life 🎧' },
+  { name: 'Admin', username: 'admin', email: 'admin@chatkonect.app', bio: 'ChatKonect operations', role: 'admin' },
 ];
 
 async function run() {

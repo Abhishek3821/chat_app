@@ -58,7 +58,7 @@ export default defineConfig({
     },
   },
   server: {
-    // Unique, fixed port so ChatConnect never silently drifts onto another
+    // Unique, fixed port so ChatKonect never silently drifts onto another
     // project's dev server. strictPort makes a clash fail loudly instead.
     port: 5290,
     strictPort: true,

@@ -1,16 +1,16 @@
 import mongoose from 'mongoose';
 
 /**
- * An "App" is a TENANT — one third-party SaaS product embedding ChatConnect.
+ * An "App" is a TENANT — one third-party SaaS product embedding ChatKonect.
  *
  * Why this exists rather than reusing Workspace or ApiKey:
- *   • Workspace is an in-product concept (a team of ChatConnect users, with a
+ *   • Workspace is an in-product concept (a team of ChatKonect users, with a
  *     business profile and auto-replies). A tenant is the opposite direction —
  *     an outside product whose OWN users live here, isolated from ours.
  *   • ApiKey is owned by a `User`, so a key can never reach data its owner
  *     couldn't. That's exactly right for personal automation and exactly wrong
  *     for an embedding product, whose key must act for thousands of end users
- *     that no single ChatConnect user owns.
+ *     that no single ChatKonect user owns.
  *
  * Trust model, mirroring Stream/Sendbird/CometChat:
  *   appId      public. Safe in a frontend bundle. Identifies the tenant.
@@ -57,7 +57,7 @@ const appSchema = new mongoose.Schema(
     secretPrefix: { type: String, required: true },
     secretRotatedAt: { type: Date },
 
-    // The ChatConnect account that administers this tenant.
+    // The ChatKonect account that administers this tenant.
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
     features: {

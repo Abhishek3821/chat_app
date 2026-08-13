@@ -53,7 +53,7 @@ function sendMeetingInvites({ meeting, hostName, emails }) {
   const tz = meeting.timezone || 'UTC';
   const html = `
     <div style="font-family:'Segoe UI',sans-serif;max-width:480px;margin:auto;background:#0f172a;color:#e2e8f0;border-radius:16px;overflow:hidden">
-      <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4);padding:24px"><h1 style="margin:0;color:#fff;font-size:20px">ChatConnect Meeting</h1></div>
+      <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4);padding:24px"><h1 style="margin:0;color:#fff;font-size:20px">ChatKonect Meeting</h1></div>
       <div style="padding:24px">
         <p><strong>${hostName || 'Someone'}</strong> invited you to a ${meeting.type || 'video'} meeting.</p>
         <p style="font-size:18px;font-weight:700;margin:6px 0">${meeting.title}</p>

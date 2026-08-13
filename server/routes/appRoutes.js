@@ -10,7 +10,7 @@ import {
 } from '../controllers/platformController.js';
 
 /**
- * Tenant ("App") management for the ChatConnect admin console — session
+ * Tenant ("App") management for the ChatKonect admin console — session
  * authenticated. Every handler scopes to apps the caller OWNS, except for
  * platform admins (role === 'admin'), who see all of them.
  *

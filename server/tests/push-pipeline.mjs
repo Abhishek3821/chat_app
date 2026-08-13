@@ -78,7 +78,7 @@ async function startServer() {
       CLIENT_URL: 'http://localhost:5290',
       VAPID_PUBLIC_KEY: vapid.publicKey,
       VAPID_PRIVATE_KEY: vapid.privateKey,
-      VAPID_SUBJECT: 'mailto:test@chatconnect.local',
+      VAPID_SUBJECT: 'mailto:test@chatkonect.local',
       REDIS_URL: '', // force inline queue so notifications land synchronously-ish
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -104,7 +104,7 @@ async function cleanupAndExit(code) {
 }
 
 async function main() {
-  console.log('\nChatConnect push-pipeline check — isolated DB\n');
+  console.log('\nChatKonect push-pipeline check — isolated DB\n');
   if (TEST_URI.includes('+srv')) { try { dns.setServers(['8.8.8.8', '1.1.1.1']); } catch { /* noop */ } }
   await mongoose.connect(TEST_URI, { serverSelectionTimeoutMS: 20000 });
   await mongoose.connection.dropDatabase();
@@ -113,8 +113,8 @@ async function main() {
   console.log('Server is up. Running tests…\n');
 
   // ── users ──
-  const A = { name: 'Push A', email: 'push.a@chatconnect.app', password: 'PasswordA1!', phone: '+15552220001' };
-  const B = { name: 'Push B', email: 'push.b@chatconnect.app', password: 'PasswordB1!', phone: '+15552220002' };
+  const A = { name: 'Push A', email: 'push.a@chatkonect.app', password: 'PasswordA1!', phone: '+15552220001' };
+  const B = { name: 'Push B', email: 'push.b@chatkonect.app', password: 'PasswordB1!', phone: '+15552220002' };
   for (const u of [A, B]) {
     await http('POST', '/auth/signup', { body: { ...u, confirmPassword: u.password } });
     const r = await http('POST', '/auth/login', { body: { identifier: u.email, password: u.password } });

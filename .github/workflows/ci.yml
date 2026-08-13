@@ -77,6 +77,12 @@ jobs:
       - name: group membership, admins + who-can-add-me-to-groups (38 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/group-membership.mjs
+      - name: status posts + views are realtime (21 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/status-realtime.mjs
+      - name: single super admin auto-provisioned from .env (36 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/super-admin.mjs
       - name: meeting visibility + post-schedule invites (20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-visibility.mjs

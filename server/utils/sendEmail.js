@@ -142,17 +142,17 @@ export async function verifyEmailTransport() {
  */
 function fromHeader() {
   const raw = (process.env.EMAIL_FROM || '').trim().replace(/^"|"$/g, '');
-  const user = smtpEnv().user || 'no-reply@chatconnect.app';
+  const user = smtpEnv().user || 'no-reply@chatkonect.app';
   if (raw.includes('@')) return raw; // already a full address / "Name <addr>"
-  return `"${raw || 'ChatConnect'}" <${user}>`;
+  return `"${raw || 'ChatKonect'}" <${user}>`;
 }
 
 /** Parse fromHeader() into Brevo's { name, email } shape. */
 function fromParts() {
   const raw = fromHeader();
   const m = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
-  if (m) return { name: m[1].trim() || 'ChatConnect', email: m[2].trim() };
-  return { name: 'ChatConnect', email: raw.trim() };
+  if (m) return { name: m[1].trim() || 'ChatKonect', email: m[2].trim() };
+  return { name: 'ChatKonect', email: raw.trim() };
 }
 
 /** Send through Brevo's HTTPS API (works where SMTP ports are blocked). */
@@ -250,7 +250,7 @@ export function otpEmailTemplate(name, otp) {
   return `
   <div style="font-family:'Segoe UI',sans-serif;max-width:480px;margin:auto;background:#0f172a;color:#e2e8f0;border-radius:16px;overflow:hidden">
     <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6,#06b6d4);padding:28px 24px">
-      <h1 style="margin:0;color:#fff;font-size:22px">ChatConnect</h1>
+      <h1 style="margin:0;color:#fff;font-size:22px">ChatKonect</h1>
     </div>
     <div style="padding:28px 24px">
       <p>Hi ${name || 'there'},</p>

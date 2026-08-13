@@ -1,13 +1,13 @@
 # JWT Authentication Flow
 
-How ChatConnect authenticates browsers, sockets and third-party integrations.
+How ChatKonect authenticates browsers, sockets and third-party integrations.
 
 **Related:** [API.md](API.md) (endpoint reference) · [ENVIRONMENT.md](ENVIRONMENT.md) (`JWT_*` vars) ·
 [SOCKET_EVENTS.md](SOCKET_EVENTS.md) (handshake) · [DATABASE_MODELS.md](DATABASE_MODELS.md#session)
 
 ## 1.1 Overview
 
-ChatConnect uses a **stateful-JWT hybrid**: short-lived HS256 access tokens that carry a session id (`sid`), backed by a `Session` collection holding an opaque, SHA-256-hashed, rotating refresh token. Every protected request re-validates the session row, so logout / device revocation / bans take effect **immediately** rather than at token expiry.
+ChatKonect uses a **stateful-JWT hybrid**: short-lived HS256 access tokens that carry a session id (`sid`), backed by a `Session` collection holding an opaque, SHA-256-hashed, rotating refresh token. Every protected request re-validates the session row, so logout / device revocation / bans take effect **immediately** rather than at token expiry.
 
 Key sources:
 - `D:\office\Office Projects\whatapp clone\server\utils\token.js` — signing/verification, cookie attribute policy

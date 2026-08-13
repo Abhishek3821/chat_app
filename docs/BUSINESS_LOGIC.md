@@ -983,10 +983,16 @@ flowchart LR
 `video`. Every status carries `expiresAt = now + 24h` and a TTL index deletes it exactly then;
 there is no separate expiry job.
 
-The response is sent first, then `notifyStatusAudience` fans out `status-updated {userId}` to
-every allowed contact. The payload is **only a hint, never content** — clients refetch the feed
-so all privacy rules are re-applied server-side. The client debounces that refetch by 500 ms, so
-posting five images triggers one reload.
+The response is sent first, then `notifyStatusAudience` fans out
+`status-updated {userId, statusId}` to every allowed contact. The payload is **only a hint, never
+content** — clients refetch the feed so all privacy rules are re-applied server-side. The client
+debounces that refetch by 400 ms, so posting five images triggers one reload.
+
+That nudge is **fire-and-forget**: it is not queued, replayed or acknowledged. Anything emitted
+while a tab is disconnected (sleep, wifi blip, server restart) is gone. So the client also reloads
+the feed on socket **reconnect**, next to `useChat.resync()` — without that, a missed nudge left the
+feed stale until the user manually refreshed, which is exactly what "I only see it after a refresh"
+looks like.
 
 ### 8.2 The four audiences, and exactly how the audience is computed
 
@@ -1020,7 +1026,14 @@ contact, matching the API exactly.
 ### 8.3 Viewers and replies
 
 - `POST /api/status/:id/view` — audience-gated; appends `{user, at}` to `viewers` **once** (no
-  duplicate rows on re-view).
+  duplicate rows on re-view). **The owner is never recorded as a viewer of their own status**, and
+  on a genuinely new view the owner receives socket
+  `status-viewed {statusId, viewer, at, viewerCount}`, which the client patches straight into the
+  item. Two bugs used to live here: nothing was emitted at all (so the count only moved on reload),
+  and a poster opening their own story counted themselves, so the count read 1 before anyone had
+  looked. The response returns `{counted, viewerCount}` so a caller can tell the two cases apart.
+- Views are recorded **per item, as the story advances** — the viewer used to fire a view for every
+  item the moment the story opened, so a 5-item story scored 5 views from someone who saw one.
 - `GET /api/status/:id/viewers` — **owner only** (403 otherwise).
 - In the feed, `viewers` **and** `replies` are stripped from every status that is not mine. Only
   the owner ever learns who watched or who replied.
@@ -1118,7 +1131,7 @@ viewing that chat, even if the tab is focused** — that is what makes an open-b
 noticeable, while the OS toast stays suppressed.
 
 **Unread badges.** `initUnreadBadge()` subscribes to the chat store for the page's lifetime and
-mirrors the total unread count into the tab title (`(3) ChatConnect …`) and the OS/taskbar app
+mirrors the total unread count into the tab title (`(3) ChatKonect …`) and the OS/taskbar app
 badge (`navigator.setAppBadge`) — subscribed globally rather than from a component so it stays
 correct on routes outside the app shell such as `/meet/:code`.
 
@@ -1414,7 +1427,7 @@ Both status changes and report updates write `securityEvent` audit lines. `prote
 
 ### 12.4 Data export
 
-`GET /api/users/me/export` streams a JSON attachment (`chatconnect-export.json`) containing the
+`GET /api/users/me/export` streams a JSON attachment (`chatkonect-export.json`) containing the
 profile, contacts (name/username/email), the chat list (id, type, name, createdAt), **only the
 caller's own messages** (chat id, type, content, timestamp) and summary counts. Restricting it to
 own messages is deliberate: the export cannot be used to exfiltrate a conversation partner's
@@ -1535,7 +1548,7 @@ requesting browser still skips re-downloading on scrollback.
 Unset (or invalid) → `pushEnabled()` is false, `GET /api/push/key` reports `enabled: false`, and
 `sendPushToUser` returns 0 without touching the DB. Everything else — the bell, socket delivery,
 OS notifications for a live tab — works unchanged. Set → closed apps and locked screens can be
-woken. `VAPID_SUBJECT` defaults to `mailto:support@chatconnect.app`.
+woken. `VAPID_SUBJECT` defaults to `mailto:support@chatkonect.app`.
 
 ### 14.4 `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`
 

@@ -74,7 +74,7 @@ export default function JoinInvite({ kind }) {
             <h1 className="font-display text-lg font-bold text-content">Invite didn&apos;t work</h1>
             <p className="mt-1.5 break-words text-sm text-content-muted">{error}</p>
             <Button as={Link} to="/" variant="primary" className="mt-5 w-full justify-center">
-              Go to ChatConnect
+              Go to ChatKonect
             </Button>
           </>
         ) : (

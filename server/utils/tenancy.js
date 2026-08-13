@@ -2,7 +2,7 @@
  * Cross-tenant isolation for the embeddable platform.
  *
  * Every end user provisioned through /v1/platform belongs to exactly one App
- * (tenant). Two customers embedding ChatConnect must be unable to see, search,
+ * (tenant). Two customers embedding ChatKonect must be unable to see, search,
  * add or message each other's users — and neither must be able to reach OUR
  * first-party accounts, or be reachable by them.
  *
@@ -16,7 +16,7 @@
 /**
  * Mongo filter restricting a query to the caller's own tenant.
  *
- * First-party ChatConnect accounts have `app: null`, and `{ app: null }` also
+ * First-party ChatKonect accounts have `app: null`, and `{ app: null }` also
  * matches documents where the field is absent — which is what every account
  * created before tenancy existed looks like. So this is correct for legacy rows
  * with no migration, and the isolation is bidirectional: our users don't see

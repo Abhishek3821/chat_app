@@ -131,7 +131,7 @@ export default function MobileNav() {
 
       {/* Modal is already a bottom sheet on phones — it brings the backdrop,
           Escape handling, scroll lock and home-indicator padding with it. */}
-      <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title="More" subtitle="Everything else in ChatConnect" size="sm">
+      <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title="More" subtitle="Everything else in ChatKonect" size="sm">
         <div className="space-y-1.5 pb-2">
           {more.map(({ to, icon: Icon, label, hint }) => {
             const active = pathname === to || pathname.startsWith(`${to}/`);

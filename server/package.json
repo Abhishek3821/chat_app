@@ -1,8 +1,8 @@
 {
-  "name": "chatconnect-server",
+  "name": "chatkonect-server",
   "version": "1.0.0",
   "private": true,
-  "description": "ChatConnect backend — Express + MongoDB + Socket.IO + JWT.",
+  "description": "ChatKonect backend — Express + MongoDB + Socket.IO + JWT.",
   "type": "module",
   "main": "server.js",
   "scripts": {

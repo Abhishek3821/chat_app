@@ -48,7 +48,7 @@ export function AuthShowcase({
       feel <span className="text-cyan-300">effortless</span>.
     </>
   ),
-  sub = 'ChatConnect brings your people, calls, and moments together in one beautifully fast space.',
+  sub = 'ChatKonect brings your people, calls, and moments together in one beautifully fast space.',
   features = [
     { icon: ShieldCheck, title: 'Encrypted in transit', desc: 'Secured with TLS on every connection.' },
     { icon: Zap, title: 'Lightning quick', desc: 'Realtime delivery with zero lag.' },
@@ -142,7 +142,7 @@ export function AuthShowcase({
         </motion.div>
 
         {/* /50 lands at ~3.3:1 on the teal panel — too low for 12px copy. */}
-        <p className="text-xs text-white/70">© {new Date().getFullYear()} ChatConnect. Crafted for real connection.</p>
+        <p className="text-xs text-white/70">© {new Date().getFullYear()} ChatKonect. Crafted for real connection.</p>
       </div>
     </div>
   );
@@ -193,7 +193,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login({ identifier: form.email.trim(), password: form.password });
-      toast.success('Welcome back to ChatConnect!');
+      toast.success('Welcome back to ChatKonect!');
       navigate('/');
     } catch (err) {
       const msg = err?.message || 'Could not sign you in. Please try again.';
@@ -310,7 +310,7 @@ export default function Login() {
         )}
 
         <motion.p variants={rise} className="mt-6 text-center text-sm text-content-muted">
-          New to ChatConnect?{' '}
+          New to ChatKonect?{' '}
           <Link to="/signup" className="font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300">
             Create an account
           </Link>

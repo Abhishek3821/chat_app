@@ -1,6 +1,6 @@
 # Architecture Review
 
-A staff-level review of the ChatConnect backend: current topology, ranked findings, a
+A staff-level review of the ChatKonect backend: current topology, ranked findings, a
 decomposition plan, queue design, and fault-tolerance work — with the thresholds that should
 *trigger* each step rather than a blanket "do all of this".
 

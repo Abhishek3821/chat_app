@@ -3,7 +3,7 @@
  *
  * Three surfaces, one source of truth:
  *   - an OS notification per chat (replaced in place as more messages arrive),
- *   - the tab title prefix "(3) ChatConnect …",
+ *   - the tab title prefix "(3) ChatKonect …",
  *   - the OS/taskbar app badge where supported (installed PWA).
  *
  * Everything here is best-effort — a browser that blocks or lacks notifications
@@ -12,7 +12,7 @@
 import { useAuth } from '../store/useAuth';
 import { useChat } from '../store/useChat';
 
-const BASE_TITLE = 'ChatConnect — Talk, meet & connect';
+const BASE_TITLE = 'ChatKonect — Talk, meet & connect';
 
 function notificationsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window;

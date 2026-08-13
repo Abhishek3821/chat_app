@@ -34,7 +34,7 @@ router.get('/health', (req, res) => {
   const dbUp = mongoose.connection.readyState === 1; // 1 = connected
   res.status(dbUp ? 200 : 503).json({
     success: dbUp,
-    service: 'ChatConnect API',
+    service: 'ChatKonect API',
     db: dbUp ? 'connected' : 'disconnected',
     email: isEmailConfigured() ? 'configured' : 'not_configured',
     time: new Date(),

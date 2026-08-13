@@ -1,9 +1,9 @@
-# Render blueprint for the ChatConnect backend.
+# Render blueprint for the ChatKonect backend.
 # In Render: New → Blueprint → point at this repo. Set the "sync: false" vars
 # (MONGO_URI, CLIENT_URL) in the dashboard after the first deploy.
 services:
   - type: web
-    name: chatconnect-api
+    name: chatkonect-api
     runtime: node
     rootDir: server
     # NOTE: "free" instances SLEEP after ~15 min idle (≈50 s cold start) and drop
@@ -30,7 +30,7 @@ services:
       - key: MONGO_URI
         sync: false # set in dashboard (MongoDB Atlas SRV string incl. /chatconnect)
       - key: CLIENT_URL
-        sync: false # set to your deployed frontend origin, e.g. https://chatconnect.vercel.app
+        sync: false # set to your deployed frontend origin, e.g. https://chatkonect.vercel.app
       # ── Media storage ──────────────────────────────────────────
       # REQUIRED for production: Render's disk is EPHEMERAL — locally stored
       # avatars/attachments/status media are wiped on every deploy or restart.
@@ -76,7 +76,7 @@ services:
       # Display name only is fine — the code binds it to the authenticated
       # mailbox (relays reject a From that isn't on the account's domain).
       - key: EMAIL_FROM
-        value: ChatConnect
+        value: ChatKonect
       # Web Push (VAPID) — notifications when the app is closed.
       - key: VAPID_PUBLIC_KEY
         sync: false

@@ -195,7 +195,7 @@ export const useAuth = create((set, get) => ({
     const url = URL.createObjectURL(new Blob([res.data], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'chatconnect-export.json';
+    a.download = 'chatkonect-export.json';
     document.body.appendChild(a);
     a.click();
     a.remove();

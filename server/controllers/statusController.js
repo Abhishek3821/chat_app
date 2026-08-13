@@ -18,17 +18,21 @@ const USER_FIELDS = 'name username avatar';
 /**
  * Realtime fan-out: tell every contact allowed by this status's audience that
  * the owner's status list changed, so their Status feed updates live instead of
- * on next refresh. Payload is just a hint (no content) — clients refetch the
- * feed, which re-applies all privacy rules server-side.
+ * on next refresh.
+ *
+ * The payload is a HINT, not content: `statusId` (posted) or `removedId`
+ * (deleted). Clients refetch the feed off it, which re-applies every privacy
+ * rule server-side — shipping the status body here would mean re-implementing
+ * the audience logic on the client and getting it wrong.
  */
-async function notifyStatusAudience(status, ownerId) {
+async function notifyStatusAudience(status, ownerId, extra = {}) {
   try {
     const owner = await User.findById(ownerId).select('contacts');
     const p = status?.privacy || {};
     let targets = (owner?.contacts || []).map((c) => String(c));
     if (p.type === 'selected') targets = targets.filter((id) => (p.allow || []).some((a) => String(a) === id));
     else if (p.type === 'except') targets = targets.filter((id) => !(p.except || []).some((e) => String(e) === id));
-    for (const t of targets) emitToUser(t, 'status-updated', { userId: String(ownerId) });
+    for (const t of targets) emitToUser(t, 'status-updated', { userId: String(ownerId), ...extra });
   } catch {
     /* fan-out is best-effort */
   }
@@ -64,7 +68,8 @@ export const createStatus = asyncHandler(async (req, res) => {
     background,
     privacy: privacy || undefined,
   });
-  notifyStatusAudience(status, req.user._id); // live update for contacts (no await — response first)
+  // Live update for contacts (no await — answer the poster first).
+  notifyStatusAudience(status, req.user._id, { statusId: String(status._id) });
   res.status(201).json({ success: true, status });
 });
 
@@ -112,11 +117,35 @@ export const viewStatus = asyncHandler(async (req, res) => {
   const status = await Status.findById(req.params.id);
   if (!status) throw new ApiError(404, 'Status not found.');
   await assertAudience(status, req.user._id);
-  if (!status.viewers.some((v) => String(v.user) === String(req.user._id))) {
-    status.viewers.push({ user: req.user._id, at: new Date() });
-    await status.save();
-  }
-  res.json({ success: true });
+
+  /* Opening your own story is not a view. Nothing excluded the owner here, and
+     the status viewer marks every item seen on open — so a poster checking their
+     own status added themselves to their own viewer list and the count read 1
+     before anyone else had looked. */
+  const isOwner = String(status.user) === String(req.user._id);
+  const alreadyViewed = status.viewers.some((v) => String(v.user) === String(req.user._id));
+  if (isOwner || alreadyViewed) return res.json({ success: true, counted: false, viewerCount: status.viewers.length });
+
+  const at = new Date();
+  status.viewers.push({ user: req.user._id, at });
+  await status.save();
+
+  /* Tell the owner live. Without this the view count and the viewer list only
+     moved when the owner reloaded — the second half of the reported bug. Sent
+     only on a NEW view, so re-opening a story doesn't re-notify. */
+  emitToUser(String(status.user), 'status-viewed', {
+    statusId: String(status._id),
+    viewer: {
+      _id: String(req.user._id),
+      name: req.user.name,
+      username: req.user.username,
+      avatar: req.user.avatar || '',
+    },
+    at,
+    viewerCount: status.viewers.length,
+  });
+
+  res.json({ success: true, counted: true, viewerCount: status.viewers.length });
 });
 
 // POST /api/status/:id/reply  { text }
@@ -144,6 +173,8 @@ export const deleteStatus = asyncHandler(async (req, res) => {
   if (!status) throw new ApiError(404, 'Status not found.');
   if (String(status.user) !== String(req.user._id)) throw new ApiError(403, 'Not your status.');
   await status.deleteOne();
-  notifyStatusAudience(status, req.user._id); // contacts drop it from their feed live
+  // Contacts drop it from their feed live; `removedId` lets them do it without
+  // waiting for the refetch to come back.
+  notifyStatusAudience(status, req.user._id, { removedId: String(status._id) });
   res.json({ success: true });
 });
