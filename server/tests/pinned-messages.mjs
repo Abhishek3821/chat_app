@@ -36,7 +36,7 @@ if (!baseUri) {
 // 500 collections, and one database per suite (~20 collections each) is what
 // exhausted it. Both suites drop the database on entry and CI runs them in
 // sequence, so sharing is safe — just never run them concurrently.
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_feat$2');
+const TEST_URI = baseUri.replace(/\/([^/?]*)(\?|$)/, '/chatconnect_t_feat$2');
 if (TEST_URI === baseUri) {
   console.error('Refusing to run: could not derive an isolated test database name.');
   process.exit(1);

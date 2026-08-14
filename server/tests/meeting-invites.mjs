@@ -16,7 +16,7 @@ dotenv.config({ path: path.join(SERVER_DIR, '.env') });
 
 const PORT = 5127;
 const API = `http://127.0.0.1:${PORT}/api`;
-const TEST_URI = (process.env.MONGO_URI || '').replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_invites$2');
+const TEST_URI = (process.env.MONGO_URI || '').replace(/\/([^/?]*)(\?|$)/, '/chatconnect_t_invites$2');
 
 const results = [];
 const check = (n, c, d = '') => {

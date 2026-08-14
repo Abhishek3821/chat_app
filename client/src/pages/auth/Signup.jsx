@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -76,6 +76,12 @@ function fileToAvatarDataUrl(file, size = 384) {
 
 export default function Signup() {
   const navigate = useNavigate();
+  // Same deal as Login: resume the invite/meeting link they arrived on, and
+  // only ever a same-origin path (never an absolute URL from a crafted link).
+  const location = useLocation();
+  const fromState = location.state?.from;
+  const redirectAfterAuth =
+    typeof fromState === 'string' && fromState.startsWith('/') && !fromState.startsWith('//') ? fromState : '/';
   const { signup, sendEmailCode, verifyEmailCode, loading } = useAuth();
   const [params] = useSearchParams();
   const inviteCode = (params.get('invite') || '').trim();
@@ -194,7 +200,7 @@ export default function Signup() {
         ...(avatar ? { avatar } : {}),
       });
       toast.success('Your ChatKonect account is ready!');
-      navigate('/');
+      navigate(redirectAfterAuth, { replace: true });
     } catch (err) {
       toast.error(err?.message || 'Could not create your account. Please try again.');
     } finally {
@@ -519,7 +525,7 @@ export default function Signup() {
 
         <motion.p variants={rise} className="mt-4 text-center text-sm text-content-muted">
           Already have an account?{' '}
-          <Link to="/login" className="font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300">
+          <Link to="/login" state={{ from: redirectAfterAuth }} className="font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300">
             Sign in
           </Link>
         </motion.p>

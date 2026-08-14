@@ -33,7 +33,7 @@ if (!baseUri) {
   console.error('MONGO_URI missing in server/.env — cannot run tests.');
   process.exit(1);
 }
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_feat$2');
+const TEST_URI = baseUri.replace(/\/([^/?]*)(\?|$)/, '/chatconnect_t_feat$2');
 if (TEST_URI === baseUri) {
   console.error('Refusing to run: could not derive an isolated test database name.');
   process.exit(1);

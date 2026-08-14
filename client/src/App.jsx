@@ -64,10 +64,15 @@ function ToastLimiter() {
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   // Two-step verification: gate the app behind a PIN once per browser session.
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('cc_unlocked') === '1');
   if (loading) return <SplashScreen />;
-  if (!user) return <Navigate to="/login" replace />;
+  /* Carry where they were headed. Bouncing to a bare /login threw the
+     destination away, which is what made a scanned QR do nothing on a phone
+     that wasn't signed in: you'd log in and land on the chat list with the
+     invite silently dropped. Login and Signup both return here afterwards. */
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   if (user.twoStepEnabled && !unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />;
   return children;
 }

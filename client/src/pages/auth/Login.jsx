@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -179,6 +179,13 @@ export function MobileBrand() {
 
 export default function Login() {
   const navigate = useNavigate();
+  /* Where to go once signed in. ProtectedRoute stashes the path the user was
+     actually trying to reach (a scanned invite, a meeting link) in location
+     state; only same-origin paths are honoured so this can't be used as an
+     open redirect via a crafted link. */
+  const location = useLocation();
+  const from = location.state?.from;
+  const redirectAfterAuth = typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/';
   const { login, loading } = useAuth();
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -194,7 +201,9 @@ export default function Login() {
     try {
       await login({ identifier: form.email.trim(), password: form.password });
       toast.success('Welcome back to ChatKonect!');
-      navigate('/');
+      // Resume whatever they were opening before being asked to sign in —
+      // typically a scanned /invite/... link. ProtectedRoute puts it here.
+      navigate(redirectAfterAuth, { replace: true });
     } catch (err) {
       const msg = err?.message || 'Could not sign you in. Please try again.';
       // Unverified account → send them to the email-verification screen.
@@ -311,7 +320,9 @@ export default function Login() {
 
         <motion.p variants={rise} className="mt-6 text-center text-sm text-content-muted">
           New to ChatKonect?{' '}
-          <Link to="/signup" className="font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300">
+          {/* Carry the pending destination across, so scanning a QR on a phone
+              with no account still lands on the invite after signing up. */}
+          <Link to="/signup" state={{ from: redirectAfterAuth }} className="font-semibold text-brand-600 transition-colors hover:text-brand-500 dark:text-brand-300">
             Create an account
           </Link>
         </motion.p>

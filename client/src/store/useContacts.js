@@ -66,8 +66,13 @@ export const useContacts = create((set, get) => ({
       );
       return;
     }
-    await api.post(`/contacts/request/${userId}`, { message });
+    /* Returns the server payload. `autoAccepted: true` means they had already
+       requested ME, so the two of us are connected as of right now — callers
+       (the QR invite page) need that to open the chat instead of saying
+       "request sent" for a connection that already exists. */
+    const { data } = await api.post(`/contacts/request/${userId}`, { message });
     await get().load();
+    return data;
   },
 
   respond: async (requestId, action) => {

@@ -36,7 +36,7 @@ if (!baseUri) { console.error('MONGO_URI missing in server/.env'); process.exit(
 // "cannot create a new collection". KEEP_TEST_DB=1 then skips the teardown drop.
 const TEST_DB = process.env.REALTIME_TEST_DB || 'chatconnect_t_realtime';
 const KEEP_DB = process.env.KEEP_TEST_DB === '1';
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, `/${TEST_DB}$2`);
+const TEST_URI = baseUri.replace(/\/([^/?]*)(\?|$)/, `/${TEST_DB}$2`);
 if (TEST_URI === baseUri) { console.error('Could not derive an isolated test DB.'); process.exit(1); }
 
 const results = [];

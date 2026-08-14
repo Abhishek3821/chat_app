@@ -20,7 +20,7 @@ const API = `${BASE}/api`;
 
 const baseUri = process.env.MONGO_URI || '';
 if (!baseUri) { console.error('MONGO_URI missing'); process.exit(1); }
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, '/chatconnect_t_upload$2');
+const TEST_URI = baseUri.replace(/\/([^/?]*)(\?|$)/, '/chatconnect_t_upload$2');
 
 const results = [];
 const check = (name, cond, detail = '') => {

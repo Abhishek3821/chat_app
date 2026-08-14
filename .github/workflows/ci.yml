@@ -71,6 +71,16 @@ jobs:
       - name: upload-validation suite (11 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/upload-validation.mjs
+      - name: chat real-time (edit/delete/react/pin/poll/settings, 26 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/chat-realtime.mjs
+      - name: meeting-room real-time (join/chat/hand/reaction/host controls, 12 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-room-realtime.mjs
+      # Reports which server→client events have NO socket-level proof. Advisory:
+      # some events are timer- or third-party-driven and cannot be driven by a test.
+      - name: real-time coverage report
+        run: node tests/realtime-coverage.mjs || true
       - name: privacy settings save AND are enforced (23 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/privacy-settings.mjs
@@ -80,6 +90,9 @@ jobs:
       - name: status posts + views are realtime (21 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/status-realtime.mjs
+      - name: personal QR invite resolves + connects strangers (11 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/qr-invite.mjs
       - name: single super admin auto-provisioned from .env (36 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/super-admin.mjs

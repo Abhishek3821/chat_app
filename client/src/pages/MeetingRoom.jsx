@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2 } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
@@ -192,6 +192,25 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   const reactionsForRemote = (sid) => reactions.filter((r) => r.socketId === sid);
   const myReactions = reactions.filter((r) => r.socketId === 'me');
 
+  /* True fullscreen (F11-style), on the room element rather than the document,
+     so the chat drawer and knock prompts — which are positioned against the room
+     — come along instead of being left behind on the page underneath.
+     `fullscreenchange` is the source of truth for the icon: the user can also
+     leave with Escape, and tracking our own clicks would desync on that. */
+  const roomRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    // Safari <16.4 and some embedded webviews have no requestFullscreen; failing
+    // silently is right — the room is already full-viewport without it.
+    else roomRef.current?.requestFullscreen?.().catch(() => {});
+  };
+
   useEffect(() => { if (status === 'left') onLeave(); }, [status, onLeave]);
   useEffect(() => { if (showChat) { setSeenChatCount(chatMessages.length); chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } }, [chatMessages, showChat]);
   const unreadChat = Math.max(0, chatMessages.length - seenChatCount);
@@ -268,7 +287,19 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   // so a tile fills its cell rather than dictating its own height — that is what
   // keeps every participant on one screen. Portrait keeps a 3:4 shape, derived from
   // the cell's height so it still cannot overflow.
-  const tileAspect = portrait ? 'h-full w-auto aspect-[3/4] max-w-full' : 'h-full w-full';
+  /* Landscape tiles keep a 16:9 SHAPE and are centred in their cell, rather than
+     stretching to whatever shape the cell happens to be. Stretching is what made
+     a solo call look broken on a wide monitor: one tile inherited the whole
+     stage (~3:1), and `object-cover` then cropped a 16:9 camera feed to that —
+     roughly a fifth off the top and bottom, which lands squarely on the
+     speaker's head. Same rule the portrait option already used. */
+  const tileAspect = portrait
+    ? 'h-full w-auto aspect-[3/4] max-w-full'
+    // Which axis leads flips with the shape of the cell: on a phone the cell is
+    // taller than 16:9, so width leads and the tile is centred vertically; from
+    // sm: up it is wider, so height leads and the tile is centred horizontally.
+    // Picking one axis for both squashes the other case back into a hard crop.
+    : 'aspect-video w-full h-auto max-h-full sm:h-full sm:w-auto sm:max-w-full';
 
   // Spotlight: whoever is presenting a screen (you or a remote peer) fills the
   // stage (object-contain so nothing is cropped) with everyone else in a strip.
@@ -281,7 +312,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   return (
     // `relative` anchors the absolutely-positioned knock prompts + chat drawer
     // to the room rather than to the page's initial containing block.
-    <div className="relative flex h-[100dvh] flex-col bg-navy-950 text-white">
+    <div ref={roomRef} className="relative flex h-[100dvh] flex-col bg-navy-950 text-white">
       {/* Host admission prompts — someone knocked and wants to join (Google-Meet style). */}
       {isHost && knocks.length > 0 && (
         <div className="absolute left-1/2 top-16 z-40 flex w-[min(92vw,380px)] -translate-x-1/2 flex-col gap-2">
@@ -329,6 +360,14 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           {isHost && (
             <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> <span className="hidden sm:inline">Mute all</span></Button>
           )}
+          <button
+            onClick={toggleFullscreen}
+            className="grid h-11 w-11 place-items-center rounded-xl bg-white/10 text-white transition-colors hover:bg-white/20 sm:h-9 sm:w-9"
+            title={isFullscreen ? 'Exit full screen' : 'Full screen'}
+            aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+          >
+            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+          </button>
           <button onClick={() => setShowChat((v) => !v)} className={cn('relative grid h-11 w-11 place-items-center rounded-xl transition-colors sm:h-9 sm:w-9', showChat ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20')} title="Meeting chat">
             <MessageSquare size={18} />
             {unreadChat > 0 && !showChat && <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white">{unreadChat}</span>}
@@ -402,7 +441,8 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
             filmstrip), so the grid path clips instead. */}
         <div
           className={cn(
-            'min-h-0 min-w-0 flex-1 flex flex-col px-2 sm:px-4',
+            // `relative` anchors the solo-call hint pill to the stage.
+            'relative min-h-0 min-w-0 flex-1 flex flex-col px-2 sm:px-4',
             presenting && presenterStream ? 'scrollbar-thin overflow-y-auto' : 'overflow-hidden'
           )}
         >
@@ -421,7 +461,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
             </div>
           </div>
         ) : (
-          <div className={cn('grid min-h-0 flex-1 auto-rows-fr gap-2 py-1 sm:gap-3', cols, portrait && 'place-items-center')}>
+          /* place-items-center always, not just for portrait: tiles now size to
+             their own aspect ratio, so without it they'd sit hard against the
+             start of the cell instead of being centred in the leftover space. */
+          <div className={cn('grid min-h-0 flex-1 auto-rows-fr place-items-center gap-2 py-1 sm:gap-3', cols)}>
             <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`} handRaised={handRaised} reactions={myReactions} className={tileAspect} />
             {remotes.map((r) => (
               <VideoTile
@@ -439,12 +482,16 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
           </div>
         )}
         {remotes.length === 0 && !presenting && (
-          // shrink-0 so this line takes its own height from the flex column
-          // instead of being added on top of a full-height grid (which would
-          // overflow the stage and reintroduce scrolling).
-          <p className="shrink-0 py-2 text-center text-sm text-white/50">
-            {status === 'connecting' ? 'Connecting…' : 'You’re the only one here. Share the meeting ID or link to invite others.'}
-          </p>
+          /* An OVERLAY pill rather than a row in the flex column. As a row it
+             took a slice of the stage's height for a hint you read once, which
+             on a laptop is the difference between the tile filling the screen
+             and being visibly short of it. pointer-events-none so it can never
+             swallow a click meant for the tile beneath. */
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-4">
+            <p className="max-w-full truncate rounded-full bg-navy-950/70 px-3.5 py-1.5 text-xs text-white/70 shadow-soft backdrop-blur-md sm:text-sm">
+              {status === 'connecting' ? 'Connecting…' : 'You’re the only one here — share the meeting ID or link to invite others.'}
+            </p>
+          </div>
         )}
         </div>
 

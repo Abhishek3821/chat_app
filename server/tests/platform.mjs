@@ -26,7 +26,7 @@ const baseUri = process.env.MONGO_URI || '';
 if (!baseUri) { console.error('MONGO_URI missing in server/.env'); process.exit(1); }
 const TEST_DB = process.env.PLATFORM_TEST_DB || 'chatconnect_t_platform';
 const KEEP_DB = process.env.KEEP_TEST_DB === '1';
-const TEST_URI = baseUri.replace(/\/(chatconnect)(\?|$)/, `/${TEST_DB}$2`);
+const TEST_URI = baseUri.replace(/\/([^/?]*)(\?|$)/, `/${TEST_DB}$2`);
 if (TEST_URI === baseUri) { console.error('Could not derive an isolated test DB.'); process.exit(1); }
 
 const results = [];
