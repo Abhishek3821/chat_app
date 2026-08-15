@@ -202,6 +202,14 @@ export function useSocket() {
       toast.success(`${by || 'Someone'} accepted your contact request`);
       useContacts.getState().load(); // the new contact appears instantly
     });
+    /* Someone unfriended me, or I unfriended them from another device. Removal is
+       mutual server-side, so both parties get this — drop the row locally rather
+       than refetching, and leave the chat history alone (it is not deleted). */
+    socket.on('contact-removed', ({ userId: removedId, by }) => {
+      if (!removedId) return;
+      useContacts.getState().applyContactRemoved(removedId);
+      if (by) toast(`${by} removed you from their contacts`);
+    });
     // A contact posted/removed a status → refresh the Status feed live.
     // Debounced: a multi-image status post fires one refetch, not five.
     let statusRefetchTimer = null;
@@ -251,6 +259,23 @@ export function useSocket() {
     socket.on('message-deleted', ({ chatId, messageId, scope }) => useChat.getState().applyDeletedMessage(chatId, messageId, scope || 'everyone'));
     socket.on('message-reaction', ({ chatId, messageId, reactions }) => useChat.getState().applyReaction(chatId, messageId, reactions));
 
+    /* Presence heartbeat.
+       The server treats "online" as "heartbeat within the last 5 minutes", not
+       "a socket is attached" — a socket survives a backgrounded tab, a sleeping
+       laptop and a dropped network, which is how everyone ended up permanently
+       online. So ping only while this tab is actually VISIBLE, and stop the
+       moment it isn't; the server's sweeper takes it from there.
+       Sent immediately on becoming visible so coming back is instant rather
+       than up to a minute late. */
+    const beat = () => {
+      if (document.visibilityState === 'visible' && socket.connected) socket.emit('presence:ping');
+    };
+    const heartbeat = setInterval(beat, 60_000);
+    const onVisibility = () => beat();
+    document.addEventListener('visibilitychange', onVisibility);
+    socket.on('connect', beat);
+    beat();
+
     // Live presence
     socket.on('presence-snapshot', ({ online }) => useChat.getState().setPresenceSnapshot(online));
     socket.on('user-online', ({ userId }) => useChat.getState().setUserOnline(userId));
@@ -294,6 +319,8 @@ export function useSocket() {
     return () => {
       clearTimeout(chatsRefetchTimer);
       clearTimeout(statusRefetchTimer);
+      clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', onVisibility);
       socket.disconnect();
       socketRef.current = null;
       window.__ccSocket = null;

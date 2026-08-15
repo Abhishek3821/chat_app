@@ -32,6 +32,7 @@ import { startRingtone, startRingback, stopRingtone } from '../lib/sounds';
  * http://localhost. Over a plain-http LAN IP the browser blocks it.
  */
 import { ICE_SERVERS } from '../lib/iceServers';
+import { applyMeshEncoding, retuneAll } from '../lib/meshQuality';
 
 // Browser DSP applied to the outgoing mic track. Toggled live via
 // track.applyConstraints() so "Noise cancellation" is a real control, not a stub.
@@ -70,6 +71,10 @@ export function useWebRTC(call) {
   const candBufRef = useRef(new Map()); // remoteId -> [RTCIceCandidate] buffered until remoteDescription
   const restartRef = useRef(new Map()); // remoteId -> ICE-restart attempt count
   const participantsRef = useRef(new Map()); // remoteId -> { _id, name, avatar }
+  /* Pairs already introduced (`idA~idB`, sorted). introduceAround now runs from
+     several places, and re-introducing an established pair would restart a
+     working handshake. */
+  const introducedRef = useRef(new Set());
   const invitedRef = useRef(new Set()); // remoteIds I rang myself (primary callee + people I added)
   const timersRef = useRef([]); // primary-call timers
   const legTimersRef = useRef(new Map()); // remoteId -> ring timeout for an added leg
@@ -159,6 +164,7 @@ export function useWebRTC(call) {
           /* noop */
         }
         peersRef.current.delete(key);
+        retuneAll(peersRef.current, peersRef.current.size); // room shrank — give quality back
       }
       candBufRef.current.delete(key);
       restartRef.current.delete(key);
@@ -331,6 +337,11 @@ export function useWebRTC(call) {
         }
       };
       peersRef.current.set(key, pc);
+      /* Group calls are mesh-only (no SFU path), so the upload cost per added
+         person is entirely on this device. Scale every leg down as the call
+         grows rather than pushing full-rate video to each one. */
+      applyMeshEncoding(pc, peersRef.current.size);
+      retuneAll(peersRef.current, peersRef.current.size);
       return pc;
     },
     [closePeer, teardown, upsertRemote, attemptIceRestart, peerId, emitSig]
@@ -603,7 +614,29 @@ export function useWebRTC(call) {
   useEffect(() => {
     const s = getSocket();
     if (!s) return undefined;
-    const mine = (cid) => !cid || cid === callIdRef.current;
+    /**
+     * Does this signal belong to my current call?
+     *
+     * Tolerant on purpose. `callIdRef` starts as a `local-…` placeholder and is
+     * replaced with the server id only on the OUTGOING path (after /calls/start).
+     * Anyone who never took that path — every callee, and anyone ADDED to a live
+     * call — can therefore still be holding the placeholder when a signal arrives.
+     * Comparing strictly then drops the signal, silently and permanently.
+     *
+     * Dropping a legitimate signal is far worse than accepting one: the visible
+     * result is a participant who can never see another participant. So a
+     * placeholder ADOPTS the first server id it is offered instead of rejecting it.
+     */
+    const mine = (cid) => {
+      if (!cid) return true;
+      const current = callIdRef.current;
+      if (cid === current) return true;
+      if (typeof current === 'string' && current.startsWith('local-')) {
+        callIdRef.current = String(cid); // adopt, don't reject
+        return true;
+      }
+      return false;
+    };
     const isPrimary = (id) => String(id) === String(peerId);
     const nameFor = (id) => participantsRef.current.get(String(id))?.name || call?.peer?.name || 'User';
 
@@ -635,10 +668,25 @@ export function useWebRTC(call) {
     // everyone sees everyone — not just me. (Group-chat calls already carry the
     // full roster, so they don't need introductions.)
     const introduceAround = (newId) => {
-      if (isGroupCall) return;
       const newcomer = participantsRef.current.get(newId) || { _id: newId };
-      participantsRef.current.forEach((user, id) => {
-        if (id === newId || id === myId) return;
+
+      /* Introduce to everyone I am ACTUALLY meshed with, plus everyone I know
+         about. Using participantsRef alone missed peers that only ever arrived
+         through a connection (an introduced member), and a group call was skipped
+         entirely on the assumption that "the roster covers it" — but a roster only
+         tells each person WHO is present, it never creates the B↔C leg. Every pair
+         needs its own introduction, group or not. */
+      const targets = new Set([...participantsRef.current.keys(), ...peersRef.current.keys()]);
+
+      targets.forEach((id) => {
+        if (!id || id === newId || id === myId) return;
+        /* Idempotent: this now runs from more than one place, and a duplicate
+           introduction would restart a working handshake. */
+        const pairKey = [id, newId].sort().join('~');
+        if (introducedRef.current.has(pairKey)) return;
+        introducedRef.current.add(pairKey);
+
+        const user = participantsRef.current.get(id) || { _id: id };
         emitSig('call:introduce', { to: id, peer: { _id: newId, name: newcomer.name, avatar: newcomer.avatar } });
         emitSig('call:introduce', { to: newId, peer: { _id: id, name: user.name, avatar: user.avatar } });
       });
@@ -650,12 +698,23 @@ export function useWebRTC(call) {
       const remote = String(from || peerId);
       if (!remote || peersRef.current.has(remote)) return;
 
-      if (isGroupCall) return meshConnect(remote);
+      /* A group call still needs every PAIR meshed — the roster tells each member
+         who is present, it does not create the legs between them. */
+      if (isGroupCall) {
+        introduceAround(remote);
+        return meshConnect(remote);
+      }
 
       // 1:1 / ad-hoc conference: if I rang this person (primary callee or someone
       // I added), I make the offer. A hello from anyone else is a mesh greeting
       // from an INTRODUCED member — use the deterministic pairwise handshake.
-      if (!invitedRef.current.has(remote)) return meshConnect(remote);
+      /* A greeting from someone I did not ring: still a participant I now know, so
+         vouch for them to the rest of the mesh. Without this, only the person who
+         did the ADDING ever introduced anyone. */
+      if (!invitedRef.current.has(remote)) {
+        introduceAround(remote);
+        return meshConnect(remote);
+      }
 
       try {
         if (statusRef.current !== 'connected') setStatus('connecting');

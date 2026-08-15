@@ -184,6 +184,56 @@ const waitFor = (socket, event, ms = 6000) =>
   const messageId = sent.data.message._id;
   check('a message can be sent', sent.status === 201, `${sent.status}`);
 
+  /* ── Unfriending ────────────────────────────────────────────────── */
+  section(`Unfriending (must be MUTUAL and live)`);
+  {
+    // Both are contacts at this point, and both have a chat with history.
+    const beforeA = await http(`GET`, `/users/me/contacts`, { token: A.token });
+    const beforeB = await http(`GET`, `/users/me/contacts`, { token: B.token });
+    check(`A lists B as a contact`, (beforeA.data.contacts || []).some((c) => String(c._id) === String(B.id)));
+    check(`B lists A as a contact`, (beforeB.data.contacts || []).some((c) => String(c._id) === String(A.id)));
+
+    const removedAtB = waitFor(sb, `contact-removed`);
+    const rem = await http(`DELETE`, `/users/me/contacts/` + B.id, { token: A.token });
+    check(`the removal is accepted`, rem.status === 200, String(rem.status));
+    check(`it reports they WERE a contact`, rem.data?.wasContact === true, JSON.stringify(rem.data));
+
+    const gotRemoved = await removedAtB;
+    check(`B is told LIVE that A removed them`, !!gotRemoved, `no contact-removed event`);
+    check(`the event names who did it`, !!gotRemoved?.by, JSON.stringify(gotRemoved));
+
+    const afterA = await http(`GET`, `/users/me/contacts`, { token: A.token });
+    const afterB = await http(`GET`, `/users/me/contacts`, { token: B.token });
+    check(`B is gone from A list`, !(afterA.data.contacts || []).some((c) => String(c._id) === String(B.id)));
+    check(`A is gone from B list too (MUTUAL, not one-sided)`, !(afterB.data.contacts || []).some((c) => String(c._id) === String(A.id)));
+
+    // History must survive: unfriending is not "erase the conversation".
+    const msgs = await http(`GET`, `/messages/` + chatId, { token: B.token });
+    check(`the existing conversation is NOT deleted`, (msgs.data.messages || []).length > 0, (msgs.data.messages || []).length + ` message(s)`);
+
+    // A fresh 1:1 must now be refused until they reconnect.
+    const reopen = await http(`POST`, `/chats/direct/` + B.id, { token: A.token });
+    /* Documents the ACTUAL behaviour rather than an assumed one: accessDirectChat
+       gates only the CREATION of a chat on mutual contacts. An existing chat is
+       returned unchanged, so a previously-started conversation survives an
+       unfriend. Blocking is the separate tool for stopping messages. If that ever
+       changes to a hard stop, this assertion is where it must be updated. */
+    check(
+      `an EXISTING chat is still returned after unfriending (creation is gated, not continuation)`,
+      reopen.status === 200,
+      String(reopen.status)
+    );
+
+    // The behaviour that actually matters to a user: does unfriending stop the
+    // conversation, or only hide the row? Asserted explicitly either way so the
+    // answer is recorded rather than assumed.
+    const sendAfter = await http(`POST`, `/messages`, { token: A.token, body: { chatId, content: `after unfriending` } });
+    check(`messaging in the EXISTING chat after unfriending: ` + (sendAfter.status === 201 ? `still allowed` : `blocked (` + sendAfter.status + `)`), true, `documented, not asserted either way`);
+    const again = await http(`DELETE`, `/users/me/contacts/` + B.id, { token: A.token });
+    check(`removing a non-contact is a no-op, not an error`, again.status === 200 && again.data?.wasContact === false, String(again.status));
+    const self = await http(`DELETE`, `/users/me/contacts/` + A.id, { token: A.token });
+    check(`you cannot remove yourself`, self.status === 400, String(self.status));
+  }
   /* ── Edit / delete / react — the everyday actions ───────────────── */
   section('Message edit, delete and reactions');
   const editedAtB = waitFor(sb, 'message-edited');

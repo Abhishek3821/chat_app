@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { tenantScope, sameTenant } from '../utils/tenancy.js';
 import ContactRequest from '../models/ContactRequest.js';
@@ -14,6 +15,7 @@ import { getWorkspaceType } from '../utils/workspaceService.js';
 import { sessionCookieOptions } from '../utils/token.js';
 import { emitToUser } from '../socket/index.js';
 import { applyPresencePrivacy } from '../utils/privacy.js';
+import { applyPresenceFreshness } from '../utils/presence.js';
 import { normalizePhone } from '../utils/sendSms.js';
 import { invalidateChatListCache } from '../utils/chatCache.js';
 
@@ -212,7 +214,11 @@ export const getContacts = asyncHandler(async (req, res) => {
     { path: 'contacts', select: PUBLIC_FIELDS },
     { path: 'favorites', select: PUBLIC_FIELDS },
   ]);
-  res.json({ success: true, contacts: req.user.contacts, favorites: req.user.favorites });
+  /* Derive the online dot from the heartbeat rather than the stored flag — this
+     list is the main place people notice presence being wrong, and the sweeper
+     only runs once a minute. */
+  const fresh = (docs) => (docs || []).map((d) => applyPresenceFreshness(d.toObject ? d.toObject() : d));
+  res.json({ success: true, contacts: fresh(req.user.contacts), favorites: fresh(req.user.favorites) });
 });
 
 // POST /api/users/me/contacts/:id
@@ -252,11 +258,55 @@ export const addContact = asyncHandler(async (req, res) => {
 });
 
 // DELETE /api/users/me/contacts/:id
+/**
+ * DELETE /api/users/me/contacts/:id — unfriend someone.
+ *
+ * MUTUAL by design. This used to pull the contact from the caller's list only,
+ * which left the relationship half-dissolved: the other person still saw the
+ * caller in their contacts, but messaging was already impossible because
+ * `accessDirectChat` requires BOTH sides to hold each other. So they were left
+ * with a contact they could not message and no way to understand why.
+ *
+ * A contact here IS a mutual relationship — mutual accept to create it, so mutual
+ * removal to end it. Favourites are cleared on both sides too, otherwise a
+ * starred entry for a non-contact lingers.
+ *
+ * Existing chats and their history are deliberately NOT deleted: unfriending is
+ * not "erase what we said", and either side may still want their copy. The chat
+ * simply cannot be re-opened until they reconnect.
+ */
 export const removeContact = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id, {
-    $pull: { contacts: req.params.id, favorites: req.params.id },
+  const otherId = req.params.id;
+  if (!mongoose.isValidObjectId(otherId)) throw new ApiError(400, 'Invalid user id.');
+  if (String(otherId) === String(req.user._id)) throw new ApiError(400, "You can't remove yourself.");
+
+  const other = await User.findById(otherId).select('_id name');
+  if (!other) throw new ApiError(404, 'User not found.');
+
+  const wasContact = (req.user.contacts || []).some((c) => String(c) === String(otherId));
+
+  await Promise.all([
+    User.findByIdAndUpdate(req.user._id, { $pull: { contacts: otherId, favorites: otherId } }),
+    User.findByIdAndUpdate(otherId, { $pull: { contacts: req.user._id, favorites: req.user._id } }),
+  ]);
+
+  /* Tell the other side live, so their contact list and any open chat header
+     update without a reload — the same standard every other mutation here meets.
+     Their own devices get it too, hence emitToUser for both. */
+  emitToUser(String(otherId), 'contact-removed', {
+    userId: String(req.user._id),
+    by: req.user.name,
   });
-  res.json({ success: true, message: 'Contact removed.' });
+  emitToUser(String(req.user._id), 'contact-removed', { userId: String(otherId) });
+
+  res.json({
+    success: true,
+    removed: true,
+    // Reported so the client can stay quiet when nothing actually changed
+    // (a double-tap, or a stale list) instead of claiming a removal happened.
+    wasContact,
+    message: wasContact ? `${other.name} removed from your contacts.` : 'Not in your contacts.',
+  });
 });
 
 // POST /api/users/me/favorites/:id  (toggle)

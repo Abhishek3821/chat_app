@@ -11,6 +11,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
 import { useLiveCaptions } from '@/hooks/useLiveCaptions';
 import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
+import { meshCapacityWarning } from '@/lib/meshQuality';
 import api from '@/lib/api';
 import { useMeetings } from '@/store/useMeetings';
 import { useAuth } from '@/store/useAuth';
@@ -162,10 +163,10 @@ function SfuRoom({ meeting, code, me, isHost, rtc, onLeave }) {
     code,
     rtc,
   });
-  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} />;
+  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} isSfu />;
 }
 
-function RoomView({ room, meeting, code, me, isHost, onLeave }) {
+function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
   const {
     localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
@@ -278,6 +279,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
   }
 
   const total = remotes.length + 1;
+  /* Only the MESH is size-limited. On the SFU each device sends one stream and
+     the server fans it out, so the warning must not appear there — `isSfu` is
+     passed down by SfuRoom. */
+  const capacityWarning = isSfu ? null : meshCapacityWarning(total);
   const cols = videoGridCols(total);
   // A tile with NO aspect-ratio class has no definite height in a CSS grid (a
   // <video> with h-full/w-full can't resolve a percentage height against an
@@ -411,6 +416,16 @@ function RoomView({ room, meeting, code, me, isHost, onLeave }) {
 
       {mediaError && (
         <div className="mx-3 mb-2 rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-300 sm:mx-4">{mediaError}</div>
+      )}
+
+      {/* A peer-to-peer room past its comfortable size. Said out loud rather than
+          left to manifest as frozen tiles: without this the room simply degrades
+          and everyone blames their own connection. Amber, not red — the meeting
+          still works, it is just past what a mesh carries well. */}
+      {capacityWarning && (
+        <div className="mx-3 mb-2 rounded-xl bg-amber-500/15 px-3 py-2 text-sm text-amber-200 ring-1 ring-amber-500/30 sm:mx-4">
+          {capacityWarning}
+        </div>
       )}
 
       {/* Presenting banner — you always SEE what you're sharing (like Google Meet).

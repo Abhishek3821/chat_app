@@ -38,8 +38,18 @@ jobs:
       # Dead buttons, empty handlers, hardcoded dev URLs, debug output shipped to
       # users, and route imports that don't resolve. None of these fail a build;
       # all of them are visible to the first person who clicks the wrong thing.
+      # Catches a control wired to a handler prop the parent never passes: it
+      # renders, looks live, and silently does nothing. audit-ui only finds buttons
+      # with NO handler at all, so this is the complementary half.
+      - name: dead-button audit (handler props supplied at every usage)
+        run: node audit-buttons.mjs
       - name: UI / production audit
         run: node audit-ui.mjs
+      # Invite/QR parsing is pure logic with no DOM, so it can be pinned exactly.
+      # It decides whether the Scan button accepts the app's own codes — and it
+      # once rejected all of them off an over-strict origin check.
+      - name: invite / QR parsing (25 checks)
+        run: node test-invite.mjs
 
   server-tests:
     runs-on: ubuntu-latest
@@ -74,6 +84,12 @@ jobs:
       - name: chat real-time (edit/delete/react/pin/poll/settings, 26 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/chat-realtime.mjs
+      - name: meeting mesh (3rd/4th joiner sees everyone, 28 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-mesh.mjs
+      - name: group-call mesh (A adds C; B and C must see each other, 20 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/group-call-mesh.mjs
       - name: meeting-room real-time (join/chat/hand/reaction/host controls, 12 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-room-realtime.mjs
@@ -90,9 +106,12 @@ jobs:
       - name: status posts + views are realtime (21 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/status-realtime.mjs
-      - name: personal QR invite resolves + connects strangers (11 checks)
+      - name: QR invite — scan, live request card, accept/decline (22 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/qr-invite.mjs
+      - name: presence — heartbeat, boot reset, 5-minute idle (20 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/presence.mjs
       - name: single super admin auto-provisioned from .env (36 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/super-admin.mjs

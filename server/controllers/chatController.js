@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat } from '../socket/index.js';
 import { verifyTwoStepPin } from './userController.js';
+import { applyPresenceFreshness } from '../utils/presence.js';
 import {
   getCachedChatList,
   setCachedChatList,
@@ -77,6 +78,9 @@ export const getChats = asyncHandler(async (req, res) => {
   const withMeta = chats.map((chat) => {
     const id = String(chat._id);
     const theme = themes.get(id);
+    // The sidebar's online dots come from these participants — derive them from
+    // the heartbeat, not the stored flag (see utils/presence.js).
+    (chat.participants || []).forEach((p) => applyPresenceFreshness(p.user));
     return {
       ...chat,
       unreadCount: counts.get(id) || 0,

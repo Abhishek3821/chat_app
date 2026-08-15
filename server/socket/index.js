@@ -7,6 +7,7 @@ import Meeting from '../models/Meeting.js';
 import Session from '../models/Session.js';
 import { isSessionValid } from '../utils/session.js';
 import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callService.js';
+import { touchPresence, forgetPresence } from '../utils/presence.js';
 
 // Socket payloads DON'T pass through the Express mongoSanitize middleware, so any
 // id used in a Mongo query MUST be validated here — otherwise a client could send
@@ -139,7 +140,10 @@ async function setPresence(userId, online) {
   try {
     await User.findByIdAndUpdate(userId, {
       isOnline: online,
-      ...(online ? {} : { lastSeen: new Date() }),
+      // `lastSeen` is stamped in BOTH directions now: while online it is the
+      // heartbeat the staleness sweeper reads (utils/presence.js), so leaving it
+      // untouched on connect would make a freshly-connected user look stale.
+      lastSeen: new Date(),
     });
   } catch {
     /* ignore presence write failures */
@@ -913,6 +917,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         set.delete(socket.id);
         if (set.size === 0) {
           onlineUsers.delete(userId);
+          forgetPresence(userId); // so a reconnect writes straight away
           // In a multi-instance deploy the user may still be connected to another
           // node — only mark them offline once they're gone everywhere.
           if (!(await isUserOnline(userId))) {
@@ -922,6 +927,14 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         }
       }
     });
+
+    /* Heartbeat. The client sends this while its tab is VISIBLE, so it means
+       "the app is actually open in front of someone" rather than "a socket is
+       technically attached". Stop hearing it for PRESENCE_TTL_MS and the sweeper
+       marks them offline — which is what covers a tab left open all night, a
+       half-open socket, and a machine that went to sleep. Throttled per user
+       inside touchPresence, so extra tabs cost nothing. */
+    socket.on('presence:ping', () => touchPresence(userId));
 
     // ── Presence (AFTER all listeners are attached) ───────────────
     const wasOffline = !onlineUsers.has(userId);

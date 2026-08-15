@@ -8,6 +8,8 @@
  * leaking presence to everyone regardless of the chosen value).
  */
 
+import { applyPresenceFreshness } from './presence.js';
+
 /** Does `setting` permit this viewer, given whether they're a contact? */
 function permits(setting, viewerIsContact) {
   if (setting === 'nobody') return false;
@@ -28,6 +30,11 @@ function permits(setting, viewerIsContact) {
 export function applyPresencePrivacy(obj, viewerIsContact) {
   if (!obj) return obj;
   const privacy = obj.privacy || {};
+  /* Staleness FIRST, before privacy: `isOnline` is only true while the
+     heartbeat is fresh (utils/presence.js). The sweeper runs once a minute and a
+     read can land between ticks, so every read derives this rather than trusting
+     the stored flag. */
+  applyPresenceFreshness(obj);
   if (!permits(privacy.onlineStatus, viewerIsContact)) obj.isOnline = false;
   if (!permits(privacy.lastSeen, viewerIsContact)) obj.lastSeen = null;
   /* `profilePhoto` was stored and offered in Settings but never applied here, so

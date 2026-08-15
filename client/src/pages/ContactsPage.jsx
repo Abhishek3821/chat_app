@@ -7,6 +7,7 @@ import {
   UserPlus,
   MessageCircle,
   Phone,
+  UserMinus,
   Video,
   Star,
   Check,
@@ -38,7 +39,7 @@ const rise = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, transiti
 export default function ContactsPage() {
   const navigate = useNavigate();
   const { startCall, openModal } = useUI();
-  const { contacts, favorites, incoming, outgoing, results, searching, load, search, clearResults, sendRequest, respond, toggleFavorite, startChat } =
+  const { contacts, favorites, incoming, outgoing, results, searching, load, search, clearResults, sendRequest, respond, toggleFavorite, startChat, removeContact } =
     useContacts();
 
   const me = useAuth((s) => s.user);
@@ -83,6 +84,34 @@ export default function ContactsPage() {
     }
   };
 
+  /**
+   * Unfriend. Confirmed first, because it is MUTUAL and therefore affects the other
+   * person's account too — they lose the contact without doing anything.
+   *
+   * The dialog spells out all four consequences rather than just the reassuring
+   * ones, since the surprising part is that messaging is NOT stopped.
+   */
+  const onRemove = async (user) => {
+    const ok = window.confirm(
+      /* Accurate about what ACTUALLY happens. The first version of this copy said
+         they "cannot message until you reconnect" — not true: the contact gate
+         applies to STARTING a chat, so an existing conversation keeps working.
+         Promising a stop that does not happen is worse than not offering one, so
+         Block is named here as the control that does stop messages. */
+      `Remove ${user.name} from your contacts?\n\n` +
+        `• You both disappear from each other's contact lists\n` +
+        `• Your conversation and its history are kept\n` +
+        `• They can still message you in that chat — use Block to stop that\n` +
+        `• Starting a NEW chat will need a fresh contact request`
+    );
+    if (!ok) return;
+    try {
+      const res = await removeContact(user._id);
+      toast.success(res?.message || `${user.name} removed`);
+    } catch (err) {
+      toast.error(err.message || 'Could not remove that contact.');
+    }
+  };
   const onRespond = async (req, action) => {
     try {
       await respond(req._id, action);
@@ -262,6 +291,7 @@ export default function ContactsPage() {
                             onAudio={() => startCall({ type: 'audio', peer: user, direction: 'outgoing' })}
                             onVideo={() => startCall({ type: 'video', peer: user, direction: 'outgoing' })}
                             onToggleFavorite={async () => { const f = await toggleFavorite(user._id); toast(f ? 'Added to favorites' : 'Removed from favorites'); }}
+                            onRemove={() => onRemove(user)}
                           />
                         ))}
                       </div>
@@ -287,7 +317,7 @@ function SectionTitle({ icon: Icon, title, children }) {
   );
 }
 
-function ContactRow({ user, isFavorite, onOpen, onMessage, onAudio, onVideo, onToggleFavorite }) {
+function ContactRow({ user, isFavorite, onOpen, onMessage, onAudio, onVideo, onToggleFavorite, onRemove }) {
   const stop = (fn) => (e) => { e.stopPropagation(); fn?.(); };
   const subtitle = user.isOnline ? user.bio || `@${user.username}` : formatLastSeen(user.lastSeen);
   return (
@@ -307,15 +337,20 @@ function ContactRow({ user, isFavorite, onOpen, onMessage, onAudio, onVideo, onT
         <RowAction label={isFavorite ? 'Unfavorite' : 'Favorite'} onClick={stop(onToggleFavorite)} active={isFavorite}>
           <Star size={17} className={cn(isFavorite && 'fill-amber-400 text-amber-400')} />
         </RowAction>
+        {/* Destructive, so it sits last and turns red on hover rather than sharing
+            the neutral treatment of the other actions. */}
+        <RowAction label="Remove contact" onClick={stop(onRemove)} danger>
+          <UserMinus size={17} />
+        </RowAction>
       </div>
     </motion.div>
   );
 }
 
-function RowAction({ children, label, onClick, active }) {
+function RowAction({ children, label, onClick, active, danger }) {
   return (
     <motion.button whileTap={{ scale: 0.88 }} whileHover={{ scale: 1.08 }} onClick={onClick} aria-label={label} title={label}
-      className={cn('ring-brand grid h-9 w-9 place-items-center rounded-xl transition-colors', active ? 'text-amber-500' : 'text-content-muted hover:bg-brand-500/10 hover:text-brand-600 dark:hover:text-brand-300')}>
+      className={cn('ring-brand grid h-9 w-9 place-items-center rounded-xl transition-colors', active ? 'text-amber-500' : danger ? 'text-content-muted hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400' : 'text-content-muted hover:bg-brand-500/10 hover:text-brand-600 dark:hover:text-brand-300')}>
       {children}
     </motion.button>
   );

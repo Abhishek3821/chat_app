@@ -98,6 +98,42 @@ export const useContacts = create((set, get) => ({
     return !isFav;
   },
 
+  /**
+   * Unfriend someone — remove them from your contacts.
+   *
+   * MUTUAL: the server removes each side from the other's list, because a contact
+   * here only exists as a two-way relationship (both must hold each other before a
+   * chat can open). Optimistic, with a rollback, since the list is what the user is
+   * looking at when they tap it.
+   *
+   * Existing chat history is NOT deleted — unfriending ends the connection, it does
+   * not erase the conversation. Reconnecting requires a fresh contact request.
+   */
+  removeContact: async (userId) => {
+    const prevContacts = get().contacts;
+    const prevFavorites = get().favorites;
+    set((s) => ({
+      contacts: s.contacts.filter((c) => (c._id || c) !== userId),
+      favorites: s.favorites.filter((f) => (f._id || f) !== userId),
+    }));
+    if (DEMO_MODE) return { removed: true };
+    try {
+      const { data } = await api.delete(`/users/me/contacts/${userId}`);
+      return { removed: !!data.removed, wasContact: !!data.wasContact, message: data.message };
+    } catch (err) {
+      set({ contacts: prevContacts, favorites: prevFavorites }); // put the row back
+      throw new Error(err?.response?.data?.message || 'Could not remove that contact.');
+    }
+  },
+
+  /** The other side unfriended ME (socket `contact-removed`) — drop them locally
+   *  so both lists agree without needing a reload. */
+  applyContactRemoved: (userId) =>
+    set((s) => ({
+      contacts: s.contacts.filter((c) => (c._id || c) !== userId),
+      favorites: s.favorites.filter((f) => (f._id || f) !== userId),
+    })),
+
   /** Block / unblock a user (toggle). The server enforces blocks in both
    *  directions — a blocked user can't send you requests, chat, or call you. */
   toggleBlock: async (userId) => {

@@ -22,6 +22,7 @@ import dns from 'dns';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { io as ioClient } from 'socket.io-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.resolve(__dirname, '..');
@@ -96,7 +97,39 @@ async function startServer() {
   throw new Error('Server did not become healthy in time.');
 }
 
+const sockets = [];
+function connect(token) {
+  const s = ioClient(`http://127.0.0.1:${PORT}`, {
+    auth: (cb) => cb({ token }),
+    transports: ['websocket'],
+    reconnection: false,
+    timeout: 8000,
+  });
+  sockets.push(s);
+  return new Promise((resolve, reject) => {
+    s.on('connect', () => resolve(s));
+    s.on('connect_error', reject);
+  });
+}
+
+/** First payload of `event`, or null after `ms` — a missing emit fails, not hangs. */
+function waitFor(socket, event, ms = 4000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      socket.off(event, onEvent);
+      resolve(null);
+    }, ms);
+    function onEvent(payload) {
+      clearTimeout(timer);
+      socket.off(event, onEvent);
+      resolve(payload ?? {});
+    }
+    socket.on(event, onEvent);
+  });
+}
+
 async function finish(code) {
+  sockets.forEach((s) => s.close());
   try {
     await mongoose.disconnect();
   } catch {
@@ -185,6 +218,68 @@ const resolve = async (scanner, username) => {
   await http('PATCH', `/contacts/request/${pending?._id}`, { token: OWNER.token, body: { action: 'accept' } });
   const nowDirect = await http('POST', `/chats/direct/${OWNER.id}`, { token: SCANNER.token });
   check('the 1:1 chat now opens', nowDirect.status === 200 && !!nowDirect.data?.chat?._id, `${nowDirect.status} ${nowDirect.data?.message}`);
+
+  /* ── The Contacts screen, live ──────────────────────────────────
+     Everything above is REST. This is what the owner actually sees: the
+     "CONTACT REQUESTS 1" card appearing without a refresh, and the requester
+     learning they were accepted. Both are socket-only. */
+  section("A scan lands on the owner's Contacts screen without a refresh");
+  const SCANNER2 = await makeUser('qrscan2');
+  const ownerSock = await connect(OWNER.token);
+  const scannerSock = await connect(SCANNER2.token);
+  await sleep(300); // personal rooms settle
+
+  const ownerGetsRequest = waitFor(ownerSock, 'contact-request');
+  const scan2 = await http('POST', `/contacts/request/${OWNER.id}`, { token: SCANNER2.token });
+  check('the scan sends the request', scan2.status >= 200 && scan2.status < 300, `${scan2.status}`);
+  const reqEvent = await ownerGetsRequest;
+  check('the owner is told live', !!reqEvent, 'no contact-request within 4s');
+  check(
+    'and the card has who it is from',
+    String(reqEvent?.from?._id) === String(SCANNER2.id) && !!reqEvent?.from?.name,
+    JSON.stringify(reqEvent)
+  );
+
+  section('Accept tells the other side live, and connects both');
+  const pending2 = ((await http('GET', '/contacts/requests', { token: OWNER.token })).data?.incoming || []).find(
+    (r) => String(r.from?._id) === String(SCANNER2.id)
+  );
+  const scannerGetsAccept = waitFor(scannerSock, 'contact-accepted');
+  const accepted = await http('PATCH', `/contacts/request/${pending2?._id}`, { token: OWNER.token, body: { action: 'accept' } });
+  check('accept succeeds', accepted.status === 200, `${accepted.status} ${accepted.data?.message}`);
+  check('the requester is told live', !!(await scannerGetsAccept), 'no contact-accepted within 4s');
+
+  const ownerContacts = (await http('GET', '/users/me/contacts', { token: OWNER.token })).data?.contacts || [];
+  const scannerContacts = (await http('GET', '/users/me/contacts', { token: SCANNER2.token })).data?.contacts || [];
+  check('the owner now lists them', ownerContacts.some((c) => String(c._id) === String(SCANNER2.id)));
+  check('and they list the owner (a contact is mutual)', scannerContacts.some((c) => String(c._id) === String(OWNER.id)));
+  check(
+    'the request card is gone from the inbox',
+    !((await http('GET', '/contacts/requests', { token: OWNER.token })).data?.incoming || []).some(
+      (r) => String(r.from?._id) === String(SCANNER2.id)
+    )
+  );
+
+  section('Decline removes the card without connecting anyone');
+  const DECLINED = await makeUser('qrdecline');
+  await http('POST', `/contacts/request/${OWNER.id}`, { token: DECLINED.token });
+  const toDecline = ((await http('GET', '/contacts/requests', { token: OWNER.token })).data?.incoming || []).find(
+    (r) => String(r.from?._id) === String(DECLINED.id)
+  );
+  const declined = await http('PATCH', `/contacts/request/${toDecline?._id}`, { token: OWNER.token, body: { action: 'reject' } });
+  check('decline succeeds', declined.status === 200, `${declined.status} ${declined.data?.message}`);
+  check(
+    'the card disappears',
+    !((await http('GET', '/contacts/requests', { token: OWNER.token })).data?.incoming || []).some(
+      (r) => String(r.from?._id) === String(DECLINED.id)
+    )
+  );
+  check(
+    'and no contact was created',
+    !((await http('GET', '/users/me/contacts', { token: OWNER.token })).data?.contacts || []).some(
+      (c) => String(c._id) === String(DECLINED.id)
+    )
+  );
 
   section('Edge cases the page has to handle');
   const self = await http('POST', `/chats/direct/${OWNER.id}`, { token: OWNER.token });

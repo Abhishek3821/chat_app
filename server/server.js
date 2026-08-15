@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import { connectDB } from './config/db.js';
 import { ensureWorkspaces } from './utils/workspaceService.js';
 import { ensureSuperAdmin, describeSuperAdmin } from './utils/superAdmin.js';
+import { resetAllPresence, startPresenceSweeper } from './utils/presence.js';
 import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -19,7 +20,7 @@ import { mongoSanitize } from './middleware/sanitize.js';
 import { csrfGuard, isAllowedOrigin } from './middleware/csrf.js';
 import { serveUpload } from './controllers/mediaController.js';
 import { verifyEmailTransport, closeEmailTransport, isEmailConfigured } from './utils/sendEmail.js';
-import { initSocket } from './socket/index.js';
+import { initSocket, getIO } from './socket/index.js';
 import { getAdapterPair, redisEnabled } from './utils/redis.js';
 import { initQueue } from './utils/queue.js';
 import { registerFanoutJobs } from './utils/jobs.js';
@@ -163,6 +164,23 @@ async function start() {
     if (r.ok) console.log('✅ SMTP verified — OTP / verification emails will send.');
     else console.warn(`⚠️  SMTP NOT ready: ${r.reason}\n   → OTP emails will not be delivered until EMAIL_HOST/USER/PASS are set correctly.`);
   }
+
+  /* Presence. Two halves, and both are needed:
+     — the RESET, because a process that just started has nobody connected to
+       it, so every `isOnline: true` in the database is a leftover from a crash
+       or a previous deploy. Without it presence never recovers and everyone
+       reads as permanently online.
+     — the SWEEPER, which marks anyone who stopped heartbeating offline, so a
+       tab left open overnight or a half-open socket doesn't keep them lit. */
+  try {
+    const cleared = await resetAllPresence();
+    if (cleared) console.log(`👤 Presence reset: ${cleared} stale "online" flag(s) cleared from a previous run.`);
+  } catch (err) {
+    console.warn('⚠️  Presence reset skipped:', err?.message || err);
+  }
+  startPresenceSweeper((userId, lastSeen) => {
+    getIO()?.emit('user-offline', { userId, lastSeen });
+  });
 
   // Zombie-call sweeper: closes ringing/live Call records whose clients died
   // without reporting an ending (crash, network loss on both sides).

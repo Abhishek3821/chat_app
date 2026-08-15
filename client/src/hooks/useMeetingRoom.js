@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
  *     answer the offer that arrives — so no two peers ever offer each other (no glare).
  */
 import { ICE_SERVERS } from '../lib/iceServers';
+import { applyMeshEncoding, retuneAll, meshCapacityWarning } from '../lib/meshQuality';
 
 const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
@@ -65,6 +66,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const closePeer = useCallback((socketId) => {
     const pc = peersRef.current.get(socketId);
     if (pc) { try { pc.close(); } catch { /* noop */ } peersRef.current.delete(socketId); }
+    // Someone left: the remaining legs can have the headroom back.
+    retuneAll(peersRef.current, peersRef.current.size);
     candBufRef.current.delete(socketId);
     setRemotes((prev) => prev.filter((r) => r.socketId !== socketId));
     setPresenterSid((prev) => (prev === socketId ? null : prev)); // presenter left → back to grid
@@ -102,6 +105,12 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       } else if (st === 'closed') closePeer(socketId);
     };
     peersRef.current.set(socketId, pc);
+    /* A mesh sends one video stream PER PEER, so every join raises what this
+       device must upload. Re-tune every leg down as the room grows — without
+       this each peer got a full-rate 720p stream and the uplink saturated at
+       about six people. */
+    applyMeshEncoding(pc, peersRef.current.size);
+    retuneAll(peersRef.current, peersRef.current.size);
     return pc;
   }, [emitSignal, upsertRemote, closePeer]);
 
