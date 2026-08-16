@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2 } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
@@ -17,6 +17,7 @@ import { useMeetings } from '@/store/useMeetings';
 import { useAuth } from '@/store/useAuth';
 import { useUI } from '@/store/useUI';
 import { cn, videoGridCols } from '@/lib/utils';
+import { EFFECTS, BACKGROUND_PRESETS, effectsSupported, gradientDataUrl } from '@/lib/videoEffects';
 
 /** Attaches a MediaStream to a <video> element. */
 function VideoTile({ stream, name, avatar, muted = false, mirror = false, label, fit = 'cover', className, handRaised = false, reactions = [], hostControls = null }) {
@@ -174,6 +175,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
     knocks = [], admitGuest,
     polls = [], questions = [], createPoll, votePoll, closePoll, askQuestion, upvoteQuestion, answerQuestion,
+    videoEffect = EFFECTS.NONE, effectLoading = false, setVideoEffect,
   } = room;
   const [portrait, setPortrait] = useState(false); // tile orientation option
   const [showChat, setShowChat] = useState(false);
@@ -598,11 +600,78 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
             </>
           )}
         </div>
+        {/* Background effects. Only offered when the browser can actually run
+            them, and hidden on the SFU path where the track isn't ours to swap. */}
+        {setVideoEffect && effectsSupported() && (
+          <BackgroundButton current={videoEffect} loading={effectLoading} onPick={setVideoEffect} />
+        )}
         <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
         <button onClick={doLeave} className="grid h-12 w-12 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 sm:h-14 sm:w-14" title="Leave">
           <PhoneOff size={22} />
         </button>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Background picker: none / blur / a few gradient scenes.
+ *
+ * The menu opens UPWARD from the control bar and is rendered in normal flow
+ * (the bar isn't a scroll container), so no portal is needed here.
+ */
+function BackgroundButton({ current, loading, onPick }) {
+  const [open, setOpen] = useState(false);
+  const active = current !== EFFECTS.NONE;
+
+  const choose = (preset) => {
+    setOpen(false);
+    if (!preset) return onPick(EFFECTS.NONE);
+    if (preset.effect === EFFECTS.BLUR) return onPick(EFFECTS.BLUR);
+    return onPick(EFFECTS.IMAGE, gradientDataUrl(preset.gradient));
+  };
+
+  return (
+    <div className="relative">
+      <CtrlButton
+        active={active}
+        onClick={() => setOpen((v) => !v)}
+        on={loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+        off={loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+        label="Background"
+        highlightWhenActive
+      />
+      {open && (
+        <>
+          <button className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} aria-label="Close background picker" />
+          <div className="absolute bottom-full left-1/2 z-20 mb-3 w-52 -translate-x-1/2 overflow-hidden rounded-2xl border border-white/15 bg-navy-900/95 p-1.5 shadow-soft-lg backdrop-blur-md">
+            <button
+              onClick={() => choose(null)}
+              className={cn('flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/10', current === EFFECTS.NONE ? 'text-white' : 'text-white/70')}
+            >
+              <span className="h-7 w-7 shrink-0 rounded-lg border border-white/25" />
+              None
+              {current === EFFECTS.NONE && <Check size={15} className="ml-auto" />}
+            </button>
+            {BACKGROUND_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => choose(p)}
+                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm text-white/70 transition-colors hover:bg-white/10"
+              >
+                <span
+                  className="h-7 w-7 shrink-0 rounded-lg border border-white/25"
+                  style={p.gradient ? { background: `linear-gradient(135deg, ${p.gradient[0]}, ${p.gradient[1]})` } : { backdropFilter: 'blur(4px)', background: 'rgba(255,255,255,.18)' }}
+                />
+                {p.label}
+              </button>
+            ))}
+            <p className="px-2.5 pb-1 pt-2 text-[11px] leading-snug text-white/40">
+              Runs on your device. First use downloads the effects engine.
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

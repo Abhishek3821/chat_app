@@ -405,6 +405,26 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       // Persist the invitee on the Call record — this is what authorizes their
       // signaling legs to EVERY conference member later (not just to the adder).
       await registerCallInvitee(callId, userId, to).catch(() => null);
+      /* WhatsApp-style group ring: the callee's screen leads with the GROUP, not
+         with whoever happened to press the button. Resolved HERE rather than
+         trusted from the caller or looked up on the callee, because:
+           • a client-supplied name could show a group the caller isn't in;
+           • the callee may not have that chat cached yet (fresh login, or a
+             group they have never opened), and then the ring shows no name at all.
+         One indexed lookup per invite, only for group calls. */
+      let group;
+      if (chatId) {
+        const chat = await Chat.findById(chatId).select('name avatar isGroup participants').lean().catch(() => null);
+        if (chat?.isGroup) {
+          group = {
+            _id: String(chat._id),
+            name: chat.name || 'Group call',
+            avatar: chat.avatar || '',
+            memberCount: (chat.participants || []).length,
+          };
+        }
+      }
+
       relay(to, ['call:incoming', 'incoming-call'], {
         from: userId,
         callId,
@@ -412,6 +432,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         caller,
         chatId, // present → the callee treats this as a group call
         isGroup: !!chatId,
+        group, // name/avatar so the ring can show the group, not the caller
       });
     });
 

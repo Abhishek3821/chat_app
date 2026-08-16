@@ -26,6 +26,13 @@
    rgb(var(--x) / <alpha-value>) syntax.
    ------------------------------------------------------------- */
 :root {
+  /* Tells the BROWSER which theme it is rendering, which our own tokens can't:
+     scrollbars, <select> popups, date pickers, spinners, the autofill wash and
+     the canvas behind the page are all painted by the UA. Without this they
+     stayed in light mode no matter what the app did — pale scrollbars down a
+     navy page, and a white autofill block over a navy input. */
+  color-scheme: light;
+
   --surface: 255 255 255; /* white panels lift off the mint canvas */
   --surface-2: 240 248 244; /* inputs / recessed rows - a breath of mint */
   --border: 205 227 219; /* mint-tinted hairline (between #97D3CD and #E4F2EA) */
@@ -118,6 +125,8 @@
 }
 
 .dark {
+  color-scheme: dark; /* see the note on :root */
+
   --surface: 12 44 71; /* #0C2C47 navy panels */
   --surface-2: 18 56 87; /* recessed rows / inputs */
   --border: 30 72 105; /* visible hairline against the navy */

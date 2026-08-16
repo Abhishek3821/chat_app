@@ -115,7 +115,25 @@ function CallSession({ call }) {
   const rootRef = useRef(null);
 
   const isVideo = call.type === 'video';
-  const peer = call.peer || {};
+  const rawPeer = call.peer || {};
+
+  /**
+   * Who this call is WITH, the way WhatsApp presents it.
+   *
+   * A group call rings from the GROUP, not from whoever pressed the button: the
+   * screen leads with the group's name and avatar, and the person calling is the
+   * secondary line. Previously every title read `peer.name`, and on the receiving
+   * side `peer` is the individual caller — so an incoming group call announced
+   * "Alice" with no hint that six other people were also being rung.
+   */
+  const group = call.group?.isGroup || call.group?.name ? call.group : null;
+  const peer = group
+    ? { ...rawPeer, _id: group._id, name: group.name || 'Group call', avatar: group.avatar || '' }
+    : rawPeer;
+  /* The caller's own name, shown UNDER the group name while ringing — you want to
+     know who started it before you answer. Empty for a 1:1, where the title
+     already names them. */
+  const callerLine = group && rawPeer?.name ? `${rawPeer.name} is calling` : '';
   const connected = status === 'connected' || status === 'demo';
   const incoming = status === 'incoming';
   const remotes = remoteStreams || [];
@@ -351,6 +369,15 @@ function CallSession({ call }) {
                 </div>
                 <div className="mt-6 px-4 text-center text-white">
                   <h2 className="break-words text-xl font-bold sm:text-2xl">{peer.name || 'Unknown'}</h2>
+                  {/* Group call: name WHO started it, and how many are being rung.
+                      The title is the group, so without this the callee cannot
+                      tell who is on the other end before answering. */}
+                  {callerLine && (
+                    <p className="mt-0.5 text-sm text-white/60">
+                      {callerLine}
+                      {group?.memberCount ? ` · ${group.memberCount} in group` : ''}
+                    </p>
+                  )}
                   <motion.p key={connected ? 'live' : statusText} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-1 text-white/70">{connected ? <CallTimer /> : statusText}</motion.p>
                 </div>
               </div>

@@ -44,14 +44,39 @@ function DirectionIcon({ call }) {
 function CallRow({ call }) {
   const startCall = useUI((s) => s.startCall);
   const peer = call.peer || {};
+  /* A group call is FROM THE GROUP, so the row leads with the group's name and
+     avatar; the person who started it moves into the subtitle. Showing just
+     "Alice · Missed" gave no way to tell WHICH group it was, or to call it back. */
+  const group = call.isGroup && call.group?.name ? call.group : null;
+  const title = group ? group.name : peer.name || 'Unknown';
+  const avatarSrc = group ? group.avatar : peer.avatar;
   const missed = isMissed(call);
   const TypeIcon = call.type === 'video' ? Video : Phone;
 
   const subtitleParts = [call.direction === 'outgoing' ? 'Outgoing' : 'Incoming'];
   if (call.status === 'rejected') subtitleParts.push('Declined');
   else if (missed) subtitleParts.push('Missed');
+  if (group) {
+    // Who started it, and how big the call was — the two things that identify a
+    // group call after the fact.
+    if (call.direction === 'incoming' && peer.name) subtitleParts.push(peer.name);
+    if (group.memberCount) subtitleParts.push(`${group.memberCount} members`);
+  }
 
   const launch = (type) => {
+    /* Calling back a group re-opens the GROUP call. Passing the single `peer`
+       here would quietly ring one member instead of the group — the row says
+       "Weekend Plans", so that is what the button must call. */
+    if (group?._id) {
+      startCall({
+        type,
+        peer: { name: group.name, avatar: group.avatar },
+        group: { _id: group._id, isGroup: true, name: group.name, avatar: group.avatar },
+        direction: 'outgoing',
+      });
+      toast.success(`Calling ${group.name}…`);
+      return;
+    }
     if (!peer._id) return;
     startCall({ type, peer, direction: 'outgoing' });
     toast.success(`Calling ${peer.name}…`);
@@ -62,11 +87,11 @@ function CallRow({ call }) {
       variants={rowItem}
       className="group flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-content/[0.035] sm:gap-3.5 sm:px-4"
     >
-      <Avatar src={peer.avatar} name={peer.name} online={peer.isOnline} size="md" />
+      <Avatar src={avatarSrc} name={title} online={group ? undefined : peer.isOnline} size="md" />
 
       <div className="min-w-0 flex-1">
         <p className={cn('truncate font-semibold', missed ? 'text-red-500' : 'text-content')}>
-          {peer.name || 'Unknown'}
+          {title}
         </p>
         <div className="mt-0.5 flex items-center gap-1.5 text-xs">
           <DirectionIcon call={call} />

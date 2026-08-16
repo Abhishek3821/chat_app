@@ -1,10 +1,38 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <!--
+      Theme, resolved BEFORE first paint.
+
+      The dark class used to be hard-coded on the <html> tag, so every
+      light-mode user got a full dark repaint on every single load: the document
+      painted navy, then React mounted, read the stored preference and tore it
+      back to mint.
+      Inline and synchronous on purpose — a module script or a React effect both
+      run after the first paint, which is precisely too late.
+
+      theme-color is set here too (it was pinned to the dark navy), so the mobile
+      browser chrome and the PWA status bar match the app instead of framing a
+      pale-mint UI in navy.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('cc_theme') || 'dark';
+          var dark = stored === 'dark' || (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#071A2B' : '#E4F2EA');
+        } catch (e) {
+          /* private mode / storage blocked — fall through to the default below */
+        }
+      })();
+    </script>
+    <meta name="theme-color" content="#071A2B" />
     <meta name="description" content="ChatKonect — a modern, premium real-time messaging platform." />
     <!-- PWA: installable + offline app shell -->
     <link rel="manifest" href="/manifest.webmanifest" />

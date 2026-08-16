@@ -177,7 +177,11 @@ export const getCallHistory = asyncHandler(async (req, res) => {
     .populate('initiator', USER_FIELDS)
     .populate('caller', USER_FIELDS)
     .populate('receiver', USER_FIELDS)
-    .populate('participants.user', USER_FIELDS);
+    .populate('participants.user', USER_FIELDS)
+    /* Group calls are FROM THE GROUP, so history has to name the group rather
+       than whichever member happened to start it — "Alice · Missed" gives you no
+       way to tell which of five groups it was, or to call it back. */
+    .populate('chat', 'name avatar isGroup');
 
   // Convenience for the client: direction + the "other person" per call.
   const enriched = calls.map((c) => {
@@ -190,6 +194,18 @@ export const getCallHistory = asyncHandler(async (req, res) => {
       ...(doc.participants || []).map((p) => p.user),
     ].filter((u) => u && String(u._id) !== me);
     doc.peer = others[0] || doc.initiator || null;
+    /* For a group call the row's identity is the GROUP. Surfaced as its own field
+       rather than overwriting `peer`, because the client still needs the actual
+       person for a 1:1 call-back, and the member count is what makes a group row
+       readable ("Weekend Plans · 3 members" vs a bare name). */
+    if (doc.isGroup && doc.chat?.isGroup) {
+      doc.group = {
+        _id: String(doc.chat._id),
+        name: doc.chat.name || 'Group call',
+        avatar: doc.chat.avatar || '',
+        memberCount: (doc.participants || []).length + 1, // participants + the initiator
+      };
+    }
     return doc;
   });
 

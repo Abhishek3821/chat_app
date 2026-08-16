@@ -292,6 +292,87 @@ const waitFor = (socket, event, ms = 6000) =>
       check(`B↔C signalling is authorised inside a group call`, !!got && got.offer?.sdp === `v=0 group-b-to-c`, `dropped`);
     }
   }
+  /* ── 7. WhatsApp-style GROUP ring ───────────────────────────────── */
+  section('Group call: one member rings the WHOLE group');
+  {
+    const { data: g } = await http('POST', '/groups', {
+      token: A.token,
+      body: { name: 'Weekend Plans', members: [B.id, C.id] },
+    });
+    const gid = g?.chat?._id;
+    check('the group exists', !!gid, JSON.stringify(g)?.slice(0, 120));
+
+    /* EVERY other member must ring, not just one. B and C are not contacts with
+       each other, so group membership is the only thing authorising this. */
+    const ringB = waitFor(sb, 'call:incoming');
+    const ringC = waitFor(sc, 'call:incoming');
+    const gCallId = String(callId);
+    const invite = (to) =>
+      sa.emit('call:invite', {
+        to,
+        callId: gCallId,
+        chatId: gid,
+        type: 'video',
+        caller: { _id: A.id, name: A.name },
+      });
+    invite(B.id);
+    invite(C.id);
+
+    const atB = await ringB;
+    const atC = await ringC;
+    check('B rings', !!atB, 'B never received call:incoming');
+    check('C ALSO rings (every member, not just one)', !!atC, 'C never received call:incoming');
+
+    check('the ring is flagged as a group call', atB?.isGroup === true, JSON.stringify(atB?.isGroup));
+    check('it carries the chatId so the callee can mesh with everyone', String(atB?.chatId) === String(gid));
+
+    /* The WhatsApp behaviour this is about: the ring identifies the GROUP, so the
+       callee sees the group name rather than whoever pressed the button. Resolved
+       server-side, so it works even for a member who has never opened that group
+       and therefore has no cached copy of it. */
+    check('the ring carries the GROUP name', atB?.group?.name === 'Weekend Plans', JSON.stringify(atB?.group));
+    check('…for every member', atC?.group?.name === 'Weekend Plans', JSON.stringify(atC?.group));
+    check('it reports the group size', atB?.group?.memberCount === 3, String(atB?.group?.memberCount));
+    check('the caller is still identified separately', String(atB?.caller?.name || '').length > 0, JSON.stringify(atB?.caller));
+
+    // Group membership authorises the ring — it must not reach anyone else.
+    const OUT = await makeUser('outsider');
+    const so2 = await connect(OUT.token);
+    const leak = waitFor(so2, 'call:incoming', 2500);
+    invite(OUT.id);
+    check('a NON-MEMBER is not rung by the group call', !(await leak), 'an outsider was rung');
+    so2.close();
+  }
+
+  /* ── 8. Call history names the group too ────────────────────────── */
+  section('Group call in call HISTORY');
+  {
+    const { data: g2 } = await http('POST', '/groups', {
+      token: A.token,
+      body: { name: 'Sunday Roast', members: [B.id, C.id] },
+    });
+    const gid2 = g2?.chat?._id;
+
+    // A real group call record, the way the REST entry point creates one.
+    const startedGroup = await http('POST', '/calls', {
+      token: A.token,
+      body: { type: 'audio', chatId: gid2, isGroup: true, participants: [B.id, C.id] },
+    });
+    check('a group call record is created', startedGroup.status === 201 || startedGroup.status === 200, `${startedGroup.status} ${startedGroup.data?.message}`);
+
+    const hist = await http('GET', '/calls', { token: B.token });
+    const row = (hist.data.calls || []).find((c) => String(c.chat?._id || c.chat) === String(gid2));
+    check('the group call appears in a member history', !!row, `${(hist.data.calls || []).length} row(s)`);
+    check('the row is flagged as a group call', row?.isGroup === true, JSON.stringify(row?.isGroup));
+    check(
+      'history identifies it by the GROUP name, not the caller',
+      row?.group?.name === 'Sunday Roast',
+      JSON.stringify(row?.group)
+    );
+    check('…and reports how many were on it', (row?.group?.memberCount || 0) >= 2, String(row?.group?.memberCount));
+    check('the individual caller is still available for the subtitle', !!row?.peer, JSON.stringify(row?.peer)?.slice(0, 80));
+  }
+
   sa.close();
   sb.close();
   sc.close();

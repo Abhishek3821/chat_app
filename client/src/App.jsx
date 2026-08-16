@@ -155,6 +155,14 @@ export default function App() {
     const apply = () => {
       const dark = theme === 'dark' || (theme === 'system' && !!mq?.matches);
       root.classList.toggle('dark', dark);
+      /* Keep the two things the CSS class alone can't reach in step — the same
+         pair the pre-paint script in index.html sets, so switching the theme at
+         runtime lands exactly where a reload would.
+         `colorScheme` drives the browser's own chrome (scrollbars, native
+         controls, autofill); `theme-color` drives the mobile browser bar and the
+         PWA status bar, which was pinned to the dark navy in both themes. */
+      root.style.colorScheme = dark ? 'dark' : 'light';
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#071A2B' : '#E4F2EA');
     };
     apply();
     if (theme === 'system' && mq) {

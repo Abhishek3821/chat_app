@@ -24,15 +24,24 @@ function preview(m) {
  * focused case), the user's "Call notifications" setting is on, and the browser
  * permission has been granted (Settings → Notifications → Enable).
  */
-function notifyIncomingCallDesktop(caller, type) {
+function notifyIncomingCallDesktop(caller, type, group) {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const settings = useAuth.getState().user?.settings;
     if (settings?.notifications?.calls === false) return;
     if (document.visibilityState === 'visible' && document.hasFocus()) return;
-    const n = new Notification(`Incoming ${type === 'video' ? 'video' : 'voice'} call`, {
-      body: `${caller?.name || 'Someone'} is calling you on ChatKonect`,
-      icon: caller?.avatar || '/logo.svg',
+    /* A group call is FROM THE GROUP. When the tab is unfocused this notification
+       is the first — often the only — thing the user sees, so naming just the
+       caller ("Alice is calling you") hid both which group it was and that other
+       people were being rung too. The caller stays in the body; the group leads. */
+    const kind = type === 'video' ? 'video' : 'voice';
+    const title = group?.name ? `${group.name} · incoming ${kind} call` : `Incoming ${kind} call`;
+    const body = group?.name
+      ? `${caller?.name || 'Someone'} is calling the group${group.memberCount ? ` · ${group.memberCount} members` : ''}`
+      : `${caller?.name || 'Someone'} is calling you on ChatKonect`;
+    const n = new Notification(title, {
+      body,
+      icon: group?.avatar || caller?.avatar || '/logo.svg',
       tag: 'cc-incoming-call', // one call notification at a time
       requireInteraction: true,
     });
@@ -290,7 +299,7 @@ export function useSocket() {
 
     // Incoming WebRTC call → pop the call screen in "incoming" mode.
     // (The SDP offer arrives later, only after we accept — see useWebRTC.)
-    socket.on('call:incoming', ({ from, callId, type, caller, chatId, isGroup }) => {
+    socket.on('call:incoming', ({ from, callId, type, caller, chatId, isGroup, group: serverGroup }) => {
       const ui = useUI.getState();
       if (String(from) === String(userId)) return; // never ring for my own call
       if (ui.call || ui.inMeeting) {
@@ -298,21 +307,34 @@ export function useSocket() {
         // "busy on another call") and surface a side notification here.
         socket.emit('call:busy', { to: from, callId, chatId });
         const who = caller || { _id: from };
-        ui.showBusyIncoming({ caller: who, type: type || 'audio', at: Date.now() });
+        ui.showBusyIncoming({ caller: who, type: type || 'audio', at: Date.now(), group: serverGroup || null });
         useNotifications.getState().pushLocal({
           type: 'missed_call',
           title: `Missed ${type === 'video' ? 'video ' : ''}call`,
-          body: `${who?.name || 'Someone'} called while you were on another call`,
+          // Same reasoning as the desktop notification: a missed GROUP call is
+          // from the group, and "Alice called" gives no way to find it again.
+          body: serverGroup?.name
+            ? `${who?.name || 'Someone'} called ${serverGroup.name} while you were on another call`
+            : `${who?.name || 'Someone'} called while you were on another call`,
           from: who,
+          data: chatId ? { chatId } : undefined,
         });
         return;
       }
       // OS-level notification so an unfocused/backgrounded desktop still rings.
       // (The audible ringtone is driven by call status inside useWebRTC.)
-      notifyIncomingCallDesktop(caller, type);
+      notifyIncomingCallDesktop(caller, type, serverGroup);
       // Group call: attach the group chat (for the roster + header) so useWebRTC
       // can mesh-connect to everyone, not just the caller.
-      const group = isGroup && chatId ? useChat.getState().chats.find((c) => c._id === chatId) || { _id: chatId, isGroup: true } : null;
+      /* Prefer the group the SERVER resolved: it is authoritative and always has
+         a name, whereas the local chat list may not contain this group yet (fresh
+         login, or a group never opened) — which used to make the ring show no
+         group name at all. The cached chat still wins for the roster, since it
+         carries populated participants the mesh needs. */
+      const cached = isGroup && chatId ? useChat.getState().chats.find((c) => c._id === chatId) : null;
+      const group = isGroup && chatId
+        ? { ...(serverGroup || {}), ...(cached || {}), _id: chatId, isGroup: true, name: cached?.name || serverGroup?.name || 'Group call' }
+        : null;
       ui.startCall({ direction: 'incoming', peer: caller || { _id: from }, callId, type: type || 'audio', chatId, group });
     });
 

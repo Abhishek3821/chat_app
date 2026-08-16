@@ -50,6 +50,10 @@ jobs:
       # once rejected all of them off an over-strict origin check.
       - name: invite / QR parsing (25 checks)
         run: node test-invite.mjs
+      # A colour hardcoded to one theme is invisible in the other, and neither
+      # the build nor a screenshot of the theme you happen to be in will say so.
+      - name: light/dark contrast audit
+        run: node audit-theme.mjs
 
   server-tests:
     runs-on: ubuntu-latest

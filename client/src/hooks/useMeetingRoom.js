@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { createEffectPipeline, EFFECTS } from '@/lib/videoEffects';
 
 /**
  * Full-mesh WebRTC for a Google-Meet-style meeting room. Every participant is a
@@ -30,6 +31,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const [questions, setQuestions] = useState([]);
   const [recording, setRecording] = useState(false);
   const [mediaError, setMediaError] = useState(null);
+  const [videoEffect, setVideoEffectState] = useState(EFFECTS.NONE);
+  const [effectLoading, setEffectLoading] = useState(false); // first enable fetches the wasm
   // In-meeting interaction state
   const [chatMessages, setChatMessages] = useState([]); // [{ id, socketId, name, avatar, text, at, mine }]
   const [reactions, setReactions] = useState([]); // transient floating [{ id, socketId, emoji }]
@@ -40,7 +43,15 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
 
   const peersRef = useRef(new Map()); // socketId -> RTCPeerConnection
   const localRef = useRef(null);
+  /* The track SENT when not screen-sharing. With a background effect on this is
+     the composited canvas track, not the camera — which is what makes stopShare
+     and every late-joining peer pick the effect up for free. */
   const cameraTrackRef = useRef(null);
+  /* The untouched camera. Kept separately because it is what actually holds the
+     device open: the effect pipeline reads from it, and only stopping THIS turns
+     the camera light off. */
+  const rawCameraTrackRef = useRef(null);
+  const effectRef = useRef(null); // active pipeline, or null
   const screenTrackRef = useRef(null);
   const candBufRef = useRef(new Map()); // socketId -> [candidate]
   const usersRef = useRef(new Map()); // socketId -> { userId, name, avatar }
@@ -223,6 +234,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         localRef.current = stream;
         cameraTrackRef.current = stream.getVideoTracks()[0] || null;
+        rawCameraTrackRef.current = cameraTrackRef.current;
         // Host-controlled mute-on-entry: actually disable the mic to match `muted`.
         if (muteOnEntry && !isHost) stream.getAudioTracks().forEach((t) => { t.enabled = false; });
         setLocalStream(stream);
@@ -334,6 +346,10 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       // Finalize any recording so it downloads before we tear the streams down.
       const rec = recRef.current;
       if (rec) { recRef.current = null; cancelAnimationFrame(rec.raf); try { if (rec.recorder.state !== 'inactive') rec.recorder.stop(); } catch { /* noop */ } try { rec.audioCtx.close(); } catch { /* noop */ } }
+      // Stop the effect's render loop. It holds a requestAnimationFrame and a
+      // canvas capture, both of which outlive the page otherwise.
+      try { effectRef.current?.destroy(); } catch { /* noop */ }
+      effectRef.current = null;
       socket.off('meeting:signal', onSignal);
       socket.off('meeting:peer-joined', onPeerJoined);
       socket.off('meeting:peer-left', onPeerLeft);
@@ -434,9 +450,75 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     setMuted((m) => !m);
   }, [muted]);
 
+  /**
+   * Background blur / virtual background.
+   *
+   * Swaps the outgoing video track with `replaceTrack`, which needs NO
+   * renegotiation — turning blur on mid-call doesn't interrupt anyone's video.
+   * Switching between effects doesn't even do that: the pipeline keeps producing
+   * the same track and only changes what it paints.
+   *
+   * The wasm runtime (~12MB) is fetched on the first enable and cached, so a
+   * call where nobody touches this pays nothing for it.
+   */
+  const setVideoEffect = useCallback(async (next, imageUrl) => {
+    if (!video) return;
+    const raw = rawCameraTrackRef.current;
+    if (!raw) return;
+
+    // Already running: just repaint. No track change, no signalling.
+    if (effectRef.current && next !== EFFECTS.NONE) {
+      await effectRef.current.setEffect(next, imageUrl);
+      setVideoEffectState(next);
+      return;
+    }
+
+    const sendTrack = (track) => {
+      cameraTrackRef.current = track;
+      // While screen-sharing the senders carry the screen; stopShare will pick
+      // this up from cameraTrackRef when it restores.
+      if (!screenTrackRef.current) {
+        peersRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+          if (sender) sender.replaceTrack(track).catch(() => {});
+        });
+      }
+      // Rebuild the local stream so the preview and any late peer see the same
+      // thing the room sees.
+      const next$ = new MediaStream([track, ...(localRef.current?.getAudioTracks() || [])]);
+      localRef.current = next$;
+      setLocalStream(next$);
+    };
+
+    if (next === EFFECTS.NONE) {
+      effectRef.current?.destroy();
+      effectRef.current = null;
+      sendTrack(raw);
+      setVideoEffectState(EFFECTS.NONE);
+      return;
+    }
+
+    try {
+      setEffectLoading(true);
+      const pipeline = await createEffectPipeline(new MediaStream([raw]), { effect: next, image: imageUrl });
+      effectRef.current = pipeline;
+      sendTrack(pipeline.stream.getVideoTracks()[0]);
+      setVideoEffectState(next);
+    } catch (err) {
+      toast.error(err?.message || 'Background effects could not start on this device.');
+      setVideoEffectState(EFFECTS.NONE);
+    } finally {
+      setEffectLoading(false);
+    }
+  }, [video]);
+
   const toggleCamera = useCallback(() => {
     const s = localRef.current; if (!s) return;
     s.getVideoTracks().forEach((t) => { t.enabled = camOff; });
+    /* Also gate the RAW camera. With an effect running the stream above is the
+       canvas, and disabling only that leaves the device open — camera light on
+       while the UI says the camera is off. */
+    if (rawCameraTrackRef.current) rawCameraTrackRef.current.enabled = camOff;
     setCamOff((c) => !c);
   }, [camOff]);
 
@@ -553,6 +635,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
 
   return {
     localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
+    videoEffect, effectLoading, setVideoEffect,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised, knocks, admitGuest,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
