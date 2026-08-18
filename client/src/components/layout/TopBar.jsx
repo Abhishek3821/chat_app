@@ -144,9 +144,15 @@ export default function TopBar() {
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                  // w-80 is exactly 320px, so on a 320-360px phone the panel ran
-                  // off the left edge. Cap it to the viewport minus the gutters.
-                  className="glass-strong absolute right-0 top-12 z-40 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-3xl sm:w-80"
+                  /* The panel is anchored to the BELL, and the bell is ~60px in
+                     from the right edge (theme toggle + avatar sit after it), so
+                     `right-0` + a 320px panel still hung ~45px off the LEFT of a
+                     360px screen — and clamping the width to `100vw - 2rem`
+                     couldn't fix it, because the overflow is measured from the
+                     anchor, not from the viewport. On phones it's a sheet pinned
+                     to both gutters under the 64px top bar; from sm: up it goes
+                     back to a popover anchored to the bell. */
+                  className="glass-strong fixed inset-x-3 top-[4.5rem] z-40 overflow-hidden rounded-3xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-80"
                 >
                   <div className="flex items-center justify-between border-b border-border px-4 py-3">
                     <p className="font-semibold text-content">Notifications</p>
@@ -157,7 +163,10 @@ export default function TopBar() {
                       <Check size={13} /> Mark all read
                     </button>
                   </div>
-                  <div className="scrollbar-thin max-h-96 overflow-y-auto">
+                  {/* 60vh on a phone: a fixed 24rem list plus the header ran past
+                      the bottom nav on a short screen, so the last rows were
+                      unreachable. */}
+                  <div className="scrollbar-thin max-h-[60vh] overflow-y-auto sm:max-h-96">
                     {notifs.length === 0 && (
                       <p className="px-4 py-8 text-center text-sm text-content-muted">You're all caught up 🎉</p>
                     )}

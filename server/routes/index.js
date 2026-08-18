@@ -30,6 +30,21 @@ import { webhookRoutes, hookIngressRoutes } from './webhookRoutes.js';
 
 const router = Router();
 
+/* Build identity, resolved once at boot.
+   An integrator could not previously tell WHICH code a given host was running,
+   so a fix verified against the source could not be confirmed as deployed —
+   the only way to find out was to retest the integration by hand. Surfacing the
+   commit makes "is this host running the change?" a single GET.
+   Platform env vars are checked first so this needs no build step. */
+const BUILD_COMMIT = (
+  process.env.GIT_COMMIT ||
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.SOURCE_VERSION ||
+  ''
+).slice(0, 12);
+const BOOTED_AT = new Date();
+
 router.get('/health', (req, res) => {
   const dbUp = mongoose.connection.readyState === 1; // 1 = connected
   res.status(dbUp ? 200 : 503).json({
@@ -37,6 +52,10 @@ router.get('/health', (req, res) => {
     service: 'ChatKonect API',
     db: dbUp ? 'connected' : 'disconnected',
     email: isEmailConfigured() ? 'configured' : 'not_configured',
+    // `unknown` means the host's platform exposes no commit var — not that it is
+    // stale. Set GIT_COMMIT explicitly in that case.
+    commit: BUILD_COMMIT || 'unknown',
+    bootedAt: BOOTED_AT,
     time: new Date(),
   });
 });

@@ -353,6 +353,91 @@ rule that applies to first-party users (`Send a contact request and get accepted
 chat.`). Provisioning two users does not automatically connect them; wire your product's own
 relationships into contact requests.
 
+### Group audio and video calls
+
+Group calling is **fully available to a tenant** — it is the same code path first-party users get,
+not a reduced one. Verified end-to-end by `server/tests/platform-calls.mjs`:
+
+- A **minted user token authenticates the Socket.IO handshake**, so a tenant's users get the full
+  signalling channel, not just REST.
+- A tenant user creates a group (`POST /api/groups`) and starts a group call
+  (`POST /api/calls` with `chatId`, `isGroup: true`, `type: 'audio' | 'video'`).
+- **Every member rings** — each gets `call:incoming` — and the ring carries the **group identity**
+  (`isGroup: true` plus `group: { _id, name, avatar, memberCount }`), so your UI can show
+  "Acme Support is calling" exactly as the first-party client does.
+- Two members who are **not contacts** can still exchange SDP offers and ICE candidates. Group
+  membership authorises the call leg; the mutual-contact rule above applies to 1:1 calls only.
+
+Two flags gate it, and both are genuinely enforced: **`calls`** (a tenant without it gets `403` from
+`POST /api/calls`, with a message naming the feature) and **`groups`**. `video` is *not* separately
+enforced — video rides the `calls` router (§9.1), so `calls` is the switch that matters.
+
+Isolation holds on this path: a `call:invite` aimed at a user of a **different** tenant is dropped,
+so cross-tenant ringing is impossible.
+
+**1:1 calls work the same way, with no Call record required.** The authorization on
+`call:offer` / `call:answer` / `call:ice-candidate` is `canCallSignal` = mutual
+contacts **or** shared group **or** `inSameCall`. For two contacts the first branch
+passes, so a raw socket emit relays with **no `callId` and no pre-existing Call
+record** — `POST /api/calls/start` is for history and the offline push, not a
+prerequisite for signalling. The same handler serves every client; there is no
+separate first-party path.
+
+> ⚠ **The target field is `to`, not `receiverId`.** `receiverId`/`callType` are REST
+> fields for `POST /api/calls/start`. On the socket, `{ receiverId, offer }` leaves
+> `to` undefined and the emit is dropped **silently** — no error, no log. And
+> `typing-start`/`typing-stop` are chat-room scoped: both sides must emit `join-chat`
+> first, and typing cannot be aimed at a user id. See
+> [SOCKET_EVENTS.md §2](SOCKET_EVENTS.md).
+
+### Group endpoints — the four that get addressed wrongly
+
+Each of these returns a success status when addressed with the wrong key or route,
+so the mistake looks like a missing feature. Verified in both directions by
+`server/tests/embed-groups.mjs` (22 checks).
+
+| Goal | Correct call | The near-miss, and what it does |
+|---|---|---|
+| Create a group with members | `POST /api/groups` `{ name, members: [ids] }` | `participants:` or `userIds:` → **201 with only the creator**. `members` is the only key read |
+| Add members later | `POST /api/groups/:id/members` `{ members: [ids] }` | `PATCH /api/groups/:id` → **200, member count unchanged**. That route is `updateGroup`; it assigns only `name`/`description`/`avatar`/`messagingPolicy` |
+| Rename / re-avatar a group | `PATCH /api/groups/:id` `{ name }` | — (works as documented) |
+| Start a group call | `POST /api/calls` `{ type, chatId, isGroup: true, participants: [ids] }` | `POST /api/calls/start` → **400**, it is the 1:1 endpoint (`receiverId` + mutual contacts) |
+
+Two things that make groups cheaper than 1:1 for a partner: **no contact handshake
+is required** to add someone to a group (`groupAddPermission` defaults to
+`everyone`), and **group membership alone authorises the mesh legs**, so members who
+aren't contacts can signal each other. Check the `skipped[]` array in the response —
+it names anyone omitted with a reason (`not_found`, `blocked`, `privacy`).
+
+### TURN is bring-your-own
+
+There is **no TURN server in this project and no endpoint that issues TURN
+credentials** — the server never touches ICE at all. `VITE_TURN_*` is a build-time
+variable for the first-party React client only; it has no bearing on a partner
+frontend, which must configure its own `RTCPeerConnection` `iceServers`.
+
+STUN alone (what `client/src/lib/iceServers.js` ships) covers same-LAN and most
+home networks and fails on mobile carriers, corporate wifi and symmetric NAT —
+where the call rings, "connects", and carries no media. A relay is required for
+production.
+
+**Do not ship static TURN credentials to a browser.** They are readable by anyone
+who opens devtools and can be used to relay arbitrary traffic at your expense. Mint
+short-lived credentials server-side instead — the coturn REST-API scheme
+(`TURN_REST_API` shared secret → HMAC username/password pairs) is the standard, and
+hosted providers expose the same shape. `iceServers.js` already supports it via
+`VITE_TURN_CREDENTIALS_URL`: an endpoint returning one ice-server object or an
+array. Copy that pattern.
+
+Two things you must supply yourself:
+
+1. **The call UI and the `RTCPeerConnection` wiring.** There is no embed SDK (§9.2). The server
+   relays signalling; creating peer connections, attaching tracks and rendering tiles is your
+   frontend's job. `client/src/hooks/useWebRTC.js` is a working reference implementation.
+2. **TURN credentials.** Calls are peer-to-peer full mesh. Without a TURN server, any two users
+   behind symmetric NAT will fail to connect — see [SCALING_CALLS.md](SCALING_CALLS.md). Mesh is
+   comfortable to ~6 participants and hard-capped at 9; beyond that use meetings with LiveKit.
+
 ---
 
 ## 7. Security rules

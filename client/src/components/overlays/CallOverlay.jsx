@@ -26,12 +26,14 @@ import {
   Presentation,
   RectangleHorizontal,
   RectangleVertical,
+  MoreHorizontal,
 } from 'lucide-react';
 import Avatar from '../ui/Avatar';
 import { useUI } from '../../store/useUI';
 import { useChat } from '../../store/useChat';
 import { useContacts } from '../../store/useContacts';
 import { useWebRTC } from '../../hooks/useWebRTC';
+import { useViewportSize } from '../../hooks/useViewportSize';
 import { formatDuration, cn, videoGridCols } from '../../lib/utils';
 
 export default function CallOverlay() {
@@ -113,6 +115,13 @@ function CallSession({ call }) {
   const [gridView, setGridView] = useState(false); // force equal-tile grid layout
   const [portrait, setPortrait] = useState(false); // tile orientation: landscape | portrait
   const rootRef = useRef(null);
+  /* Below `sm` the bar keeps mic / camera / speaker / chat / end and everything
+     else moves into one labelled sheet — nine 48px circles wrapped into two
+     ragged rows on a phone, which is the device most calls happen on. Measured
+     from the live viewport because the split is structural (which buttons exist),
+     not cosmetic. */
+  const { width: viewportWidth } = useViewportSize();
+  const compact = viewportWidth < 640;
 
   const isVideo = call.type === 'video';
   const rawPeer = call.peer || {};
@@ -506,21 +515,27 @@ function CallSession({ call }) {
               </button>
             </div>
           ) : (
-            <div className="glass-strong flex max-w-full flex-wrap items-center justify-center gap-2 rounded-full p-2.5 shadow-soft-lg sm:gap-3">
+            /* An explicitly DARK pill. `glass-strong` paints itself from
+               `--surface`, which follows the app theme — but this overlay is
+               always dark navy, so on a light-themed phone the pill turned white
+               and every `bg-white/15` control disappeared into it. */
+            <div className="flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-full bg-navy-950/70 p-2 shadow-soft-lg ring-1 ring-white/15 backdrop-blur-xl sm:gap-3 sm:p-2.5">
               <CtrlBtn active={!muted} onClick={toggleMute} icon={muted ? MicOff : Mic} label={muted ? 'Unmute' : 'Mute'} />
               {isVideo && <CtrlBtn active={!camOff} onClick={toggleCamera} icon={camOff ? VideoOff : Video} label={camOff ? 'Camera on' : 'Camera off'} />}
               <CtrlBtn onClick={cycleSpeaker} icon={Volume2} label="Speaker" />
-              <CtrlBtn
-                active={!noiseCancel}
-                onClick={toggleNoiseCancel}
-                icon={AudioLines}
-                label={noiseCancel ? 'Noise cancel: On' : 'Noise cancel: Off'}
-              />
+              {!compact && (
+                <CtrlBtn
+                  active={!noiseCancel}
+                  onClick={toggleNoiseCancel}
+                  icon={AudioLines}
+                  label={noiseCancel ? 'Noise cancel: On' : 'Noise cancel: Off'}
+                />
+              )}
               {/* Presenting is gated on the CAPABILITY, not on the viewport: it
                   was `hidden sm:grid`, which both hid it from the Android
                   browsers that do support getDisplayMedia and would have shown
                   it on a small desktop window that doesn't. */}
-              {isVideo && typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
+              {!compact && isVideo && typeof navigator.mediaDevices?.getDisplayMedia === 'function' && (
                 <CtrlBtn
                   active={!sharingScreen}
                   onClick={toggleScreenShare}
@@ -528,7 +543,7 @@ function CallSession({ call }) {
                   label={sharingScreen ? 'Stop presenting' : 'Present screen'}
                 />
               )}
-              {connected && (
+              {!compact && connected && (
                 <CtrlBtn
                   active={!gridView}
                   onClick={() => setGridView((v) => !v)}
@@ -536,7 +551,7 @@ function CallSession({ call }) {
                   label={gridView ? 'Auto layout' : 'Grid layout'}
                 />
               )}
-              {isVideo && connected && (
+              {!compact && isVideo && connected && (
                 <CtrlBtn
                   active={!portrait}
                   onClick={() => setPortrait((v) => !v)}
@@ -544,13 +559,28 @@ function CallSession({ call }) {
                   label={portrait ? 'Portrait tiles (tap for landscape)' : 'Landscape tiles (tap for portrait)'}
                 />
               )}
-              {/* Add people and Chat used to vanish below `sm`, so on a phone —
-                  the device most calls happen on — there was no way to reach
-                  either during a call. The bar is already `flex-wrap`, so they
-                  simply take a second row instead of being dropped. */}
-              {isVideo && <CtrlBtn active={!showAdd} onClick={() => setShowAdd((v) => !v)} icon={UserPlus} label="Add people" />}
+              {!compact && isVideo && <CtrlBtn active={!showAdd} onClick={() => setShowAdd((v) => !v)} icon={UserPlus} label="Add people" />}
               <CtrlBtn onClick={openChat} icon={MessageSquare} label="Chat" />
-              <button onClick={hangUp} title="End call" className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-lg transition-transform hover:scale-105 active:scale-95">
+              {/* Everything the phone bar drops is still reachable here — with a
+                  label, which an unmarked circle never had. */}
+              {compact && (
+                <CallMoreControls
+                  isVideo={isVideo}
+                  connected={connected}
+                  noiseCancel={noiseCancel}
+                  onToggleNoiseCancel={toggleNoiseCancel}
+                  sharingScreen={sharingScreen}
+                  onToggleScreenShare={toggleScreenShare}
+                  gridView={gridView}
+                  onToggleGridView={() => setGridView((v) => !v)}
+                  portrait={portrait}
+                  onTogglePortrait={() => setPortrait((v) => !v)}
+                  onAddPeople={() => setShowAdd(true)}
+                />
+              )}
+              {/* A size up from the rest on a phone — it is the one control you
+                  must be able to hit without looking. */}
+              <button onClick={hangUp} title="End call" className="grid h-12 w-12 place-items-center rounded-full bg-red-500 text-white shadow-lg transition-transform hover:scale-105 active:scale-95 sm:h-14 sm:w-14">
                 <PhoneOff size={22} />
               </button>
             </div>
@@ -561,11 +591,109 @@ function CallSession({ call }) {
   );
 }
 
+/* 44px on a phone (the touch-target floor) and 48 from sm: up — at a flat 48 the
+   row of primaries plus End call was a few pixels wider than a 360px screen, so
+   the bar wrapped for the sake of about 20px. */
 function CtrlBtn({ icon: Icon, label, onClick, active = true, className }) {
   return (
-    <button onClick={onClick} title={label} className={cn('grid h-12 w-12 place-items-center rounded-full transition-all hover:scale-105 active:scale-95', active ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white text-navy-900', className)}>
+    <button onClick={onClick} title={label} className={cn('grid h-11 w-11 place-items-center rounded-full transition-all hover:scale-105 active:scale-95 sm:h-12 sm:w-12', active ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white text-navy-900', className)}>
       <Icon size={20} />
     </button>
+  );
+}
+
+/** One labelled row in the phone control sheet. */
+function MoreRow({ icon: Icon, label, hint, active = false, onClick }) {
+  return (
+    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl px-2.5 py-3 text-left transition-colors hover:bg-white/10">
+      <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-full', active ? 'bg-white text-navy-900' : 'bg-white/10 text-white')}>
+        <Icon size={17} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-white">{label}</span>
+        {hint && <span className="block truncate text-[11px] text-white/50">{hint}</span>}
+      </span>
+      {active && <Check size={16} className="shrink-0 text-white/70" />}
+    </button>
+  );
+}
+
+/**
+ * Phone-only overflow for the secondary call controls.
+ *
+ * The sheet is pinned to the viewport's gutters rather than anchored to its
+ * button: the control bar is centred, so an anchored menu hangs off whichever
+ * edge the button happens to sit near.
+ */
+function CallMoreControls({
+  isVideo,
+  connected,
+  noiseCancel,
+  onToggleNoiseCancel,
+  sharingScreen,
+  onToggleScreenShare,
+  gridView,
+  onToggleGridView,
+  portrait,
+  onTogglePortrait,
+  onAddPeople,
+}) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+  const canPresent = isVideo && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+
+  return (
+    <>
+      <CtrlBtn active={!open} onClick={() => setOpen((v) => !v)} icon={MoreHorizontal} label="More options" />
+      {open && (
+        <>
+          <button className="fixed inset-0 z-40 cursor-default" onClick={close} aria-label="Close options" />
+          <div className="fixed inset-x-3 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-50 overflow-hidden rounded-3xl bg-navy-900/95 p-2 shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl">
+            <MoreRow
+              icon={AudioLines}
+              label="Noise cancellation"
+              hint={noiseCancel ? 'On — filters background noise' : 'Off'}
+              active={noiseCancel}
+              onClick={() => { onToggleNoiseCancel(); close(); }}
+            />
+            {canPresent && (
+              <MoreRow
+                icon={sharingScreen ? MonitorX : MonitorUp}
+                label={sharingScreen ? 'Stop presenting' : 'Present screen'}
+                active={sharingScreen}
+                onClick={() => { onToggleScreenShare(); close(); }}
+              />
+            )}
+            {isVideo && (
+              <MoreRow
+                icon={UserPlus}
+                label="Add people"
+                hint="Ring someone else into this call"
+                onClick={() => { onAddPeople(); close(); }}
+              />
+            )}
+            {connected && (
+              <MoreRow
+                icon={LayoutGrid}
+                label="Grid layout"
+                hint={gridView ? 'On — equal tiles' : 'Off — automatic layout'}
+                active={gridView}
+                onClick={() => { onToggleGridView(); close(); }}
+              />
+            )}
+            {isVideo && connected && (
+              <MoreRow
+                icon={portrait ? RectangleVertical : RectangleHorizontal}
+                label="Tile shape"
+                hint={portrait ? 'Portrait — tap for landscape' : 'Landscape — tap for portrait'}
+                active={portrait}
+                onClick={() => { onTogglePortrait(); close(); }}
+              />
+            )}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 

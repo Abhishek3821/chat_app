@@ -8,6 +8,52 @@ Every realtime event, in both directions, plus the exact ordering of WebRTC call
 - **Related:** [AUTHENTICATION.md](AUTHENTICATION.md#110-socketio-handshake-authentication) ·
   [API.md](API.md) · [BUSINESS_LOGIC.md](BUSINESS_LOGIC.md)
 
+### Inventory (extracted from source, 2026-08-17)
+
+| Direction | Distinct events |
+|---|---:|
+| Client → Server (`socket.on` in `server/socket/index.js`) | 48 |
+| Server → Client (every emit shape) | 67 |
+| Client listens for | 59 |
+| Client sends | 36 |
+| **Total distinct protocol events** | **91** |
+
+Cross-referencing the four directions leaves exactly two gaps, and both are deliberate:
+
+- **0 events the client listens for that the server never emits** — no dead listeners.
+- **0 events the client sends that the server has no handler for** — nothing is silently dropped.
+- **8 events the server emits that the web client ignores** — the dash-form call aliases
+  (`incoming-call`, `accept-call`, `reject-call`, `webrtc-offer`, `webrtc-answer`,
+  `webrtc-ice-candidate`, `call-missed`, `call-ended`). These exist for third-party and
+  embedded clients; the web app uses the `call:*` form. See §5.
+- **12 handlers the web client never triggers** — the same aliases in the inbound
+  direction, plus the legacy `register-user` / `call-user` / `end-call` /
+  `message-read` / `message-reaction` names.
+
+To re-derive after changing any event, grep for `socket.on(`, `.emit(`, `emitToUser(`,
+`emitToChat(`, `relay(` and the client wrappers `emitSocket(` / `emitSig(` /
+`emitSignal(` / `getSocket()?.emit(`. Missing the wrapper forms is what makes a live
+event look dead — `s.on(...)` in `useWebRTC.js` and `getSocket()?.emit(...)` in
+`useMeetingRoom.js` are both invisible to a naive `socket.on` / `socket.emit` search.
+
+### Test coverage: 66/66 (100%)
+
+Every server→client event is **proven on a real socket** by a suite that connects
+`socket.io-client` sessions for two users and asserts on what the OTHER side receives.
+`node tests/realtime-coverage.mjs` reports this and runs in CI.
+
+One event is deliberately not socket-tested: `presence-state` is an echo to the
+sender's own devices and is asserted through REST in `privacy-settings.mjs`.
+
+**Waiting on a socket event in a test has one trap worth knowing.** Polls, Q&A and
+every other room broadcast reach *both* participants about a millisecond apart, so
+"wait for the next `meeting:polls` on the guest" will happily catch the tail of the
+*previous* operation if the waiter is attached inside that gap — and then every
+assertion after it reads one event behind. Wait for a payload that **matches the
+expected state** (`p.polls[0].closed === true`), not merely for the next one. The
+suites below all do; getting this wrong produced a very convincing false report that
+upvotes weren't broadcasting when they were.
+
 ## 1. Connection & handshake
 
 ### URL resolution (client)
@@ -98,6 +144,26 @@ Ordering note (`socket/index.js:176`): **all** listeners are registered synchron
 
 All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string' && mongoose.isValidObjectId(v)` (socket payloads never pass through the Express `mongoSanitize`, so any id used in a query is validated here).
 
+> ### ⚠ Every handler below fails SILENTLY on a wrong payload
+>
+> There is no error event, no ack, and no server log when a guard rejects an emit. A
+> malformed payload is indistinguishable from a dead relay, so read the Payload
+> column exactly. The two mistakes that actually happen:
+>
+> **1. The target field is `to`, never `receiverId`.** Every call signal is keyed
+> `{ to: <userId>, … }`. `receiverId` and `callType` are **REST** fields, belonging
+> to `POST /api/calls/start` only. Emitting `{ receiverId, offer, callType }` leaves
+> `to` undefined, the `if (to && …)` guard short-circuits, and the offer is dropped
+> without a trace. Use `{ to, offer }`.
+>
+> **2. `typing-*`, `message-read` and `message-reaction` are CHAT-ROOM scoped, not
+> user-targeted.** They relay to `chat:<chatId>` and require the *sender* to have
+> emitted `join-chat` first (the `inChat` guard — room membership doubles as the
+> authorization check). There is no way to target typing at a user id. Both parties
+> must `join-chat` before either sees the other type.
+>
+> Proven both directions by `server/tests/embed-1to1-signalling.mjs` (18 checks).
+
 | Event | Payload | Who may emit | Effect / what the server does | What it emits back |
 |---|---|---|---|---|
 | `join-chat` | `chatId` (raw string, not an object) | any authenticated socket | `isChatMember()` → `socket.join('chat:'+chatId)`. Silent no-op if not a member | nothing |
@@ -131,6 +197,14 @@ All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string
 | `meeting:force-mute` | `{ meetingId, to? , toUser? }` (`to`=socketId for mesh, `toUser`=userId for the LiveKit/SFU path) | in-room + room host | targeted relay; `toUser` wins over `to` | `meeting:force-mute` `{ by: hostName }` → `user:<toUser>` or the single socket `to` |
 | `meeting:remove` | `{ meetingId, to?, toUser? }` | in-room + room host | `fetchSockets()` on the room, selects targets by `toUser` (all their sockets) or exact `to`, never the host's own socket; forces `target.leave(room)` | `meeting:removed` `{ by: hostName }` to each target; `meeting:peer-left` `{ socketId: target.id }` to the room |
 | `meeting:leave` | `{ meetingId }` | any (`isId` required) | leaves the room, clears `socket.data.meetings`/`meetingHost`, `finalizeAttendance()` → `$inc attendees.$.durationSeconds`, sets `leftAt`+`endedAt`, and if the room is now empty flips `status: 'ongoing' → 'completed'` | `meeting:peer-left` `{ socketId }` to the room |
+| `meeting:poll-create` | `{ meetingId, question, options, multi }` | in-room **and room host** | appends a poll to `Meeting.polls` | `meeting:polls` `{ polls }` — the whole list — to the room |
+| `meeting:poll-vote` | `{ meetingId, pollId, choices }` (`choices` = array of option indices) | in-room (anyone) | records/replaces this user's vote; a closed poll is ignored | `meeting:polls` `{ polls }` to the room |
+| `meeting:poll-close` | `{ meetingId, pollId }` | in-room **and room host** | sets `closed: true` | `meeting:polls` `{ polls }` to the room |
+| `meeting:qa-ask` | `{ meetingId, text, anonymous }` | in-room (anyone) | appends a question; `anonymous` hides the asker's name from everyone but the host | `meeting:questions` `{ questions }` to the room |
+| `meeting:qa-upvote` | `{ meetingId, questionId }` | in-room (anyone) | toggles this user in the question's `upvotes` | `meeting:questions` `{ questions }` to the room |
+| `meeting:qa-answer` | `{ meetingId, questionId, answerText }` | in-room **and room host** | marks answered + stores the text | `meeting:questions` `{ questions }` to the room |
+| `meeting:caption` | `{ meetingId, text, final }` | in-room. Rate-limited on the WRITE bucket — captions fire continuously while someone speaks | broadcasts the line and appends it to the stored transcript (capped at 500 lines) | `meeting:caption` `{ socketId, userId, name, text, final }` to the room, **sender excluded** |
+| `presence:ping` | *(no payload)* | any authenticated socket | `touchPresence(userId)` — stamps `lastSeen` and `isOnline: true`, throttled to one DB write per user per 30 s. The client sends this every 60 s **only while its tab is visible**, which is what makes "online" mean *the app is open* rather than *a socket exists*. Silence for 5 minutes ⇒ the sweeper marks the user offline | nothing directly; the sweeper later emits `user-offline` |
 | `disconnect` | — | — | For each tracked `callPeers` entry: `transitionCall(callId, me, 'end')`; emits the ended/cancelled pair (below). Then per meeting: `meeting:peer-left` + `finalizeAttendance`. Then presence bookkeeping | `call:ended`+`call-ended`, or `call:cancelled`+`call-missed` when the resulting status is `missed`, payload `{ from, callId, reason: 'peer-disconnected' }`; `meeting:peer-left` `{ socketId }`; `user-offline` `{ userId, lastSeen }` (broadcast) |
 
 ---
@@ -181,6 +255,18 @@ All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string
 | `status-viewed` | `{ statusId, viewer: {_id,name,username,avatar}, at, viewerCount }` | sent to the status OWNER only, and only for a **new** viewer — a re-view or a self-view emits nothing (`statusController.js:136`) | `useSocket.js:218` → `useStatus.applyStatusViewed()` patches the viewer into the item in place, so the count and avatar row move while the owner is looking at them |
 | `status-reply` | `{ from: <name>, text }` | replying to a status (`statusController.js:158`) | `useSocket.js:221` → bell + toast |
 | `meeting-invited` | `{ meetingId, title, startAt }` | meeting created/invitees added (`meetingController.js:133`) | `useSocket.js:194` → bell + `📅` toast (only reads `title`) |
+| `contact-removed` | To the person removed: `{ userId, by }`. To the actor's own other tabs: `{ userId }` | `DELETE /api/users/me/contacts/:id` (`userController.js:296`). Unfriending is **mutual**, so both sides are told | `useContacts.applyContactRemoved(userId)` — drops the row locally so both lists agree without a reload |
+| `scheduled-message` | `{ id, chatId, status }`, `status ∈ pending \| cancelled \| sent \| failed` | scheduling, cancelling, and the dispatcher firing (`messageController.js:762`, `:790`). Sent **only to the author's own room**, so their other devices stay in step | `useSocket.js` → `useChat.applyScheduledUpdate()` |
+
+### Per-user settings echo (own devices only)
+
+Both go to the actor's **own** personal room. They exist so a change made on one device
+lands on that person's other tabs — nobody else can see either value.
+
+| Event | Payload | When emitted | Client handler |
+|---|---|---|---|
+| `chat-flag` | `{ chatId, action, value }`, `action ∈ pin \| archive \| mute` | `POST /api/users/me/chats/:id/:action` (`userController.js:343`) | `useSocket.js` → `useChat.applyChatFlag()`. Takes the **absolute** value, never a toggle — the device that made the change also receives this echo, and re-toggling there would undo the action the user just took |
+| `chat-theme` | `{ chatId, wallpaper, bubble }` | `PATCH /api/users/me/chat-theme` (`userController.js:392`) | `useChat.applyChatTheme()` — per-chat wallpaper is personal, like WhatsApp's |
 
 ### Live location
 
@@ -227,6 +313,21 @@ Every call signal is emitted under **both** naming schemes; the current client l
 | `meeting:denied` | `{ meetingId }` | host denied | `useMeetingRoom.js:275` / `useLiveKitRoom.js:227` → `status:'denied'` |
 | `meeting:force-mute` | `{ by, all? }` | `meeting:mute-all` (with `all:true`) or targeted `meeting:force-mute` | `useMeetingRoom.js:181` disables local audio tracks · `useLiveKitRoom.js:152` `setMicrophoneEnabled(false)` |
 | `meeting:removed` | `{ by }` | host removed this participant | `useMeetingRoom.js:188` / `useLiveKitRoom.js:153` → `status:'left'` |
+
+### Meeting collaboration — polls, Q&A, captions
+
+Server-authoritative: the whole collection is re-broadcast on every change, so a client
+never merges deltas and a late joiner is correct after one event.
+
+| Event | Payload | When emitted | Client handler |
+|---|---|---|---|
+| `meeting:polls` | `{ polls: Poll[] }` — the **entire** list, replaced wholesale | any poll create / vote / close, to the whole room (`socket/index.js:715`) | `useMeetingRoom.js` → `setPolls(polls)` |
+| `meeting:questions` | `{ questions: Question[] }` — the entire list | any Q&A ask / upvote / answer (`socket/index.js:775`) | `useMeetingRoom.js` → `setQuestions(questions)` |
+| `meeting:caption` | `{ socketId, userId, name, text, final }` | a participant's speech-to-text produced a line (`socket/index.js:687`). Sent with `socket.to(...)` so the **speaker never receives their own** — their UI already has it. `final:false` is an interim hypothesis that will be superseded | `CaptionOverlay` via the room hook |
+
+Captions are also appended to the meeting's stored transcript, capped at
+`MAX_TRANSCRIPT_LINES = 500` — an unbounded array on a hot document would grow all
+meeting long.
 
 ---
 
@@ -326,3 +427,95 @@ Two things deliberately **not** gated: answer/ICE/end "only make sense inside an
 
 ---
 
+
+## 5. Event-name aliases (third-party / embedded clients)
+
+Every call signal is accepted **and** emitted under two names: the namespaced `call:*`
+form and a legacy dash form. Both are live in both directions — the server registers
+each handler through `onAll([...])` and fans every outbound signal out through
+`relay(to, [...])`.
+
+| `call:*` (used by the web client) | Dash alias (also accepted / emitted) |
+|---|---|
+| `call:incoming` | `incoming-call` |
+| `call:accept` → `call:accepted` | `accept-call` |
+| `call:reject` → `call:rejected` | `reject-call` |
+| `call:offer` | `webrtc-offer` |
+| `call:answer` | `webrtc-answer` |
+| `call:ice-candidate` | `webrtc-ice-candidate` |
+| `call:end` → `call:ended` | `end-call` / `call-ended` |
+| `call:cancelled` | `call-missed` |
+
+Also accepted but never emitted by the web client: `register-user` (presence is keyed
+off the JWT handshake, so this is a no-op kept for older clients), `call-user`,
+`message-read`, `message-reaction`.
+
+**Why this matters for an integration:** you may pick either naming convention, but
+**do not listen on both** — you will receive every signal twice and, for `call:offer`,
+attempt two SDP negotiations against one peer connection. Pick one set and ignore
+the other.
+
+The alias pairs are the reason a raw extraction reports 8 "server emits nothing
+listens to" and 12 "handlers nobody calls". Neither list is dead code.
+
+---
+
+## 6. Delivery scope — what a room actually reaches
+
+Every emit lands in exactly one of five scopes. Getting this wrong is the most common
+cause of "the event never arrived".
+
+| Scope | Helper | Reaches |
+|---|---|---|
+| One user, all their devices | `emitToUser(userId, …)` | `user:<userId>` — every socket that user has open |
+| One conversation | `emitToChat(chatId, …)` | `chat:<chatId>` — **only sockets that have emitted `join-chat`** |
+| One meeting | `ioRef.to('mtg:<id>')` | everyone in the meeting room |
+| One socket | `ioRef.to(socketId)` / `socket.emit` | a single tab |
+| Everyone | `socket.broadcast.emit` | every connected socket except the sender (presence only) |
+
+Two consequences worth internalising:
+
+1. **`chat:<chatId>` membership is opt-in.** A socket is in it only after `join-chat`,
+   and the web client joins only the chat that is currently OPEN. So typing indicators
+   and read receipts reach people looking at that conversation — not everyone in it.
+   `receive-message` works regardless because message fan-out also goes through
+   `emitToUser` for each participant.
+2. **Targeted delivery is instance-local without Redis.** `emitToUser` and
+   `emitToChat` resolve rooms on the local Socket.IO adapter. Run more than one
+   server process without `REDIS_URL` and a signal addressed to a user connected to
+   *another* instance is silently dropped — while presence (which broadcasts) keeps
+   working, so the system looks half-alive. This exact triad is covered by
+   `tests/relay-delivery.mjs`.
+
+---
+
+## 7. Which suite proves what
+
+Every event above is driven over a real socket by one of these. Run any of them with
+`node tests/<name>.mjs` from `/server`.
+
+| Suite | Checks | Covers |
+|---|---:|---|
+| `e2e.mjs` | 54 | presence, messaging, typing, the full 1:1 WebRTC sequence under both name conventions |
+| `chat-realtime.mjs` | 39 | edit, delete, reactions, pins, poll votes, per-chat settings |
+| `embed-1to1-signalling.mjs` | 26 | the raw signalling contract an embed partner integrates against — `to` vs `receiverId`, the `join-chat` gate |
+| `meeting-mesh.mjs` | 28 | a 3rd/4th joiner sees everyone already in the room |
+| `meeting-room-realtime.mjs` | 12 | join, in-meeting chat, hand, reactions, host controls |
+| `meeting-collab-realtime.mjs` | 24 | polls, Q&A, live captions, knock/deny |
+| `call-edges-realtime.mjs` | 12 | `call:unavailable`, `call:handled`, cancel-while-ringing, dash aliases |
+| `rest-triggered-realtime.mjs` | 18 | live location, `chat-updated`, scheduled messages, unfriend |
+| `group-call-mesh.mjs` | 20 | A adds C — B and C must then see each other |
+| `status-realtime.mjs` | 21 | status posted / viewed / deleted, and the audience filter |
+| `presence.mjs` | 20 | heartbeat, boot reset, the 5-minute idle rule |
+| `qr-invite.mjs` | 22 | the live contact-request card and accept/decline |
+| `relay-delivery.mjs` | 13 | single vs multi-instance delivery — the no-`REDIS_URL` failure mode |
+| `platform-calls.mjs` | 17 | tenant users calling, with the feature flags applied |
+| `realtime-browser.mjs` | 17 | a browser-shaped client: Origin header, auth callback, transport order |
+
+Two static checks back these up and need no database:
+
+- `realtime-wiring.mjs` — every event name matches on both sides, and every
+  `getState().method()` a handler calls still exists. Catches a rename done on one
+  side only, which presents to a user as "real time is broken" while the build passes
+  and the server logs nothing.
+- `realtime-coverage.mjs` — reports any event with no socket-level proof.

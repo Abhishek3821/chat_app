@@ -505,7 +505,12 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       sendTrack(pipeline.stream.getVideoTracks()[0]);
       setVideoEffectState(next);
     } catch (err) {
-      toast.error(err?.message || 'Background effects could not start on this device.');
+      /* Show the REAL reason and keep it on screen — these messages name a
+         specific fix (a CSP header, a missing asset, a dead GPU delegate) and a
+         2-second toast that says "could not start" helps nobody diagnose it. */
+      const why = err?.message || 'Background effects could not start on this device.';
+      toast.error(why, { duration: 8000 });
+      console.error('[video effects]', err);
       setVideoEffectState(EFFECTS.NONE);
     } finally {
       setEffectLoading(false);

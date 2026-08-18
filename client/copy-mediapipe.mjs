@@ -8,9 +8,16 @@
  *   • a video call that stops working because someone else's CDN is having a bad
  *     day is not a trade worth making.
  *
- * Only the SIMD build is copied. The nosimd fallback doubles the payload for
- * browsers that haven't existed for years, and the app already requires
- * WebRTC + WebCodecs-era APIs well beyond that baseline.
+ * BOTH the SIMD and the nosimd build are copied, and that is not optional.
+ * MediaPipe picks the filename from a runtime feature test:
+ *
+ *     `${base}/vision_wasm${simd ? '' : '_nosimd'}_internal.js`
+ *
+ * so the moment that test returns false — an older browser, or simply a
+ * Content-Security-Policy that blocks WebAssembly compilation — it requests the
+ * nosimd pair. Shipping only the SIMD build turned that into a 404 and the
+ * feature died with an unhelpful error. Half the payload is not worth a
+ * failure mode nobody can diagnose from the outside.
  *
  * public/mediapipe/ is gitignored — it is a build artifact reproduced from
  * node_modules, not source. Runs from `predev` and `prebuild`.
@@ -20,7 +27,12 @@ import path from 'path';
 
 const FROM = path.join(process.cwd(), 'node_modules', '@mediapipe', 'tasks-vision', 'wasm');
 const TO = path.join(process.cwd(), 'public', 'mediapipe');
-const NEEDED = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm'];
+const NEEDED = [
+  'vision_wasm_internal.js',
+  'vision_wasm_internal.wasm',
+  'vision_wasm_nosimd_internal.js',
+  'vision_wasm_nosimd_internal.wasm',
+];
 
 if (!fs.existsSync(FROM)) {
   console.warn('[mediapipe] @mediapipe/tasks-vision is not installed — background blur will report itself unavailable.');

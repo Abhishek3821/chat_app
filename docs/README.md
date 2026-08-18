@@ -14,6 +14,7 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 | [**DATABASE_MODELS.md**](DATABASE_MODELS.md) | All 20 Mongoose schemas — fields, types, defaults, indexes, hooks/methods, and how the models reference each other. |
 | [**SOCKET_EVENTS.md**](SOCKET_EVENTS.md) | Every Socket.IO event in both directions, plus the exact call-signaling sequences (accept/reject/cancel/busy/group mesh). |
 | [**FILE_UPLOADS.md**](FILE_UPLOADS.md) | Upload endpoints, size/type limits, storage drivers, and how uploaded/protected media is accessed. |
+| [**MEETINGS.md**](MEETINGS.md) | The meeting module end to end: model, status lifecycle, the three ways in and the knock/admit gate, REST + socket surface, mesh vs SFU, polls/Q&A/captions/recording, attendance, invitations, and what's stored but not implemented. |
 | [**SCALING_CALLS.md**](SCALING_CALLS.md) | How many people fit in one call/meeting and why; adaptive mesh encoding; turning on the LiveKit SFU for 10+ rooms. |
 | [**PLATFORM.md**](PLATFORM.md) | Embedding ChatKonect in another product: App-as-tenant, the app-secret/user-token split, the `/v1/platform` API, capability flags, and the current gaps. **Hand this to an integrating customer.** |
 | [**ENVIRONMENT.md**](ENVIRONMENT.md) | Every environment variable actually read by the app — non-secret, by design. Base URL / Socket URL resolution. |

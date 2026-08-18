@@ -54,6 +54,13 @@ jobs:
       # the build nor a screenshot of the theme you happen to be in will say so.
       - name: light/dark contrast audit
         run: node audit-theme.mjs
+      # Background effects load a wasm runtime + model over HTTP. Both wasm
+      # variants must ship (MediaPipe picks the filename at runtime), the .wasm
+      # must carry application/wasm, and the CSP must allow WebAssembly at all.
+      # A missing asset does NOT 404 here — the SPA fallback returns HTML — so
+      # the failure is otherwise invisible until someone clicks the button.
+      - name: background effects — assets, MIME types, CSP (18 checks)
+        run: node test-video-effects.mjs
 
   server-tests:
     runs-on: ubuntu-latest
@@ -91,12 +98,45 @@ jobs:
       - name: meeting mesh (3rd/4th joiner sees everyone, 28 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-mesh.mjs
+      - name: platform group calls (tenant users, socket + flags, 17 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/platform-calls.mjs
+      # Separates "the relay is broken" from "targeted delivery can't cross
+      # processes". Proves the 1:1 offer path works on one instance, that typing
+      # needs join-chat first, and that a fleet without REDIS_URL reproduces the
+      # exact 201-but-"missed" + no-offer + presence-fine symptom triad.
+      - name: relay delivery — single vs multi-instance (13 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/relay-delivery.mjs
+      # Pins the raw-socket contract an embed partner integrates against: `to` (not
+      # the REST `receiverId`) targets a call signal, authorization needs no Call
+      # record, and typing is chat-room scoped behind join-chat. A wrong key is
+      # dropped silently, which reads exactly like a dead relay.
+      - name: embed 1:1 signalling contract (26 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/embed-1to1-signalling.mjs
+      # Group create/add/call each return a success status when addressed with the
+      # wrong key or route (`participants` vs `members`, PATCH vs POST /:id/members,
+      # /calls/start vs /calls), so the mistake reads as a missing feature. Pins
+      # both directions.
+      - name: embed group chat + group calls (22 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/embed-groups.mjs
       - name: group-call mesh (A adds C; B and C must see each other, 20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/group-call-mesh.mjs
       - name: meeting-room real-time (join/chat/hand/reaction/host controls, 12 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-room-realtime.mjs
+      - name: call edge signals — unavailable/handled/cancelled + dash aliases (12 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/call-edges-realtime.mjs
+      - name: meeting collaboration — polls, Q&A, captions, deny (24 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-collab-realtime.mjs
+      - name: REST-triggered realtime — live location, scheduled, unfriend (18 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/rest-triggered-realtime.mjs
       # Reports which server→client events have NO socket-level proof. Advisory:
       # some events are timer- or third-party-driven and cannot be driven by a test.
       - name: real-time coverage report
@@ -116,6 +156,12 @@ jobs:
       - name: presence — heartbeat, boot reset, 5-minute idle (20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/presence.mjs
+      # A limiter keyed on the wrong thing puts every caller in ONE bucket, which
+      # a single client can never notice — its own requests are counted fine.
+      # This sends from two identities and proves the counters are independent.
+      - name: rate limits are per client, not global (9 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/rate-limit-keying.mjs
       - name: single super admin auto-provisioned from .env (36 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/super-admin.mjs

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2, Sparkles, MoreHorizontal } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import MeetingPollsPanel from '@/components/meeting/MeetingPollsPanel';
 import CaptionOverlay from '@/components/meeting/CaptionOverlay';
 import { useSocket } from '@/hooks/useSocket';
+import { useViewportSize } from '@/hooks/useViewportSize';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
 import { useLiveCaptions } from '@/hooks/useLiveCaptions';
 import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
@@ -18,6 +19,10 @@ import { useAuth } from '@/store/useAuth';
 import { useUI } from '@/store/useUI';
 import { cn, videoGridCols } from '@/lib/utils';
 import { EFFECTS, BACKGROUND_PRESETS, effectsSupported, gradientDataUrl } from '@/lib/videoEffects';
+
+/* Module scope, not inside RoomView: the phone control sheet (<MoreControls>)
+   renders the same set, and a per-render local const wasn't reachable from it. */
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '👏', '😮', '🙏', '🔥'];
 
 /** Attaches a MediaStream to a <video> element. */
 function VideoTile({ stream, name, avatar, muted = false, mirror = false, label, fit = 'cover', className, handRaised = false, reactions = [], hostControls = null }) {
@@ -180,6 +185,12 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
   const [portrait, setPortrait] = useState(false); // tile orientation option
   const [showChat, setShowChat] = useState(false);
   const [showPolls, setShowPolls] = useState(false);
+  /* Below `sm` the control bar keeps only the controls you reach for mid-sentence
+     and folds the rest into one sheet — see <MoreControls>. Read from the live
+     viewport rather than a CSS breakpoint because the SPLIT is structural (which
+     buttons exist), not cosmetic. */
+  const { width: viewportWidth } = useViewportSize();
+  const compact = viewportWidth < 640;
   // `muted` is passed so a muted mic never broadcasts captions of what you say.
   const captions = useLiveCaptions(meeting._id, { myName: me?.name || 'You', muted });
   // Captions can fail for reasons only the browser knows (mic busy, no network,
@@ -225,8 +236,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
     sendChat(t);
     setChatInput('');
   };
-  const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '👏', '😮', '🙏', '🔥'];
-
   const doLeave = () => { leave(); onLeave(); };
   const copyId = () => {
     navigator.clipboard?.writeText(code).then(() => toast.success('Meeting ID copied.')).catch(() => toast(code));
@@ -308,6 +317,15 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
     // Picking one axis for both squashes the other case back into a hard crop.
     : 'aspect-video w-full h-auto max-h-full sm:h-full sm:w-auto sm:max-w-full';
 
+  /* A lone 16:9 tile on a portrait phone is a thin strip floating in a screen of
+     empty navy — most of the room is wasted on the one layout people see most
+     (you, waiting for someone to join). Below sm the solo tile fills the stage
+     instead: width AND height are set, so `aspect-video` doesn't apply and
+     object-cover crops to the frame, which is exactly what every phone call app
+     does. From sm: up nothing changes — the anti-crop rule above still holds,
+     and the portrait option still wins when it's on. */
+  const soloTile = total === 1 && !portrait;
+
   // Spotlight: whoever is presenting a screen (you or a remote peer) fills the
   // stage (object-contain so nothing is cropped) with everyone else in a strip.
   const presenting = Boolean(presenterSid);
@@ -351,18 +369,24 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
       {/* shrink-0 (like the footer): header + banners + footer keep their natural
           height and the stage takes exactly the rest, so the room is always one
           screen tall and never scrolls. */}
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-        <div className="min-w-0 flex-1">
+      {/* Stacked on a phone, one row from sm: up. Six 44px controls plus the
+          host's "Mute all" leave ~40px for the title on a 360px screen, which
+          rendered every meeting name as "Sup…" and wrapped "1 in call" onto its
+          own line. Given a line of its own the title fits, and the meeting ID
+          (the thing you need in order to invite anyone) fits with it. */}
+      <header className="flex shrink-0 flex-col gap-2 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
+        <div className="min-w-0 sm:flex-1">
           <p className="truncate text-sm font-semibold sm:text-base">{meeting.title}</p>
-          <button onClick={copyId} title="Copy meeting ID" className="flex items-center gap-1.5 text-xs text-white/60 hover:text-white/90">
-            <Users size={12} /> {total} in call
-            <span className="hidden sm:inline">
-              &nbsp;· Meeting ID <span className="font-mono">{code}</span>
+          <button onClick={copyId} title="Copy meeting ID" className="flex max-w-full items-center gap-1.5 text-xs text-white/60 hover:text-white/90">
+            <Users size={12} className="shrink-0" />
+            <span className="shrink-0">{total} in call</span>
+            <span className="min-w-0 truncate">
+              · Meeting ID <span className="font-mono">{code}</span>
             </span>
-            <Copy size={11} className="hidden sm:inline" />
+            <Copy size={11} className="shrink-0" />
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           {recording && <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-300"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC</span>}
           {isHost && (
             <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> <span className="hidden sm:inline">Mute all</span></Button>
@@ -482,7 +506,20 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
              their own aspect ratio, so without it they'd sit hard against the
              start of the cell instead of being centred in the leftover space. */
           <div className={cn('grid min-h-0 flex-1 auto-rows-fr place-items-center gap-2 py-1 sm:gap-3', cols)}>
-            <VideoTile stream={localStream} name={me?.name} avatar={me?.avatar} muted mirror label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`} handRaised={handRaised} reactions={myReactions} className={tileAspect} />
+            <VideoTile
+              stream={localStream}
+              name={me?.name}
+              avatar={me?.avatar}
+              muted
+              mirror
+              label={`${me?.name || 'You'} (you)${muted ? ' · muted' : ''}`}
+              handRaised={handRaised}
+              reactions={myReactions}
+              /* Order matters — `cn` is tailwind-merge, so the override has to
+                 come last. Only the UNPREFIXED h/w are replaced; tileAspect's
+                 `sm:` half survives, which is what keeps desktop unchanged. */
+              className={cn(tileAspect, soloTile && 'h-full w-full')}
+            />
             {remotes.map((r) => (
               <VideoTile
                 key={r.socketId}
@@ -505,7 +542,11 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
              and being visibly short of it. pointer-events-none so it can never
              swallow a click meant for the tile beneath. */
           <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-4">
-            <p className="max-w-full truncate rounded-full bg-navy-950/70 px-3.5 py-1.5 text-xs text-white/70 shadow-soft backdrop-blur-md sm:text-sm">
+            {/* Wraps on a phone instead of truncating: the one-line pill cut the
+                sentence to "…share the meeting ID or link …", which is the half
+                that carried the instruction. It only truncates from sm: up, where
+                the whole thing fits on a line anyway. */}
+            <p className="max-w-full rounded-2xl bg-navy-950/70 px-3.5 py-1.5 text-center text-xs text-white/70 shadow-soft backdrop-blur-md sm:truncate sm:rounded-full sm:text-sm">
               {status === 'connecting' ? 'Connecting…' : 'You’re the only one here — share the meeting ID or link to invite others.'}
             </p>
           </div>
@@ -563,9 +604,12 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
         )}
       </div>
 
-      {/* flex-wrap: on narrow phones 7-8 circular controls at full size don't fit
-          one row — they used to overflow off-screen instead of wrapping. */}
-      <footer className="mb-safe flex shrink-0 flex-wrap items-center justify-center gap-2 px-3 py-4 sm:gap-3 sm:px-4 sm:py-5">
+      {/* One row, always. Nine 48px circles are ~500px wide, so on a phone the bar
+          used to wrap into a ragged six-then-three with Leave stranded at the end
+          of the second row. Below `sm` only the mid-conversation controls stay out
+          here (mic, camera, present, hand) and the rest live in one sheet, which
+          also gives them labels — an unlabelled circle is a guess. */}
+      <footer className="mb-safe flex shrink-0 flex-wrap items-center justify-center gap-1.5 px-3 py-4 sm:gap-3 sm:px-4 sm:py-5">
         <CtrlButton active={!muted} onClick={toggleMute} on={<Mic size={20} />} off={<MicOff size={20} />} label={muted ? 'Unmute' : 'Mute'} />
         {meeting.type !== 'audio' && (
           <CtrlButton active={!camOff} onClick={toggleCamera} on={<Video size={20} />} off={<VideoOff size={20} />} label={camOff ? 'Start video' : 'Stop video'} />
@@ -573,43 +617,188 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
         {meeting.type !== 'audio' && (
           <CtrlButton active={sharingScreen} onClick={toggleScreenShare} on={<MonitorX size={20} />} off={<MonitorUp size={20} />} label={sharingScreen ? 'Stop presenting' : 'Share screen'} highlightWhenActive />
         )}
-        {meeting.type !== 'audio' && (
+        {/* highlightWhenActive: without it the default (landscape) rendered as the
+            one solid-white button in the bar, so the tile-shape toggle read as the
+            most important control on the screen. */}
+        {!compact && meeting.type !== 'audio' && (
           <CtrlButton
             active={portrait}
             onClick={() => setPortrait((v) => !v)}
             on={<RectangleVertical size={20} />}
             off={<RectangleHorizontal size={20} />}
             label={portrait ? 'Switch to landscape tiles' : 'Switch to portrait tiles'}
+            highlightWhenActive
           />
         )}
         <CtrlButton active={handRaised} onClick={toggleHand} on={<Hand size={20} />} off={<Hand size={20} />} label={handRaised ? 'Lower hand' : 'Raise hand'} highlightWhenActive />
-        <div className="relative">
-          <CtrlButton active={showReactions} onClick={() => setShowReactions((v) => !v)} on={<Smile size={20} />} off={<Smile size={20} />} label="React" highlightWhenActive />
-          {showReactions && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setShowReactions(false)} />
-              {/* Fixed + wrapping: 8 emoji buttons in one row are ~356px wide, so
-                  anchored to the (possibly off-centre) React button they ran off
-                  the side of a 320px screen. The offsets clear the control bar,
-                  which wraps to two rows on phones, plus the home indicator. */}
-              <div className="fixed bottom-[calc(9rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex w-[min(92vw,20rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl bg-navy-950/95 p-2 shadow-soft-lg ring-1 ring-white/10 sm:bottom-[calc(7rem+env(safe-area-inset-bottom))] sm:w-auto sm:flex-nowrap">
-                {REACTION_EMOJIS.map((e) => (
-                  <button key={e} onClick={() => { sendReaction(e); setShowReactions(false); }} className="grid h-11 w-11 place-items-center rounded-xl text-2xl transition-transform hover:scale-125 hover:bg-white/10 sm:h-10 sm:w-10">{e}</button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        {!compact && (
+          <div className="relative">
+            <CtrlButton active={showReactions} onClick={() => setShowReactions((v) => !v)} on={<Smile size={20} />} off={<Smile size={20} />} label="React" highlightWhenActive />
+            {showReactions && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowReactions(false)} />
+                {/* Fixed rather than anchored: 8 emoji buttons in one row are
+                    ~356px wide, so hung off the (possibly off-centre) React button
+                    they ran past the side of the screen. */}
+                <div className="fixed bottom-[calc(7rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex -translate-x-1/2 justify-center gap-1 rounded-2xl bg-navy-950/95 p-2 shadow-soft-lg ring-1 ring-white/10">
+                  {REACTION_EMOJIS.map((e) => (
+                    <button key={e} onClick={() => { sendReaction(e); setShowReactions(false); }} className="grid h-10 w-10 place-items-center rounded-xl text-2xl transition-transform hover:scale-125 hover:bg-white/10">{e}</button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {/* Background effects. Only offered when the browser can actually run
             them, and hidden on the SFU path where the track isn't ours to swap. */}
-        {setVideoEffect && effectsSupported() && (
+        {!compact && setVideoEffect && effectsSupported() && (
           <BackgroundButton current={videoEffect} loading={effectLoading} onPick={setVideoEffect} />
         )}
-        <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
+        {!compact && (
+          <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
+        )}
+        {compact && (
+          <MoreControls
+            isVideo={meeting.type !== 'audio'}
+            portrait={portrait}
+            onTogglePortrait={() => setPortrait((v) => !v)}
+            recording={recording}
+            onToggleRecording={toggleRecording}
+            onReact={sendReaction}
+            effect={videoEffect}
+            effectLoading={effectLoading}
+            onPickEffect={setVideoEffect && effectsSupported() ? setVideoEffect : null}
+          />
+        )}
+        {/* Deliberately a size up from the rest on a phone — it is the one control
+            you must be able to hit without looking. */}
         <button onClick={doLeave} className="grid h-12 w-12 place-items-center rounded-full bg-red-500 text-white transition-transform hover:scale-105 sm:h-14 sm:w-14" title="Leave">
           <PhoneOff size={22} />
         </button>
       </footer>
+    </div>
+  );
+}
+
+/** A preset from BACKGROUND_PRESETS → the (effect, payload) pair the room wants.
+ *  Shared by the desktop menu and the phone sheet so the two can't drift. */
+function pickPreset(preset, onPick) {
+  if (!preset) return onPick(EFFECTS.NONE);
+  if (preset.effect === EFFECTS.BLUR) return onPick(EFFECTS.BLUR);
+  return onPick(EFFECTS.IMAGE, gradientDataUrl(preset.gradient));
+}
+
+/** One labelled row in the phone control sheet. */
+function SheetRow({ icon: Icon, label, hint, active = false, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-xl px-2.5 py-3 text-left transition-colors hover:bg-white/10"
+    >
+      <span className={cn('grid h-9 w-9 shrink-0 place-items-center rounded-full', active ? 'bg-white text-navy-950' : 'bg-white/10 text-white')}>
+        <Icon size={17} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-white">{label}</span>
+        {hint && <span className="block truncate text-[11px] text-white/50">{hint}</span>}
+      </span>
+      {active && <Check size={16} className="shrink-0 text-white/70" />}
+    </button>
+  );
+}
+
+/**
+ * Phone-only overflow for the secondary meeting controls.
+ *
+ * The bar carries nine controls, which is fine on a laptop and two ragged rows on
+ * a 360px phone. Reactions, backgrounds, recording and tile shape move in here:
+ * the ones you touch while talking stay on the bar, and these get labels.
+ *
+ * The sheet is pinned to the viewport's gutters rather than anchored to its
+ * button — the bar is centred, so an anchored menu hangs off whichever edge the
+ * button happens to sit near.
+ */
+function MoreControls({ isVideo, portrait, onTogglePortrait, recording, onToggleRecording, onReact, effect, effectLoading, onPickEffect }) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+
+  return (
+    <div className="relative">
+      <CtrlButton
+        active={open}
+        onClick={() => setOpen((v) => !v)}
+        on={<MoreHorizontal size={20} />}
+        off={<MoreHorizontal size={20} />}
+        label="More options"
+        highlightWhenActive
+      />
+      {open && (
+        <>
+          <button className="fixed inset-0 z-40 cursor-default" onClick={close} aria-label="Close options" />
+          <div className="fixed inset-x-3 bottom-[calc(6.25rem+env(safe-area-inset-bottom))] z-50 overflow-hidden rounded-3xl bg-navy-900/95 p-2 shadow-soft-lg ring-1 ring-white/10 backdrop-blur-xl">
+            {onReact && (
+              <div className="flex justify-between gap-0.5 px-1 pb-2 pt-1">
+                {REACTION_EMOJIS.map((e) => (
+                  <button
+                    key={e}
+                    onClick={() => { onReact(e); close(); }}
+                    title={`React ${e}`}
+                    /* 36px, not the usual 44: eight of them have to fit one row
+                       inside a sheet that is only as wide as a 360px screen. */
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-xl transition-transform hover:bg-white/10 active:scale-90"
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+            {onPickEffect && (
+              <div className="border-t border-white/10 px-1 pb-1 pt-2">
+                <p className="pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/40">
+                  Background {effectLoading && <Loader2 size={11} className="ml-1 inline animate-spin" />}
+                </p>
+                <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+                  <button
+                    onClick={() => { pickPreset(null, onPickEffect); close(); }}
+                    title="No background effect"
+                    className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl border text-[10px] font-semibold text-white/70', effect === EFFECTS.NONE ? 'border-white bg-white/15 text-white' : 'border-white/25')}
+                  >
+                    Off
+                  </button>
+                  {BACKGROUND_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => { pickPreset(p, onPickEffect); close(); }}
+                      title={p.label}
+                      aria-label={p.label}
+                      className="h-11 w-11 shrink-0 rounded-xl border border-white/25"
+                      style={p.gradient ? { background: `linear-gradient(135deg, ${p.gradient[0]}, ${p.gradient[1]})` } : { backdropFilter: 'blur(4px)', background: 'rgba(255,255,255,.18)' }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="border-t border-white/10 pt-1">
+              {isVideo && (
+                <SheetRow
+                  icon={portrait ? RectangleVertical : RectangleHorizontal}
+                  label="Tile shape"
+                  hint={portrait ? 'Portrait — tap for landscape' : 'Landscape — tap for portrait'}
+                  active={portrait}
+                  onClick={() => { onTogglePortrait(); close(); }}
+                />
+              )}
+              <SheetRow
+                icon={Disc}
+                label={recording ? 'Stop recording' : 'Record meeting'}
+                hint={recording ? 'Recording now' : 'Saves to your device'}
+                active={recording}
+                onClick={() => { onToggleRecording(); close(); }}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -626,9 +815,7 @@ function BackgroundButton({ current, loading, onPick }) {
 
   const choose = (preset) => {
     setOpen(false);
-    if (!preset) return onPick(EFFECTS.NONE);
-    if (preset.effect === EFFECTS.BLUR) return onPick(EFFECTS.BLUR);
-    return onPick(EFFECTS.IMAGE, gradientDataUrl(preset.gradient));
+    pickPreset(preset, onPick);
   };
 
   return (
@@ -682,8 +869,10 @@ function CtrlButton({ active, onClick, on, off, label, highlightWhenActive = fal
     <button
       onClick={onClick}
       title={label}
+      /* 44px on a phone (the touch-target floor) so the primary controls and Leave
+         fit one row even on a 320px screen; 56 from sm: up. */
       className={cn(
-        'grid h-12 w-12 place-items-center rounded-full transition-colors sm:h-14 sm:w-14',
+        'grid h-11 w-11 place-items-center rounded-full transition-colors sm:h-14 sm:w-14',
         highlighted ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20'
       )}
     >

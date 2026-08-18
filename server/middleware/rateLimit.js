@@ -1,6 +1,32 @@
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { getRedis } from '../utils/redis.js';
+import { rateLimitKey, reportIpResolutionOnce } from '../utils/clientIp.js';
+
+/**
+ * Every limiter keys on the RESOLVED client address, not `req.ip`.
+ *
+ * `req.ip` is only the client when Express's `trust proxy` count happens to
+ * match the proxies actually deployed. In production it did not, so `req.ip`
+ * was one constant value and all traffic shared a single bucket — a fresh IP's
+ * very first request already saw `RateLimit-Remaining: 580`, and people who had
+ * done nothing were locked out of signing in. See utils/clientIp.js.
+ *
+ * `validate: { keyGeneratorIpFallback: false }` silences express-rate-limit's
+ * warning about a custom key generator: the fallback it wants to add is exactly
+ * the `req.ip` behaviour that caused this.
+ */
+const keyed = (extra = {}) => ({
+  keyGenerator: (req) => {
+    reportIpResolutionOnce(req);
+    return rateLimitKey(req);
+  },
+  /* We read the forwarding headers ourselves (utils/clientIp.js), so switch off
+     the two checks that assume the default `req.ip` key — they would otherwise
+     warn on every request about a trust-proxy setup we deliberately bypass. */
+  validate: { trustProxy: false, xForwardedForHeader: false },
+  ...extra,
+});
 
 /**
  * Shared store when Redis is configured, so a fleet of instances enforces ONE
@@ -20,6 +46,7 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: makeStore('rl:api:'),
+  ...keyed(),
   message: { success: false, message: 'Too many requests, please slow down.' },
 });
 
@@ -30,6 +57,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: makeStore('rl:auth:'),
+  ...keyed(),
   message: { success: false, message: 'Too many attempts. Try again in a few minutes.' },
 });
 
@@ -48,6 +76,12 @@ export const webhookIngressLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   store: makeStore('rl:hook:'),
-  keyGenerator: (req) => req.params.token || req.ip,
+  // The token IS the identity here; fall back to the resolved client address
+  // rather than `req.ip`, for the same reason as every limiter above.
+  keyGenerator: (req) => req.params.token || rateLimitKey(req),
+  /* We read the forwarding headers ourselves (utils/clientIp.js), so switch off
+     the two checks that assume the default `req.ip` key — they would otherwise
+     warn on every request about a trust-proxy setup we deliberately bypass. */
+  validate: { trustProxy: false, xForwardedForHeader: false },
   message: { success: false, message: 'This webhook is receiving too many requests. Slow down.' },
 });

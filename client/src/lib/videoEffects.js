@@ -39,18 +39,89 @@ export function effectsSupported() {
   );
 }
 
-/** Load (once) the MediaPipe selfie segmenter. Subsequent calls reuse it. */
+/**
+ * Can this page compile WebAssembly at all?
+ *
+ * Chrome requires `'wasm-unsafe-eval'` in the CSP's `script-src`, and without it
+ * every WebAssembly call throws — including MediaPipe's own SIMD feature test,
+ * which then quietly reports "no SIMD" and asks for a *different* filename.
+ * Checking here turns a confusing 404 into an accurate sentence.
+ */
+function wasmBlocked() {
+  try {
+    // The 8-byte header of an empty, valid module. Compiling it is the cheapest
+    // possible probe and is exactly what CSP intercepts.
+    // Reached off `window` so the undefined-reference scanner (which does not
+    // know the WebAssembly global) stays clean — same reason as effectsSupported.
+    new window.WebAssembly.Module(new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]));
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Fetch a HEAD to confirm an asset is actually served before MediaPipe needs it. */
+async function assetMissing(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD' });
+    return res.ok ? null : `${url} → HTTP ${res.status}`;
+  } catch (e) {
+    return `${url} → ${e?.message || 'unreachable'}`;
+  }
+}
+
+/**
+ * Load (once) the MediaPipe selfie segmenter. Subsequent calls reuse it.
+ *
+ * Every failure path here reports WHAT failed. The first version caught
+ * everything into "Background effects could not start on this device", which is
+ * true, useless, and hid two entirely different bugs (a blocked CSP and a
+ * missing wasm variant) behind identical text.
+ */
 async function getSegmenter() {
   if (segmenterPromise) return segmenterPromise;
   segmenterPromise = (async () => {
+    if (wasmBlocked()) {
+      throw new Error(
+        "This page isn't allowed to run WebAssembly, which background effects need. Add 'wasm-unsafe-eval' to the script-src Content-Security-Policy."
+      );
+    }
+
     const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision');
+
+    // MediaPipe resolves its own filename from a SIMD test, so check the model —
+    // which is a fixed path — and report clearly if the engine wasn't staged.
+    const missing = await assetMissing('/models/selfie_segmenter.tflite');
+    if (missing) {
+      throw new Error(`The background-effects model isn't being served (${missing}). Run \`npm run dev\` again to stage it.`);
+    }
+
     const fileset = await FilesetResolver.forVisionTasks('/mediapipe');
-    return ImageSegmenter.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: '/models/selfie_segmenter.tflite', delegate: 'GPU' },
+
+    /* GPU first, CPU on failure. The GPU delegate needs a working WebGL2
+       context, which a VM, a locked-down driver or a headless-ish environment
+       may not have — and its failure is not a reason to have no blur at all. */
+    const options = {
+      baseOptions: { modelAssetPath: '/models/selfie_segmenter.tflite' },
       runningMode: 'VIDEO',
       outputCategoryMask: true,
       outputConfidenceMasks: false,
-    });
+    };
+    try {
+      return await ImageSegmenter.createFromOptions(fileset, {
+        ...options,
+        baseOptions: { ...options.baseOptions, delegate: 'GPU' },
+      });
+    } catch (gpuErr) {
+      try {
+        return await ImageSegmenter.createFromOptions(fileset, {
+          ...options,
+          baseOptions: { ...options.baseOptions, delegate: 'CPU' },
+        });
+      } catch (cpuErr) {
+        throw new Error(`The effects engine could not start (GPU: ${gpuErr?.message || gpuErr}; CPU: ${cpuErr?.message || cpuErr}).`);
+      }
+    }
   })().catch((err) => {
     segmenterPromise = null; // let a later attempt retry rather than fail forever
     throw err;

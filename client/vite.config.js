@@ -5,6 +5,15 @@ import path from 'path';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  /* Pre-bundle the segmentation runtime up front.
+     It is only ever reached through a dynamic `import()` (so that the ~12MB of
+     wasm stays out of the initial bundle), and a dep Vite has not seen at
+     startup gets discovered on FIRST use — which triggers a re-optimise and can
+     fail that first import with "Failed to fetch dynamically imported module".
+     In this feature that lands as "background effects could not start" the
+     first time anyone clicks the button, and works after a reload, which is a
+     miserable thing to debug. */
+  optimizeDeps: { include: ['@mediapipe/tasks-vision'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

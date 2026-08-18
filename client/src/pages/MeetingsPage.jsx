@@ -403,7 +403,12 @@ function MeetingListRow({ meeting, me, past }) {
   return (
     <motion.article
       variants={cardItem}
-      className="group flex items-center gap-3 px-3 py-3 transition-colors hover:bg-content/[0.035] sm:gap-4 sm:px-4"
+      /* Two lines on a phone, one from sm: up. The action rail is `shrink-0` and
+         adds up to ~180px, which left the title with ~80px on a 360px screen —
+         every meeting read as "S..", and the time span wrapped over three
+         lines. On mobile the rail now takes a full-width second line (see
+         `basis-full` below) and the title gets the whole first one. */
+      className="group flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 transition-colors hover:bg-content/[0.035] sm:flex-nowrap sm:gap-4 sm:px-4"
     >
       {/* Date block — carries the date so the row needs no day header above it. */}
       <div
@@ -426,16 +431,19 @@ function MeetingListRow({ meeting, me, past }) {
           <StatusChip meeting={meeting} past={past} />
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <Clock size={13} className="text-brand-500" />
+          {/* nowrap on each item: these are single values, and wrapping INSIDE
+              one ("Tue · 1:21 / PM – 1:51 / PM") is what made the row three
+              lines tall on a phone. They wrap as whole units instead. */}
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Clock size={13} className="shrink-0 text-brand-500" />
             {format(start, 'EEE')} · {format(start, 'h:mm a')} – {format(end, 'h:mm a')}
           </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Users size={13} className="text-brand-500" />
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <Users size={13} className="shrink-0 text-brand-500" />
             {(meeting.participants?.length || 0) + 1}
           </span>
           {meeting.recurrence !== 'none' && (
-            <span className="inline-flex items-center gap-1.5 capitalize">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap capitalize">
               <Repeat size={13} className="text-violet-500" />
               {meeting.recurrence}
             </span>
@@ -456,48 +464,58 @@ function MeetingListRow({ meeting, me, past }) {
         )}
       </div>
 
-      {/* Right rail — each piece drops out at the width where it stops fitting. */}
-      <div className="hidden shrink-0 lg:block">
-        <ParticipantStack people={people} max={3} size="xs" />
-      </div>
-      {!amHost && myEntry && !past && (
-        <div className="hidden xl:block">
-          <RsvpButtons meeting={meeting} myResponse={myResponse} compact />
+      {/* Right rail — each piece drops out at the width where it stops fitting.
+          `basis-full` on mobile: as bare siblings these competed with the title
+          for the same line and won (every one of them is shrink-0). Grouped, they
+          drop to a line of their own below 640px and sit inline from sm: up. */}
+      <div className="flex basis-full items-center justify-end gap-2 sm:basis-auto sm:shrink-0 sm:gap-2.5 md:gap-3">
+        <div className="hidden shrink-0 lg:block">
+          <ParticipantStack people={people} max={3} size="xs" />
         </div>
-      )}
-      <div className="hidden shrink-0 md:block">
-        <TypeChip type={meeting.type} compact />
+        {!amHost && myEntry && !past && (
+          <div className="hidden xl:block">
+            <RsvpButtons meeting={meeting} myResponse={myResponse} compact />
+          </div>
+        )}
+        {/* Leads the mobile action line (mr-auto) so it fills the space the
+            buttons leave, instead of being dropped below md as it used to be. */}
+        <div className="mr-auto shrink-0 sm:mr-0">
+          <TypeChip type={meeting.type} compact />
+        </div>
+        {roomCode && (
+          <button
+            onClick={copyLink}
+            title="Copy meeting link"
+            className="hidden shrink-0 items-center gap-1.5 rounded-xl neu-raised-sm neu-press bg-surface px-2.5 py-1.5 font-mono text-[11px] font-semibold text-content-muted hover:text-content xl:inline-flex"
+          >
+            {roomCode}
+            <Copy size={12} />
+          </button>
+        )}
+        {/* Was `hidden sm:inline-flex`, which put the attendance report out of
+            reach on a phone for every meeting except the featured one. It's an
+            icon-only button — there is room for it at any width. */}
+        {amHost && (
+          <Button variant="ghost" size="icon-sm" onClick={openReport} title="Attendance report" aria-label="Attendance report" className="inline-flex shrink-0">
+            <ClipboardList size={16} />
+          </Button>
+        )}
+        {amHost && !past && (
+          <Button variant="ghost" size="icon-sm" onClick={() => setInviteOpen(true)} title="Invite people" aria-label="Invite people" className="shrink-0">
+            <UserPlus size={15} />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon-sm" onClick={copyLink} title="Copy meeting link" aria-label="Copy meeting link" className="shrink-0 xl:hidden">
+          <Copy size={16} />
+        </Button>
+        {/* The label no longer waits for `xs`: the rail has its own line on a
+            phone, so an icon-only "Join" was hiding the row's primary action
+            behind a guess. */}
+        <Button size="sm" onClick={join} variant={past ? 'outline' : 'primary'} className="shrink-0">
+          {meeting.type === 'video' ? <Video size={15} /> : <Phone size={15} />}
+          {past ? 'Reopen' : 'Join'}
+        </Button>
       </div>
-      {roomCode && (
-        <button
-          onClick={copyLink}
-          title="Copy meeting link"
-          className="hidden shrink-0 items-center gap-1.5 rounded-xl neu-raised-sm neu-press bg-surface px-2.5 py-1.5 font-mono text-[11px] font-semibold text-content-muted hover:text-content xl:inline-flex"
-        >
-          {roomCode}
-          <Copy size={12} />
-        </button>
-      )}
-      {/* Was `hidden sm:inline-flex`, which put the attendance report out of
-          reach on a phone for every meeting except the featured one. It's an
-          icon-only button — there is room for it at any width. */}
-      {amHost && (
-        <Button variant="ghost" size="icon-sm" onClick={openReport} title="Attendance report" aria-label="Attendance report" className="inline-flex shrink-0">
-          <ClipboardList size={16} />
-        </Button>
-      )}
-      {amHost && !past && (
-        <Button variant="ghost" size="icon-sm" onClick={() => setInviteOpen(true)} title="Invite people" aria-label="Invite people" className="shrink-0">
-          <UserPlus size={15} />
-        </Button>
-      )}
-      <Button variant="ghost" size="icon-sm" onClick={copyLink} title="Copy meeting link" aria-label="Copy meeting link" className="shrink-0 xl:hidden">
-        <Copy size={16} />
-      </Button>
-      <Button size="sm" onClick={join} variant={past ? 'outline' : 'primary'} className="shrink-0">
-        {meeting.type === 'video' ? <Video size={15} /> : <Phone size={15} />}
-        <span className="hidden xs:inline">{past ? 'Reopen' : 'Join'}</span>
-      </Button>
 
       {/* Host-only, and only mounted once opened — a list of 50 meetings should
           not portal 50 dormant dialogs into <body>. */}
