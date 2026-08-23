@@ -31,7 +31,7 @@ import { startRingtone, startRingback, stopRingtone } from '../lib/sounds';
  * NOTE: getUserMedia/getDisplayMedia only work on secure origins — https:// or
  * http://localhost. Over a plain-http LAN IP the browser blocks it.
  */
-import { ICE_SERVERS, ensureIceServers } from '../lib/iceServers';
+import { ICE_SERVERS, ensureIceServers, callFailureMessage } from '../lib/iceServers';
 import { applyMeshEncoding, retuneAll } from '../lib/meshQuality';
 
 // Browser DSP applied to the outgoing mic track. Toggled live via
@@ -450,7 +450,7 @@ export function useWebRTC(call) {
             // accepted call; give it the full connect budget instead.
             addTimer(() => {
               if (statusRef.current !== 'connecting') return;
-              toast.error('Couldn’t connect the call — the network is blocking the media path.');
+              toast.error(callFailureMessage());
               teardown('error', { linger: 2200 });
             }, CONNECT_TIMEOUT_MS);
             return;
@@ -490,7 +490,7 @@ export function useWebRTC(call) {
         setStatus('connecting');
         addTimer(() => {
           if (statusRef.current !== 'connecting' || peersRef.current.size > 0) return;
-          toast.error('Couldn’t connect the call — the network is blocking the media path.');
+          toast.error(callFailureMessage());
           teardown('error', { linger: 2200 });
         }, CONNECT_TIMEOUT_MS);
       } else if (hasSocketPeer) {
@@ -499,7 +499,7 @@ export function useWebRTC(call) {
         // Caller never sent the offer (crashed / cancelled at the same moment)?
         addTimer(() => {
           if (statusRef.current !== 'connecting') return;
-          toast.error('Couldn’t connect the call — the network is blocking the media path.');
+          toast.error(callFailureMessage());
           teardown('error', { linger: 2200 });
         }, CONNECT_TIMEOUT_MS);
       } else {

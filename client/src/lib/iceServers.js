@@ -45,6 +45,26 @@ export function hasRelay() {
   return ICE_SERVERS.some((s) => /^turns?:/.test(String(Array.isArray(s.urls) ? s.urls[0] : s.urls)));
 }
 
+/**
+ * Why a call could not connect — and the two causes are NOT the same thing.
+ *
+ * "The network is blocking the media path" is true when a relay was offered and
+ * still nothing got through. When no relay was offered at all, that message
+ * blames the user's wifi for a missing deployment setting, and sends whoever is
+ * debugging it to the wrong place entirely — which is exactly how a STUN-only
+ * deployment stays STUN-only for weeks.
+ */
+export function callFailureMessage() {
+  if (hasRelay()) return 'Couldn’t connect the call — the network is blocking the media path.';
+  if (import.meta.env.DEV) {
+    console.warn(
+      '[ice] the call failed and NO relay was offered. Set TURN_URL + TURN_SECRET (or the ' +
+        'Cloudflare pair) on the API and rebuild the client. See deploy/turn/README.md.'
+    );
+  }
+  return 'Couldn’t connect — calls between different networks need a relay server, and none is set up yet.';
+}
+
 /** Accepts a bare object, an array, or `{ iceServers: [...] }`. */
 function extractServers(body) {
   const raw = Array.isArray(body) ? body : body?.iceServers || [body];
