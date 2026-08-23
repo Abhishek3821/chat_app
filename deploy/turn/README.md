@@ -27,6 +27,33 @@ why the config does not make you choose.
 
 ---
 
+## Everything at once, on an existing API box
+
+If the API already runs on a box with a public IP, this does the whole job — pulls the
+code, installs coturn, writes `TURN_URL`/`TURN_SECRET` into `server/.env`, restarts the
+API, and verifies each part:
+
+```bash
+sudo ./deploy/turn/bootstrap-production.sh
+```
+
+One script rather than a checklist because the failure mode here is doing four steps out
+of five: the API without a relay is STUN-only, the relay without an API restart is never
+asked for, and both fail identically from the outside. `--dry-run` shows everything first.
+
+It re-uses the `TURN_SECRET` already in `.env` if there is one, so re-running does not
+invalidate credentials in flight, and it backs the file up before touching it.
+
+Two things it cannot do, and it says so at the end: open your **cloud security group**
+(the outer firewall — a relay that works from the box and nowhere else is always this),
+and rebuild the frontend.
+
+Add `--domain turn.yourdomain.com --email you@…` to get `turns:` on 5349 as well. Without
+it the box’s public IP is used — no DNS record needed, but no TLS either, so the
+strictest networks are not covered.
+
+---
+
 ## Route 1 — your own relay, in one command
 
 You need a VPS with a **public IP** and a subdomain pointing at it

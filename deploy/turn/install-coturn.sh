@@ -58,7 +58,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$DOMAIN" ] || die "--domain is required (e.g. --domain turn.example.com)"
+[ -n "$DOMAIN" ] || die "--domain is required (e.g. --domain turn.example.com, or a bare IP)"
+
+# A bare IP is allowed and is the fastest way to a working relay: turn: needs no
+# hostname, and skipping DNS removes the slowest step. turns: is unavailable
+# though — a public CA will not issue a certificate for an IP address — so this
+# relay cannot serve the networks that only let TLS on 5349 through. Add a
+# hostname and re-run to get that.
+IS_IP=0
+case "$DOMAIN" in
+  *[!0-9.]*) ;;
+  *.*.*.*) IS_IP=1 ;;
+esac
+if [ "$IS_IP" = "1" ]; then
+  if [ "$USE_TLS" = "1" ]; then
+    echo "  ℹ $DOMAIN is an IP address, so turns: (TLS) is not possible — no CA issues certs for IPs."
+    echo "    Continuing with turn: on UDP+TCP, which covers the large majority of networks."
+    USE_TLS=0
+  fi
+fi
 [ "$(id -u)" = "0" ] || [ "$DRY_RUN" = "1" ] || die "run this with sudo"
 
 MIN_PORT="${PORT_RANGE%-*}"
@@ -83,16 +101,22 @@ else
   EXTERNAL_LINE="external-ip=$PUBLIC_IP"
 fi
 
-step "Checking $DOMAIN points here"
-RESOLVED="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)"
-if [ -z "$RESOLVED" ]; then
-  echo "  ⚠ $DOMAIN does not resolve yet."
-  [ "$USE_TLS" = "1" ] && die "certbot cannot issue a certificate until it does. Add the A record, or pass --no-tls."
-elif [ "$RESOLVED" != "$PUBLIC_IP" ]; then
-  echo "  ⚠ $DOMAIN resolves to $RESOLVED, not $PUBLIC_IP."
-  [ "$USE_TLS" = "1" ] && die "certbot will fail. Fix the A record, or pass --no-tls."
+if [ "$IS_IP" = "1" ]; then
+  step "Skipping the DNS check — $DOMAIN is already an address"
+  [ "$DOMAIN" = "$PUBLIC_IP" ] || note "note: that is not this box's detected public IP ($PUBLIC_IP). Fine behind a load balancer; wrong otherwise."
 else
-  note "resolves to this box ✓"
+  step "Checking $DOMAIN points here"
+  RESOLVED="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1; exit}' || true)"
+  if [ -z "$RESOLVED" ]; then
+    echo "  ⚠ $DOMAIN does not resolve yet."
+    [ "$USE_TLS" = "1" ] && die "certbot cannot issue a certificate until it does. Add the A record, or pass --no-tls."
+  elif [ "$RESOLVED" != "$PUBLIC_IP" ]; then
+    echo "  ⚠ $DOMAIN resolves to $RESOLVED, not $PUBLIC_IP."
+    [ "$USE_TLS" = "1" ] && die "certbot will fail. Fix the A record, or pass --no-tls."
+  else
+    note "resolves to this box ✓"
+  fi
+
 fi
 
 step "Installing coturn"
