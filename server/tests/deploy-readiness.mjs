@@ -128,7 +128,11 @@ section('Production guards');
 const serverJs = fs.readFileSync(path.join(SERVER_DIR, 'server.js'), 'utf8');
 const checks = [
   [/helmet\(/, 'helmet security headers'],
-  [/cors\(\s*\{[^}]*origin/s, 'CORS restricted to an allowlist'],
+  /* Accepts the inline `cors({ origin: … })` form OR a named per-request options
+     function. server.js uses the latter (corsOptions() returns origin:false for an
+     unknown origin and varies credentials by origin tier) — matching only the inline
+     shape warned about a CORS setup that is in fact stricter than before. */
+  [/cors\(\s*\{[^}]*origin|cors\(\s*corsOptions\s*\)/s, 'CORS restricted to an allowlist'],
   [/rateLimit|Limiter/, 'rate limiting'],
   [/mongoSanitize|sanitize/, 'input sanitization'],
   [/compression\(/, 'response compression'],

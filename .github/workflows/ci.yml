@@ -43,6 +43,16 @@ jobs:
       # with NO handler at all, so this is the complementary half.
       - name: dead-button audit (handler props supplied at every usage)
         run: node audit-buttons.mjs
+      # The embed postMessage protocol must match on both sides. Every integration
+      # failure on this project has been a name matching on one side only, failing
+      # silently — this is the third surface with that exact failure mode.
+      - name: embed postMessage protocol (loader vs framed app)
+        run: node audit-embed-protocol.mjs
+      # Executes the loader against a DOM shim: the iframe it builds (allow= for
+      # camera/mic, token NOT in the URL), the token handshake, rotation, and the
+      # messages it must ignore. Nothing had ever run this file.
+      - name: embed loader handshake (37 checks)
+        run: node test-embed-loader.mjs
       - name: UI / production audit
         run: node audit-ui.mjs
       # Invite/QR parsing is pure logic with no DOM, so it can be pinned exactly.
@@ -95,6 +105,13 @@ jobs:
       - name: chat real-time (edit/delete/react/pin/poll/settings, 26 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/chat-realtime.mjs
+      # A full mesh meeting must REFUSE the joiner who would break it, rather than
+      # admit everyone and freeze the video for the people already talking. Also
+      # pins the two exemptions: the host is never locked out, and an SFU-backed
+      # deployment has no ceiling at all.
+      - name: meeting capacity is ENFORCED, not just warned (15 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-capacity.mjs
       - name: meeting mesh (3rd/4th joiner sees everyone, 28 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/meeting-mesh.mjs
@@ -122,6 +139,25 @@ jobs:
       - name: embed group chat + group calls (22 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/embed-groups.mjs
+      # A tenant-registered origin must never gain ambient-credential access.
+      # Feeding App.allowedOrigins into the shared CORS/CSRF allowlist once let any
+      # signed-up user register evil.example and read a fresh access token out of
+      # /auth/refresh in a logged-in victim's browser. Proves the attack is dead
+      # AND that legitimate Bearer traffic from a tenant origin still works.
+      - name: SECURITY — embed origin trust tiers (23 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/security-embed-origins.mjs
+      # The drop-in embed: config bootstrap, allowedOrigins finally enforced (and
+      # against the PARENT origin), and minted time-limited TURN credentials.
+      - name: drop-in embed (config, origins, TURN minting, 29 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/embed-dropin.mjs
+      # Boots examples/saas-host for real. It is the file integrators copy, so a
+      # silent rot there breaks the paste-path while everything else stays green.
+      # Also guards realistic externalId lengths, which no other fixture covers.
+      - name: example SaaS host, end to end (28 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/embed-host-example.mjs
       - name: group-call mesh (A adds C; B and C must see each other, 20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/group-call-mesh.mjs
@@ -156,6 +192,22 @@ jobs:
       - name: presence — heartbeat, boot reset, 5-minute idle (20 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/presence.mjs
+      # A relay that never allocates and a prober that is silently malformed look
+      # identical from the outside — both report failure for every endpoint. This
+      # runs the prober against a TURN responder that verifies MESSAGE-INTEGRITY
+      # with its own implementation, so a broken prober cannot pass. No database.
+      - name: TURN relay prober speaks real TURN (25 checks)
+        run: node ../deploy/turn/check-relay.test.mjs
+      # Calls are peer-to-peer: without a TURN relay they fail between strict/
+      # symmetric NATs (mobile carriers, office networks) — the call rings, both
+      # sides accept, then there is no media. Pins that credentials are minted
+      # when configured, that the absence is reported rather than hidden, and
+      # that a relay NETWORK signs each relay with its own secret — a group with
+      # no matching secret must be dropped, never signed with the wrong one,
+      # since a credential the relay rejects burns ICE time and reads as an outage.
+      - name: TURN relay readiness — credentials, relay network, Cloudflare fallback (54 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/turn-relay.mjs
       # A limiter keyed on the wrong thing puts every caller in ONE bucket, which
       # a single client can never notice — its own requests are counted fine.
       # This sends from two identities and proves the counters are independent.

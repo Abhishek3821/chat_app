@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My SaaS — with ChatKonect embedded</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --panel: #ffffff;
+        --line: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --brand: #4f46e5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1120;
+          --panel: #111827;
+          --line: #1f2937;
+          --text: #e5e7eb;
+          --muted: #94a3b8;
+          --brand: #818cf8;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        height: 100vh;
+      }
+      nav {
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        padding: 20px 14px;
+      }
+      .brand { font-weight: 700; margin-bottom: 22px; letter-spacing: -0.01em; }
+      nav a {
+        display: block;
+        padding: 8px 10px;
+        border-radius: 8px;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      nav a.on { background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); font-weight: 600; }
+      main { display: flex; flex-direction: column; min-width: 0; }
+      header {
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--panel);
+      }
+      header h1 { font-size: 15px; margin: 0; font-weight: 650; }
+      #status { margin-left: auto; font-size: 12px; color: var(--muted); }
+      /* The embed fills whatever box you give it. This is the only layout rule
+         that matters: the container needs a real height. */
+      #chat { flex: 1; min-height: 0; }
+      .bar { padding: 8px 20px; border-top: 1px solid var(--line); background: var(--panel); display: flex; gap: 8px; }
+      button {
+        font: inherit;
+        padding: 5px 11px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--text);
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--brand); color: var(--brand); }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="brand">My SaaS</div>
+      <a href="#">Dashboard</a>
+      <a href="#">Customers</a>
+      <a href="#">Invoices</a>
+      <a href="#" class="on">Messages</a>
+      <a href="#">Settings</a>
+    </nav>
+
+    <main>
+      <header>
+        <h1>Messages</h1>
+        <span id="status">starting…</span>
+      </header>
+
+      <!-- Everything ChatKonect renders goes in here. -->
+      <div id="chat"></div>
+
+      <div class="bar">
+        <button data-go="/">Chats</button>
+        <button data-go="/calls">Calls</button>
+        <button data-go="/meetings">Meetings</button>
+        <button data-go="/contacts">Contacts</button>
+        <button data-go="/settings">Settings</button>
+      </div>
+    </main>
+
+    <script src="__CK_HOST__/embed.js"></script>
+    <script>
+      const status = document.getElementById('status');
+
+      const chat = ChatKonect.mount({
+        el: '#chat',
+        appId: '__APP_ID__',
+
+        /* Called on mount AND again before the token expires, so the session
+           never visibly drops. It must hit YOUR backend — the app secret stays
+           server-side. `as` just picks which demo user this window is. */
+        getToken: () =>
+          fetch('/chat-token' + window.location.search)
+            .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(new Error(e.error)))))
+            .then((d) => d.token),
+
+        onReady: (user) => {
+          status.textContent = 'signed in as ' + user.name;
+        },
+        onError: (err) => {
+          status.textContent = err.code + ': ' + err.message;
+          console.error('[ChatKonect]', err);
+        },
+        onConfig: (cfg) => {
+          console.log('[ChatKonect] features:', cfg.app.features, '| relay:', cfg.ice.relay);
+          if (cfg.ice.relay !== 'configured') {
+            console.warn('[ChatKonect]', cfg.ice.note);
+          }
+        },
+      });
+
+      // Your own chrome can drive the embedded UI.
+      document.querySelectorAll('[data-go]').forEach((b) => {
+        b.addEventListener('click', () => chat.navigate(b.dataset.go));
+      });
+    </script>
+  </body>
+</html>

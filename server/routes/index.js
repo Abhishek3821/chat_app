@@ -19,6 +19,9 @@ import keyRoutes from './keyRoutes.js';
 import v1Routes from './v1Routes.js';
 import appRoutes from './appRoutes.js';
 import platformRoutes from './platformRoutes.js';
+import embedRoutes from './embedRoutes.js';
+import { getIceServers } from '../controllers/embedController.js';
+import { protect } from '../middleware/auth.js';
 import pushRoutes from './pushRoutes.js';
 import communityRoutes from './communityRoutes.js';
 import catalogRoutes from './catalogRoutes.js';
@@ -60,6 +63,14 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Drop-in embed: bootstrap config (public, app id only) + minted ICE servers.
+router.use('/v1/embed', embedRoutes);
+/* The same minted ICE servers for the FIRST-PARTY app. Server-side TURN was
+   originally added for the embed only, so configuring TURN_URL fixed embeds
+   while leaving this app STUN-only — two places to configure, one of them
+   silent when missed. Registered before the `/v1` API-key router so this exact
+   path is not shadowed by it. */
+router.get('/v1/ice', protect, getIceServers);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/chats', chatRoutes);

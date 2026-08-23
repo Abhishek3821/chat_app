@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { refreshTenantOrigins } from '../utils/tenantOrigins.js';
 import User from '../models/User.js';
 import App, { APP_FEATURES } from '../models/App.js';
 import Session from '../models/Session.js';
@@ -40,9 +41,27 @@ function synthesizeIdentity(tenant, externalId) {
     .update(`${tenant.appId}:${externalId}`)
     .digest('hex')
     .slice(0, 12);
+  /* User.username is capped at 30 characters, and the tenant prefix alone is 19
+     ("app" + 16 hex). The previous layout appended the full externalId slug, so
+     anything longer than five characters overflowed and provisioning died on a
+     raw Mongoose validation error — which is every realistic externalId.
+
+     Budget, worst case 26 of the 30 available:
+       appPart  8   readable hint of which tenant a row belongs to
+       extPart  6   readable hint of which end user
+       fp      10   40 bits, the part that actually has to be unique
+       2 separators
+
+     The authoritative identifier is the indexed `externalId` field; this string
+     only has to be unique and vaguely recognisable, so the readable halves are
+     the ones that get truncated. */
+  const appPart = slug(tenant.appId).slice(0, 8);
+  const extPart = slug(externalId).slice(0, 6) || fingerprint.slice(0, 6);
+  const username = `${appPart}_${extPart}_${fingerprint.slice(0, 10)}`.slice(0, 30);
+
   return {
     email: `u-${fingerprint}@${tenant.appId}.app.invalid`,
-    username: `${slug(tenant.appId)}_${slug(externalId) || fingerprint.slice(0, 6)}_${fingerprint.slice(0, 4)}`,
+    username,
     password: crypto.randomBytes(24).toString('base64url'), // unusable by design
   };
 }
@@ -200,7 +219,27 @@ export const updateApp = asyncHandler(async (req, res) => {
   }
   if (req.body.allowedOrigins !== undefined) {
     if (!Array.isArray(req.body.allowedOrigins)) throw new ApiError(400, 'allowedOrigins must be a list.');
-    app.allowedOrigins = req.body.allowedOrigins.map((o) => String(o).slice(0, 200)).slice(0, 20);
+    /* Must be real http(s) origins. "null" (what a sandboxed iframe, a file://
+       page and some redirect chains send), "*", and scheme-only junk are all
+       rejected — an origin allowlist that accepts non-origins silently grants
+       far more than the console suggests. Normalised so that a trailing slash
+       or a full URL with a path cannot cause a same-origin value to miss. */
+    const normalised = [];
+    for (const raw of req.body.allowedOrigins.slice(0, 20)) {
+      const value = String(raw).trim().slice(0, 200);
+      if (!value) continue;
+      let parsed;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new ApiError(400, `"${value}" is not a valid origin. Use the full form, e.g. https://app.example.com.`);
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new ApiError(400, `"${value}" must use http:// or https://.`);
+      }
+      if (!normalised.includes(parsed.origin)) normalised.push(parsed.origin);
+    }
+    app.allowedOrigins = normalised;
   }
   if (req.body.limits?.maxUsers !== undefined) {
     app.limits.maxUsers = Math.max(1, Math.min(Number(req.body.limits.maxUsers) || 1, 1_000_000));
@@ -210,6 +249,7 @@ export const updateApp = asyncHandler(async (req, res) => {
   }
 
   await app.save();
+  await refreshTenantOrigins(); // origins/active feed the CORS allowlist — awaited so the next request sees it
   res.json({ success: true, app: { ...app.toObject(), secretHash: undefined } });
 });
 
@@ -222,6 +262,7 @@ export const rotateAppSecret = asyncHandler(async (req, res) => {
   app.secretPrefix = secret.prefix;
   app.secretRotatedAt = new Date();
   await app.save();
+  await refreshTenantOrigins(); // origins/active feed the CORS allowlist — awaited so the next request sees it
   res.json({ success: true, secret: secret.raw, secretPrefix: secret.prefix });
 });
 
@@ -233,6 +274,7 @@ export const disableApp = asyncHandler(async (req, res) => {
   if (!app) throw new ApiError(404, 'App not found.');
   app.active = false;
   await app.save();
+  await refreshTenantOrigins(); // origins/active feed the CORS allowlist — awaited so the next request sees it
   res.json({ success: true, disabled: true });
 });
 

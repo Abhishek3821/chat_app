@@ -26,6 +26,16 @@ export const createLabel = asyncHandler(async (req, res) => {
   if (!canManage(req.user)) throw new ApiError(403, 'Only workspace owners/admins can manage labels.');
   const name = (req.body.name || '').trim();
   if (!name) throw new ApiError(400, 'A label needs a name.');
+
+  /* Check BEFORE inserting, rather than relying only on the duplicate-key error.
+     The unique index is built asynchronously by Mongoose, so on a fresh database
+     the first writes can land before it exists — the duplicate is then stored
+     permanently, and once duplicates exist the unique index can never be built
+     at all, so uniqueness is lost for good. The 11000 catch below stays for the
+     race between this check and the insert. */
+  const clash = await Label.findOne({ workspace, name: name.slice(0, 40) }).select('_id').lean();
+  if (clash) throw new ApiError(409, 'A label with that name already exists.');
+
   try {
     const label = await Label.create({
       workspace,
@@ -90,6 +100,11 @@ export const createQuickReply = asyncHandler(async (req, res) => {
   const shortcut = (req.body.shortcut || '').trim().replace(/^\/+/, '');
   const text = (req.body.text || '').trim();
   if (!shortcut || !text) throw new ApiError(400, 'A quick reply needs a shortcut and text.');
+
+  // Same reasoning as createLabel: do not depend on the unique index existing yet.
+  const clash = await QuickReply.findOne({ workspace, shortcut: shortcut.slice(0, 40) }).select('_id').lean();
+  if (clash) throw new ApiError(409, 'A quick reply with that shortcut already exists.');
+
   try {
     const quickReply = await QuickReply.create({
       workspace,

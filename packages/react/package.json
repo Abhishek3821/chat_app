@@ -1,0 +1,10 @@
+{
+  "name": "@chatkonect/react",
+  "version": "1.0.0",
+  "description": "Drop the whole ChatKonect UI into a React app, authenticated by your own login.",
+  "type": "module",
+  "main": "src/index.jsx",
+  "files": ["src"],
+  "peerDependencies": { "react": ">=18" },
+  "license": "UNLICENSED"
+}

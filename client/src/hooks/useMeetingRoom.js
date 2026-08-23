@@ -11,7 +11,7 @@ import { createEffectPipeline, EFFECTS } from '@/lib/videoEffects';
  *   - Existing peers learn of the newcomer via meeting:peer-joined and simply
  *     answer the offer that arrives — so no two peers ever offer each other (no glare).
  */
-import { ICE_SERVERS } from '../lib/iceServers';
+import { ICE_SERVERS, ensureIceServers } from '../lib/iceServers';
 import { applyMeshEncoding, retuneAll, meshCapacityWarning } from '../lib/meshQuality';
 
 const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -230,7 +230,10 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
 
     (async () => {
       try {
+        // Same as the call path: load the relay alongside the permission prompt.
+        const relay = ensureIceServers();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO_ENHANCE }, video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false });
+        await relay;
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         localRef.current = stream;
         cameraTrackRef.current = stream.getVideoTracks()[0] || null;

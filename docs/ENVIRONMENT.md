@@ -8,13 +8,13 @@ Compiled by grepping all `process.env.` / `import.meta.env.` references in `serv
 ## 2.0 Secrets policy
 
 ### 🔴 Secrets — never commit, never log, rotate if exposed
-`MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `SUPER_ADMIN_PASSWORD` (the platform admin's login) · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
+`MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `SUPER_ADMIN_PASSWORD` (the platform admin's login) · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TURN_SECRET` (mints relay credentials — bandwidth theft if leaked) · `CLOUDFLARE_TURN_API_TOKEN` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
 
 ### 🟡 Public-by-construction — safe in the bundle, but still access-controlled resources
 Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. `client/.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` is therefore *exposed by design* — prefer short-lived TURN credentials (`VITE_TURN_CREDENTIALS_URL`). **Never** put a real secret behind a `VITE_` prefix.
 
 ### 🟢 Non-secret configuration
-`PORT` · `NODE_ENV` · `CLIENT_URL` · `JWT_ACCESS_EXPIRES` · `REFRESH_TOKEN_DAYS` · `SESSION_IDLE_DAYS` · `EMAIL_HOST` · `EMAIL_PORT` · `EMAIL_USER` · `EMAIL_FROM` · `STORAGE_DRIVER` · `CLOUDINARY_CLOUD_NAME` · `VAPID_PUBLIC_KEY` · `VAPID_SUBJECT` · `LIVEKIT_URL` · `DNS_SERVERS` · `EXTRA_CORS_ORIGINS` · `ENABLE_EMAIL_VERIFICATION` · `TWILIO_FROM` · all `VITE_*`
+`PORT` · `NODE_ENV` · `CLIENT_URL` · `JWT_ACCESS_EXPIRES` · `REFRESH_TOKEN_DAYS` · `SESSION_IDLE_DAYS` · `EMAIL_HOST` · `EMAIL_PORT` · `EMAIL_USER` · `EMAIL_FROM` · `STORAGE_DRIVER` · `CLOUDINARY_CLOUD_NAME` · `VAPID_PUBLIC_KEY` · `VAPID_SUBJECT` · `LIVEKIT_URL` · `TURN_URL` · `DNS_SERVERS` · `EXTRA_CORS_ORIGINS` · `ENABLE_EMAIL_VERIFICATION` · `TWILIO_FROM` · all `VITE_*`
 
 ### Keys present in `server/.env` (⚠️ **names only — no values read or reproduced**)
 ```
@@ -143,6 +143,38 @@ Push activates only when **both** keys are set; bad keys are caught and logged (
 
 `livekitEnabled()` requires **all three**. When set, meeting **media** routes through the SFU — each participant sends **one** upstream instead of one per peer, which is what lets a room scale past the ~6-person mesh ceiling. Signaling for chat/reactions/hand-raise/attendance still rides the app's own socket room, so only the media transport changes. Unset → the whole module is a no-op and meetings use the peer-to-peer mesh.
 
+## 2.8b TURN relay (server-minted ICE credentials)
+
+| Variable | Where used | Required? | Default if unset | What it does |
+|---|---|---|---|---|
+| `TURN_URL` | server — `utils/turnCredentials.js` (`relayGroups()`), served by `GET /api/v1/ice` | No (needed for calls across strict NATs) | *(unset → STUN only)* | One or more relays. `,` separates URLs **within** one relay, `\|` separates **relays**. Max 6 relays; extras are dropped with a boot warning. Order is preserved — the browser tries them in order, so list the relay nearest your users first. |
+| `TURN_SECRET` 🔴 | server — `utils/turnCredentials.js` (HMAC signing) | With `TURN_URL` | *(unset → STUN only)* | coturn's `static-auth-secret`. One value applies to every relay; `\|`-separated values are matched **positionally** to the `TURN_URL` relays. Never leaves the server — clients only ever get an expiring username/credential pair. |
+| `CLOUDFLARE_TURN_KEY_ID` | server — `utils/turnCredentials.js` (`cloudflareIceServers()`) | No | *(unset)* | Cloudflare TURN key id (dashboard → Calls → TURN keys). Additive to `TURN_URL`, not a replacement. |
+| `CLOUDFLARE_TURN_API_TOKEN` 🔴 | server — same | With the key id | *(unset)* | Account-level API token, exchanged server-side for time-limited credentials and cached to 80% of their life. Never reaches a browser. A bad token surfaces on the **first call**, not at boot. |
+
+With **both** providers configured, your own relays are offered first and Cloudflare is the
+fallback — the browser tries them in list order, so a working self-hosted relay is used and
+Cloudflare is only reached for when it is not. Trade-off: Cloudflare generates one credential
+shared by every user for its lifetime, so relay bandwidth cannot be attributed to an individual
+user the way the coturn path allows.
+
+`TURN_URL`/`TURN_SECRET`, or the Cloudflare pair, or both — otherwise the endpoint degrades to
+STUN only and says so (`turnStatus()`), rather than
+failing silently. Either way this is the **server-side** path: the browser fetches credentials at call time,
+so the secret stays server-side and credentials expire on their own (4 h default). The client
+`VITE_TURN_*` vars in §2.11 are the older build-time path and are world-readable by construction —
+prefer these.
+
+A relay group with no matching secret is **dropped, not signed with another group's secret**: a
+credential the relay rejects is worse than no credential, because the browser burns ICE time on it
+before failing, which presents exactly like a dead relay. Boot logs the relay count and any
+mismatch.
+
+Setup, sizing, and how to run several relays: **[SELF_HOSTED_TURN.md](SELF_HOSTED_TURN.md)**
+(§6 one relay, §9 a network of them). One-command installer and a prober that performs a real
+TURN Allocate: **[deploy/turn/](../deploy/turn/)** —
+`node deploy/turn/check-relay.mjs --env` answers "does this relay actually relay" in one
+command, which no amount of reading config can.
 ## 2.9 Redis / queue / scaling
 
 | Variable | Where used | Required? | Default if unset | What it does |

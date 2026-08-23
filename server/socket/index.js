@@ -7,6 +7,7 @@ import Meeting from '../models/Meeting.js';
 import Session from '../models/Session.js';
 import { isSessionValid } from '../utils/session.js';
 import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callService.js';
+import { meetingCapacityCheck } from '../utils/meetingCapacity.js';
 import { touchPresence, forgetPresence } from '../utils/presence.js';
 
 // Socket payloads DON'T pass through the Express mongoSanitize middleware, so any
@@ -562,6 +563,15 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       const isInvited = (meeting.participants || []).some((p) => String(p.user) === userId && !p.viaLink);
       const peers = await meetingPeers(meetingId, socket.id);
       const hostPresent = peers.some((p) => String(p.userId) === String(meeting.host));
+
+      /* Capacity, enforced here rather than only warned about in the UI. Checked
+         before the waiting/knock branches so a full room answers immediately
+         instead of making someone knock for a seat that does not exist. Hosts and
+         SFU-backed rooms are exempt — see utils/meetingCapacity.js. */
+      const capacity = meetingCapacityCheck(peers.length, isHost);
+      if (capacity.full) {
+        return typeof cb === 'function' && cb({ ok: false, full: true, limit: capacity.limit, error: capacity.error });
+      }
       // Host-controlled "join anytime": if off, a guest can't enter until the
       // host is actually in the room.
       if (meeting.settings?.joinAnytime === false && !isHost && !hostPresent) {

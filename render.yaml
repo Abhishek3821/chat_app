@@ -84,6 +84,28 @@ services:
         sync: false
       - key: VAPID_SUBJECT
         value: mailto:abhisheksingh@capyngen.com # real, monitored contact (push services may use it to reach you)
+      # ── TURN relay: REQUIRED for calls between different networks ──
+      # Calls are peer-to-peer. Without a relay, two people behind symmetric NAT
+      # or CGNAT (mobile data, office wifi — i.e. two different cities) get a call
+      # that rings, connects, and carries no audio or video. Chat is unaffected,
+      # which is why this looks like an app bug rather than a missing setting.
+      #
+      # Fill in EITHER route in the dashboard (or both — own relays are offered
+      # first and Cloudflare becomes the fallback):
+      #
+      # A) Your own coturn. deploy/turn/install-coturn.sh sets up a box and prints
+      #    both values. Several relays: separate with "|", nearest first.
+      - key: TURN_URL
+        sync: false
+      - key: TURN_SECRET
+        sync: false
+      # B) Cloudflare TURN — dashboard → Calls → TURN keys. No box to run.
+      - key: CLOUDFLARE_TURN_KEY_ID
+        sync: false
+      - key: CLOUDFLARE_TURN_API_TOKEN
+        sync: false
+      # Verify after setting either: node deploy/turn/check-relay.mjs --env
+      # The API logs which providers loaded at boot.
       # Optional: comma-separated additional allowed origins
       # - key: EXTRA_CORS_ORIGINS
       #   value: https://staging.yourdomain.com

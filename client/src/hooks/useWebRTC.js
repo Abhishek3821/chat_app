@@ -31,7 +31,7 @@ import { startRingtone, startRingback, stopRingtone } from '../lib/sounds';
  * NOTE: getUserMedia/getDisplayMedia only work on secure origins — https:// or
  * http://localhost. Over a plain-http LAN IP the browser blocks it.
  */
-import { ICE_SERVERS } from '../lib/iceServers';
+import { ICE_SERVERS, ensureIceServers } from '../lib/iceServers';
 import { applyMeshEncoding, retuneAll } from '../lib/meshQuality';
 
 // Browser DSP applied to the outgoing mic track. Toggled live via
@@ -228,7 +228,12 @@ export function useWebRTC(call) {
       audio: { ...AUDIO_ENHANCE },
       video: wantVideo ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
     };
+    /* Fetch the TURN relay in parallel with the permission prompt. Kicked off
+       first so it is usually resolved by the time media is, which keeps the
+       first peer connection off a STUN-only config without adding latency. */
+    const relay = ensureIceServers();
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    await relay;
     localStreamRef.current = stream;
     cameraTrackRef.current = stream.getVideoTracks()[0] || null;
     setLocalStream(stream);

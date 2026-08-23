@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api, { DEMO_MODE, ensureMediaToken, clearMediaToken } from '../lib/api';
+import { resetIceServers } from '../lib/iceServers';
 import { resetFreshness } from '../lib/freshness';
 import { ME } from '../lib/demoData';
 import { useUI } from './useUI';
@@ -128,6 +129,10 @@ export const useAuth = create((set, get) => ({
     localStorage.removeItem('cc_token');
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
+    /* TURN credentials are minted per user and signed with an expiry. Dropping
+       them means the next person to sign in on this browser fetches their own
+       rather than relaying on the previous user's. */
+    resetIceServers();
     useUI.getState().resetAppearance();
     set({ user: null });
   },

@@ -40,7 +40,13 @@ const indexSrc = fs.readFileSync(path.join(SERVER_DIR, 'routes', 'index.js'), 'u
 const mounts = new Map(); // imported identifier -> { file, prefix }
 
 // Default imports:  import chatRoutes from './chatRoutes.js'
-for (const m of indexSrc.matchAll(/import\s+(\w+)\s+from\s+'\.\/([\w.]+\.js)'/g)) mounts.set(m[1], { file: m[2] });
+/* Comments blanked BEFORE scanning: `// router.get(...)` otherwise counted as a
+   declared route, so disabling one kept this audit green while every client call
+   to it 404s. Offsets are preserved so nothing else shifts. */
+const indexNoComments = indexSrc
+  .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+  .replace(/(^|[^:\\])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length));
+for (const m of indexNoComments.matchAll(/import\s+(\w+)\s+from\s+'\.\/([\w.]+\.js)'/g)) mounts.set(m[1], { file: m[2] });
 /* NAMED imports:  import { webhookRoutes, hookIngressRoutes } from './webhookRoutes.js'
    Missing these is not a false positive, it is a SILENT GAP: the whole file goes
    unscanned, so every call into it is reported as unmatched (or worse, a genuinely
@@ -59,6 +65,19 @@ for (const m of indexSrc.matchAll(/router\.use\(\s*'([^']+)'\s*,\s*(\w+)\s*\)/g)
 
 /* ── 2. Server: declared routes ────────────────────────────────────── */
 const declared = []; // { method, pattern }
+
+/* Routes declared DIRECTLY in index.js, not inside a mounted route file — e.g.
+   `router.get('/health', …)` and `router.get('/v1/ice', protect, …)`. Only route
+   FILES were parsed before, so a direct route read as "no matching server route"
+   and failed this audit on a call that works. The dangerous direction is the
+   other one: a direct route that gets deleted would otherwise never be missed. */
+/* Scanned from `indexNoComments` (declared above), not the raw source: otherwise
+   `// router.get('/v1/ice', …)` counts as a declared route, so DISABLING one keeps
+   this audit green while every client call to it 404s — the exact direction this
+   audit exists to catch. */
+for (const m of indexNoComments.matchAll(/\brouter\s*\.\s*(get|post|put|patch|delete)\s*\(\s*'([^']*)'/g)) {
+  declared.push({ method: m[1].toUpperCase(), pattern: joinPath('', m[2]) });
+}
 for (const [, entry] of mounts) {
   if (!entry.prefix || !entry.file) continue;
   const file = path.join(SERVER_DIR, 'routes', entry.file);

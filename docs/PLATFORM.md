@@ -12,10 +12,12 @@ There are two audiences here, and they need different halves of this document:
 | You are… | Read |
 |---|---|
 | The **ChatKonect operator** — you own the admin console and create the apps | §1 – §3 |
-| A **third-party developer** integrating ChatKonect into your own product | §4 – §8 |
+| A **third-party developer** who wants the whole UI dropped in | **§10** (start here) |
+| A **third-party developer** building their own frontend against the API | §4 – §8 |
 
-> **Read §9 before you promise anything to a customer.** Two parts of this platform are not finished:
-> there is no embed SDK yet, and most capability toggles are not enforced. §9 says exactly which.
+> **Read §9 before you promise anything to a customer.** Most capability toggles are still not
+> enforced server-side — §9.1 says exactly which, and it matters if you are packaging or billing on
+> them. The drop-in embed IS built: see §10.
 
 ---
 
@@ -129,7 +131,7 @@ Turning an enforced flag off makes its endpoints return:
 
 The snippet in the panel is copy-pasteable but uses `http://localhost:5000` — the **development**
 API base. Give your customer the deployed host instead (see `docs/ENVIRONMENT.md`). Its step 3 says
-"hand that token to the embed" — read §9.2 first, because that embed does not exist yet.
+"hand that token to the embed" — that embed is real; §10 is the current reference for it.
 
 ---
 
@@ -533,22 +535,45 @@ Practical consequences:
 (`messageRoutes`, `uploadRoutes`, `pushRoutes`, …) — the helper already exists and already handles
 first-party users correctly. Until then, treat the nine as labels.
 
-### 9.2 There is no embed SDK or widget
+### 9.2 Two integration modes, and only one of them is drop-in
 
-The Integrate snippet's step 3 — "hand that token to the embed" — refers to a `@chatkonect/react`
-package and a `<script>` widget that were designed but **never built**. Nothing in the repo ships
-them.
+**Mode A — drop-in embed (§10).** The whole UI in an iframe, authenticated by your
+own login. You write no chat code. This is the recommended path and what most
+integrators should use.
 
-So a customer integrating today must **build their own UI** against the REST API and Socket.IO
-events, using the token as shown in §4. That is entirely workable — [API.md](API.md) and
-[SOCKET_EVENTS.md](SOCKET_EVENTS.md) document the whole surface — but it is a real frontend project,
-not a drop-in `<ChatKonect />` component. Set expectations accordingly.
+**Mode B — build your own frontend.** Full REST + Socket.IO access
+([API.md](API.md), [SOCKET_EVENTS.md](SOCKET_EVENTS.md)). Total control, and you own
+every screen, the WebRTC wiring and your own ICE configuration.
 
-### 9.3 `allowedOrigins` is stored but never checked
+What Mode B does *not* have is a component library: there is no published package
+that renders individual ChatKonect pieces (a message list, a composer) inside your
+own layout. It is the whole UI in a frame, or your own UI against the API. A
+half-way option would mean shipping our React tree into your bundle, where it would
+fight your React version, your Tailwind preflight and your global CSS in every host
+it lands in.
 
-`PATCH /api/apps/:id` accepts and saves an `allowedOrigins` list, and nothing reads it. CORS is
-decided by the server's global origin rule (`CLIENT_URL` + `EXTRA_CORS_ORIGINS`), not per tenant.
-Setting it gives no per-app browser-origin restriction.
+`@chatkonect/react` (in `packages/react/`) is a thin wrapper around the iframe
+loader, not a component library — it exists so a React host does not have to manage
+script injection by hand.
+
+### 9.3 `allowedOrigins` — now enforced
+
+Previously stored and never read. It is now the source of truth for two things:
+
+- **Who may embed.** `GET /api/v1/embed/config` rejects a `parentOrigin` that isn't
+  registered. Checked against the *parent* origin, not the iframe's own — an XHR
+  from inside the frame carries our origin, so a header-only check compared the
+  value against ourselves and could never fail.
+- **CORS and CSRF.** A registered origin is accepted without an operator adding it
+  to the global `EXTRA_CORS_ORIGINS` and redeploying. That per-partner env edit was
+  the single biggest reason self-service integration did not work.
+
+An empty list still means "any origin" for that tenant, so this only ever widens
+access for tenants that chose to pin. Pin yours before production.
+
+Origin is forgeable outside a browser, so treat this as an integration guard rather
+than a security boundary. The boundary is that a user token speaks for exactly one
+end user, and only your backend can mint one.
 
 ### 9.4 Disabling an app does not end live sessions
 
@@ -566,6 +591,83 @@ users individually.
 `DELETE /users/:externalId` sets `accountStatus: 'suspended'`, and no platform endpoint sets it back —
 `POST /users` deliberately only syncs name/avatar/bio on an existing user. Reactivation needs
 operator intervention outside the platform API.
+
+---
+
+## 10. Drop-in embed — the whole UI, your login
+
+The fastest integration, and the one that removes every class of error the raw API
+path exposes. You supply a user token; ChatKonect supplies the product.
+
+```html
+<div id="chat" style="height:600px"></div>
+<script src="https://chat.example.com/embed.js"></script>
+<script>
+  const chat = ChatKonect.mount({
+    el: '#chat',
+    appId: 'app_7f3c9a2b4d1e',
+    // Called on mount AND again before expiry, so sessions never visibly drop.
+    // Point it at YOUR endpoint, behind YOUR session (see §8).
+    getToken: () => fetch('/my-app/chat-token').then((r) => r.json()).then((d) => d.token),
+    onReady: (user) => console.log('chat ready', user),
+    onError: (err) => console.error(err.code, err.message),
+  });
+
+  chat.navigate('/calls');   // drive the embedded UI
+  chat.refreshToken();       // push a fresh token immediately
+  chat.destroy();            // remove it
+</script>
+```
+
+React hosts can use `packages/react/` instead:
+
+```jsx
+<ChatKonect host="https://chat.example.com" appId="app_…" getToken={getToken} style={{ height: 600 }} />
+```
+
+### What you no longer configure
+
+| Previously your problem | Now |
+|---|---|
+| API base URL | Resolved by `GET /api/v1/embed/config` |
+| Socket.IO URL and path | Same |
+| Which features are on | Same — the embed hides surfaces your app isn't granted |
+| A TURN relay | `GET /api/v1/embed/ice` mints time-limited coturn credentials from the operator's relay |
+| The entire UI | Rendered by us |
+| Signalling contracts (`to` vs `receiverId`, the `join-chat` argument shape, `call:end` vs `call:ended`) | Not yours to get wrong any more |
+
+### Security properties
+
+- **The token is never in the URL.** Query strings land in browser history, server
+  access logs and the `Referer` header. It arrives by `postMessage` from your
+  declared origin only.
+- **The frame renders nothing without a token.** A pre-existing first-party session
+  in `localStorage` is deliberately *not* enough, so a hostile page that frames
+  `/embed` gets an idle "Connecting…" screen and no session.
+- **Origins are verified twice**: the frame compares every message origin with
+  strict equality against its declared `parentOrigin`, and the server checks that
+  origin against `allowedOrigins` (§9.3).
+- **No refresh token reaches the browser.** Rotation goes through your backend, the
+  only holder of the app secret. The embed asks for one via `token-expiring` at 80%
+  of the token lifetime.
+- **Admin surfaces are absent by construction** — the embed's route table has no
+  `/admin`, `/developers` or `/platform` entry to reach.
+
+### Operator setup
+
+| Variable | Why |
+|---|---|
+| `EMBED_URL` | Origin serving the UI. A wrong value is why a host page frames a 404. |
+| `TURN_URL` + `TURN_SECRET` | coturn in `use-auth-secret` mode. Unset = STUN only, and calls fail between strict/symmetric NATs. |
+| `API_PUBLIC_URL` | Only when a proxy rewrites Host and the derived origin comes out wrong. |
+
+The frontend host must allow framing on `/embed` **only**. `client/vercel.json` does
+this: `frame-ancestors *` on `/embed` and `/embed/*`, `'none'` everywhere else, so
+the main app still cannot be clickjacked. On another host, replicate that split — a
+blanket `X-Frame-Options: DENY` silently blocks the entire embed.
+
+Verified by `server/tests/embed-dropin.mjs` (29 checks) and
+`client/audit-embed-protocol.mjs`.
 
 ---
 

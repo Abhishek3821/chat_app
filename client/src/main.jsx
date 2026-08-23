@@ -2,16 +2,31 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
+import EmbedApp from './EmbedApp.jsx';
 import './index.css';
 import { registerServiceWorker } from './lib/push';
 import { initAudioUnlock } from './lib/sounds';
 import { initUnreadBadge } from './lib/notify';
 
+/* The embeddable surface is the SAME bundle under a router basename, not a
+   second entry point. Mounting it with basename='/embed' is what makes the
+   existing screens work unchanged: AppLayout and every page link to absolute
+   paths ('/calls', '/settings'), and without the basename those would navigate
+   the iframe straight out of the embed. One build, one SPA fallback, no
+   duplicated route table. */
+const IS_EMBED = window.location.pathname === '/embed' || window.location.pathname.startsWith('/embed/');
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    {IS_EMBED ? (
+      <BrowserRouter basename="/embed">
+        <EmbedApp />
+      </BrowserRouter>
+    ) : (
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    )}
   </React.StrictMode>
 );
 

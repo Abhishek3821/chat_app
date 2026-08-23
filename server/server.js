@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
+import { primeTenantOrigins } from './utils/tenantOrigins.js';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
@@ -13,11 +14,12 @@ import { connectDB } from './config/db.js';
 import { ensureWorkspaces } from './utils/workspaceService.js';
 import { ensureSuperAdmin, describeSuperAdmin } from './utils/superAdmin.js';
 import { resetAllPresence, startPresenceSweeper } from './utils/presence.js';
+import { turnStatus, relayConfigWarnings } from './utils/turnCredentials.js';
 import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { mongoSanitize } from './middleware/sanitize.js';
-import { csrfGuard, isAllowedOrigin } from './middleware/csrf.js';
+import { csrfGuard, isAllowedOrigin, isFirstPartyOrigin, isEmbedTenantOrigin } from './middleware/csrf.js';
 import { serveUpload } from './controllers/mediaController.js';
 import { verifyEmailTransport, closeEmailTransport, isEmailConfigured } from './utils/sendEmail.js';
 import { initSocket, getIO } from './socket/index.js';
@@ -37,12 +39,27 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5290';
  * Allows CLIENT_URL + EXTRA_CORS_ORIGINS always, and any localhost/LAN origin
  * in development.
  */
-function corsOrigin(origin, cb) {
-  // Don't THROW on a disallowed origin — that returns a 500 and makes CSRF
-  // defense an implicit side-effect of CORS. Instead just decline CORS headers
-  // (the browser then can't read the response); csrfGuard is the explicit gate
-  // that blocks cross-site state-changing requests with a clean 403.
-  return cb(null, isAllowedOrigin(origin));
+/**
+ * Per-request CORS options, because CREDENTIALS must vary by origin tier.
+ *
+ * Don't THROW on a disallowed origin — that returns a 500 and makes CSRF
+ * defense an implicit side-effect of CORS. Declining the headers is enough;
+ * csrfGuard is the explicit gate with a clean 403.
+ *
+ * First-party origins get credentials (the app relies on httpOnly session
+ * cookies). Tenant-registered origins do NOT: that list is self-service and
+ * effectively attacker-controllable, and granting it cookie access let any
+ * signed-up user read a fresh access token out of /auth/refresh in a victim's
+ * browser. An embed authenticates with a Bearer user token, which needs no
+ * cookies — so withCredentials from a tenant origin is refused by design.
+ */
+function corsOptions(req, cb) {
+  const origin = req.header('Origin');
+  // No Origin: curl, server-to-server, same-origin. Nothing to widen.
+  if (!origin) return cb(null, { origin: true, credentials: true });
+  if (isFirstPartyOrigin(origin)) return cb(null, { origin: true, credentials: true });
+  if (isEmbedTenantOrigin(origin)) return cb(null, { origin: true, credentials: false });
+  return cb(null, { origin: false, credentials: false });
 }
 
 /**
@@ -86,7 +103,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 // Gzip responses (JSON chat/message payloads compress ~5–8×, cutting transfer
 // time on every API call). The filter auto-skips already-compressed media.
 app.use(compression());
-app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(cookieParser());
@@ -111,7 +128,12 @@ app.use(errorHandler);
 
 // ── Socket.IO ───────────────────────────────────────────────────
 const io = new SocketServer(server, {
-  cors: { origin: corsOrigin, credentials: true },
+  /* Both origin tiers may open a socket, and credentials stay on here — unlike
+     the HTTP layer, the handshake has NO cookie path: it reads the token from
+     `handshake.auth.token` (or an Authorization header) and rejects scoped
+     tokens outright. So there is no ambient credential for a hostile origin to
+     ride, which is what made HTTP cookies the problem. */
+  cors: { origin: (origin, cb) => cb(null, isAllowedOrigin(origin)), credentials: true },
 });
 // Attach the Redis adapter when REDIS_URL is set, so message/presence fan-out
 // works across a load-balanced fleet of instances. Without it, Socket.IO runs
@@ -131,6 +153,9 @@ app.set('io', io);
 async function start() {
   validateEnv();
   await connectDB();
+  // Embedding tenants' registered origins feed the CORS/CSRF allowlist. Primed
+  // here so the first cross-origin request isn't the one that pays for the query.
+  await primeTenantOrigins();
 
   // Background jobs (notification fan-out, push delivery). Runs on a BullMQ
   // worker when REDIS_URL is set, else inline in this process.
@@ -178,6 +203,31 @@ async function start() {
   } catch (err) {
     console.warn('⚠️  Presence reset skipped:', err?.message || err);
   }
+  /* Relay readiness. WebRTC needs a TURN relay whenever both peers sit behind
+     symmetric NAT or CGNAT — mobile carriers, most office networks. Without one
+     the call rings, both sides accept, and then there is no media: a failure that
+     looks like a bug in the app rather than a missing deployment setting. Say so
+     at boot so it is a known state instead of a mystery support ticket. */
+  {
+    const t = turnStatus();
+    if (t.relay === 'configured') {
+      console.log(
+        `🔀 TURN relay configured — ${t.relayCount} relay${t.relayCount === 1 ? '' : 's'} via ${t.providers.join(' + ')}, tried in the order listed. Calls can traverse strict/symmetric NATs.`
+      );
+      /* Cloudflare credentials come from an API call, not a local HMAC, so a bad
+         token fails at the FIRST CALL rather than at boot. Name it here so that
+         later warning has context. */
+      if (t.providers.includes('cloudflare')) {
+        console.log('   Cloudflare TURN credentials are fetched on first use; a bad token surfaces then, not now.');
+      }
+      /* A relay group with no secret to sign it is silently dropped, so the
+         operator would otherwise think they had more capacity than they do. */
+      relayConfigWarnings().forEach((w) => console.warn('⚠️  TURN config: ' + w));
+    } else {
+      console.warn('⚠️  No TURN relay (STUN only). ' + t.note);
+    }
+  }
+
   startPresenceSweeper((userId, lastSeen) => {
     getIO()?.emit('user-offline', { userId, lastSeen });
   });
