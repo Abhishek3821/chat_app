@@ -142,6 +142,16 @@ const cfServer = http.createServer((req, res) => {
 });
 const cfEnv = { CLOUDFLARE_TURN_KEY_ID: CF_KEY_ID, CLOUDFLARE_TURN_API_TOKEN: CF_TOKEN, CLOUDFLARE_TURN_API_BASE: CF_BASE };
 
+/** Wait for a condition, since the boot credential check is not awaited. */
+const until = async (fn, ms = 4000) => {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (fn()) return true;
+    await sleep(100);
+  }
+  return false;
+};
+
 const relaysIn = (body) => {
   const list = Array.isArray(body?.iceServers) ? body.iceServers : Array.isArray(body) ? body : [];
   return list.filter((s) => /^turns?:/.test(String(Array.isArray(s.urls) ? s.urls[0] : s.urls)));
@@ -272,6 +282,18 @@ const relaysIn = (body) => {
   check('the key id went in the path, as the API requires', String(cfHits[0]?.url || '').includes('/keys/' + CF_KEY_ID + '/'), cfHits[0]?.url);
   check('a ttl was requested, so the credential expires on its own', Number(JSON.parse(cfHits[0]?.body || '{}').ttl) >= 3600, cfHits[0]?.body);
 
+  section('Boot proves the credentials work, instead of the first caller proving it');
+  check(
+    'boot VERIFIES the credentials against the API',
+    await until(() => /Cloudflare TURN credentials verified/.test(bootLog.join('\n'))),
+    bootLog.join('').slice(-260)
+  );
+  check(
+    'so the cache is already warm before anyone calls',
+    cfHits.length >= 1,
+    String(cfHits.length) + ' — a cold cache puts an API round trip in front of the first call'
+  );
+
   section('The advertised ttl must not outlive the credential');
   check(
     'ttlSeconds never exceeds the life the credential was minted with',
@@ -314,6 +336,11 @@ const relaysIn = (body) => {
   cfMode = 'unauthorized';
   cfHits.length = 0;
   await boot({ TURN_URL: TURN_URLS, TURN_SECRET, ...cfEnv });
+  check(
+    'a bad token is reported AT BOOT, before any user places a call',
+    await until(() => /Cloudflare TURN did not answer at boot/.test(bootLog.join('\n'))),
+    bootLog.join('').slice(-260)
+  );
   const degraded = await iceFor(await signIn());
   check('the endpoint still answers 200, not 500', degraded.status === 200, String(degraded.status));
   const degradedRelays = relaysIn(degraded.body);

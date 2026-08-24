@@ -1,6 +1,6 @@
 import App from '../models/App.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { resolveIceServers, turnStatus } from '../utils/turnCredentials.js';
+import { resolveIceServers, iceStatus } from '../utils/iceServers.js';
 
 /**
  * Bootstrap for the drop-in embed.
@@ -86,7 +86,7 @@ export const getEmbedConfig = asyncHandler(async (req, res) => {
     },
     // Relay credentials are NOT here on purpose: this endpoint is unauthenticated.
     // Call GET /api/v1/embed/ice with a user token to get them.
-    ice: turnStatus(),
+    ice: iceStatus(),
     userTokenSeconds: (Math.min(Math.max(Number(tenant.limits?.userTokenMinutes) || 60, 5), 1440)) * 60,
   });
 });
@@ -106,6 +106,6 @@ export const getIceServers = asyncHandler(async (req, res) => {
     success: true,
     iceServers,
     ttlSeconds,
-    ...turnStatus(),
+    ...iceStatus(),
   });
 });

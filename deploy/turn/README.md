@@ -27,6 +27,37 @@ why the config does not make you choose.
 
 ---
 
+## Cloudflare only — the whole setup
+
+No box, no DNS, no firewall rule. Cloudflare dashboard → **Realtime** (formerly Calls)
+→ **TURN keys** → create one, then on the API:
+
+```
+CLOUDFLARE_TURN_KEY_ID=<key id>
+CLOUDFLARE_TURN_API_TOKEN=<api token>
+```
+
+Restart it and boot tells you whether the credentials actually work — it makes one real
+API call to check, rather than leaving the first user to discover a bad token:
+
+```
+🔀 TURN relay configured — 1 relay via cloudflare, tried in the order listed.
+   ✅ Cloudflare TURN credentials verified — 3 relay url(s), credential cached for 14400s
+```
+
+Then rebuild the frontend, and confirm end to end with the credentials a browser would
+actually be handed:
+
+```bash
+curl -s https://api.yourdomain.com/api/v1/ice -H "Authorization: Bearer <token>" \
+  | node deploy/turn/check-relay.mjs --ice -
+```
+
+You can add your own relay later without changing any of this — see below. The two are
+additive, and yours would then be tried first.
+
+---
+
 ## Everything at once, on an existing API box
 
 If the API already runs on a box with a public IP, this does the whole job — pulls the
@@ -192,6 +223,78 @@ journalctl -u coturn -f     # one allocation per relayed stream
 
 A `401` in that log during setup is normal — TURN always challenges once before the
 credential is presented.
+
+---
+
+## How the code is structured
+
+Three files, one interface, no consumer that knows which provider answered.
+
+```
+server/utils/iceServers.js     the only thing controllers import
+  ├─ iceCoturn.js              your own relays — local HMAC, no network, cannot fail
+  └─ iceCloudflare.js          managed — HTTP + cache, can fail, must not matter
+```
+
+Every provider exports the same five things:
+
+| | |
+|---|---|
+| `id` | name shown in status and boot output |
+| `configured()` | is it switched on — env only, no I/O |
+| `count()` | how many relay networks it represents |
+| `warnings()` | misconfigurations to report at boot |
+| `entries(scope, ttl)` | `{entries, ttl}`; may be async, **must never reject** |
+
+Adding a provider (Twilio, metered, a second Cloudflare account) is a file and
+one line in `PROVIDERS`. Nothing else changes — not the controller, not the
+client, not the tests that assert ordering.
+
+Three rules the interface encodes, each from a way this breaks in production:
+
+- **`entries()` must never reject.** A provider that throws would 500 the whole
+  `/ice` request, so the caller would not even get STUN back. A missing relay is
+  a degraded call; a failed endpoint is no call. `iceServers.js` still catches, as
+  a backstop, and logs which provider misbehaved.
+- **Order is policy, not preference.** The browser tries ICE servers in the order
+  given, so `PROVIDERS` order decides which relay carries the call. Self-hosted
+  before managed: yours is cheaper, and a metered provider should only be paid
+  for when your own relay cannot carry the call.
+- **The returned `ttl` is the shortest, not the requested one.** The client
+  refreshes the whole bundle as a unit, and a cached managed credential may be
+  most of the way through its life. Reporting the nominal figure is how a long
+  meeting ends up holding a credential the relay already stopped accepting.
+
+Providers resolve **concurrently** — a slow managed API must not add its latency
+to a self-hosted relay that needs no network at all — and the result is
+re-ordered back to `PROVIDERS` order rather than completion order.
+
+### Scaling the managed path
+
+A managed provider means an HTTP call, and a call start is the wrong moment to
+make one. So `iceCloudflare.js` caches in two layers:
+
+1. **process memory** — the hot path, always on;
+2. **Redis**, when `REDIS_URL` is set — *shared*, so a fleet of ten instances
+   makes one API call between them instead of ten. Without Redis it is a no-op
+   and each process keeps its own copy: correct, just less efficient.
+
+Past 80% of its life a credential is served from cache **and** refreshed in the
+background, so no caller ever waits for a refresh it did not cause. Only a
+completely cold cache blocks — and boot warms it, precisely so the first real
+call does not pay for it.
+
+Boot also **verifies** the managed credentials with one real API call:
+
+```
+🔀 TURN relay configured — 1 relay via cloudflare, tried in the order listed.
+   ✅ Cloudflare TURN credentials verified — 3 relay url(s), credential cached for 14400s
+```
+
+Without that, a bad token is discovered by the first user who tries to call —
+the worst moment and the hardest place to see it. It is deliberately
+fire-and-forget and never fatal: refusing to boot over a relay provider would
+turn a degraded feature into an outage.
 
 ---
 

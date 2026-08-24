@@ -33,7 +33,7 @@ username    = "<unix-expiry>:<scope>"
 credential  = base64( HMAC-SHA1( static-auth-secret, username ) )
 ```
 
-That is coturn's REST / `use-auth-secret` scheme exactly. `server/utils/turnCredentials.js`
+That is coturn's REST / `use-auth-secret` scheme exactly. `server/utils/iceCoturn.js`
 mints it, `tests/turn-relay.mjs` recomputes the HMAC independently to prove it, and the
 secret never leaves your server — the browser only ever receives an expiring
 username/credential pair.

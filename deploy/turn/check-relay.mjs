@@ -311,7 +311,7 @@ function parseTurnUrl(raw) {
 }
 
 function mintCredential(secret, scope) {
-  // Exactly what server/utils/turnCredentials.js does, so a pass here means the
+  // Exactly what server/utils/iceCoturn.js does, so a pass here means the
   // app's own credentials work — not merely that some credential works.
   const expiry = Math.floor(Date.now() / 1000) + 600;
   const username = `${expiry}:${scope}`;

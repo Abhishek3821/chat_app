@@ -205,7 +205,7 @@ jobs:
       # that a relay NETWORK signs each relay with its own secret — a group with
       # no matching secret must be dropped, never signed with the wrong one,
       # since a credential the relay rejects burns ICE time and reads as an outage.
-      - name: TURN relay readiness — credentials, relay network, Cloudflare fallback (54 checks)
+      - name: TURN relay readiness — credentials, relay network, Cloudflare fallback (57 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/turn-relay.mjs
       # A limiter keyed on the wrong thing puts every caller in ONE bucket, which

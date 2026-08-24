@@ -14,7 +14,7 @@ import { connectDB } from './config/db.js';
 import { ensureWorkspaces } from './utils/workspaceService.js';
 import { ensureSuperAdmin, describeSuperAdmin } from './utils/superAdmin.js';
 import { resetAllPresence, startPresenceSweeper } from './utils/presence.js';
-import { turnStatus, relayConfigWarnings } from './utils/turnCredentials.js';
+import { reportIceReadiness } from './utils/iceServers.js';
 import apiRoutes from './routes/index.js';
 import { notFound, errorHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -208,25 +208,9 @@ async function start() {
      the call rings, both sides accept, and then there is no media: a failure that
      looks like a bug in the app rather than a missing deployment setting. Say so
      at boot so it is a known state instead of a mystery support ticket. */
-  {
-    const t = turnStatus();
-    if (t.relay === 'configured') {
-      console.log(
-        `🔀 TURN relay configured — ${t.relayCount} relay${t.relayCount === 1 ? '' : 's'} via ${t.providers.join(' + ')}, tried in the order listed. Calls can traverse strict/symmetric NATs.`
-      );
-      /* Cloudflare credentials come from an API call, not a local HMAC, so a bad
-         token fails at the FIRST CALL rather than at boot. Name it here so that
-         later warning has context. */
-      if (t.providers.includes('cloudflare')) {
-        console.log('   Cloudflare TURN credentials are fetched on first use; a bad token surfaces then, not now.');
-      }
-      /* A relay group with no secret to sign it is silently dropped, so the
-         operator would otherwise think they had more capacity than they do. */
-      relayConfigWarnings().forEach((w) => console.warn('⚠️  TURN config: ' + w));
-    } else {
-      console.warn('⚠️  No TURN relay (STUN only). ' + t.note);
-    }
-  }
+  /* Not awaited: verifying a managed provider means an API round trip, and boot
+     must not wait on a third party. It logs when it resolves. */
+  reportIceReadiness().catch(() => {});
 
   startPresenceSweeper((userId, lastSeen) => {
     getIO()?.emit('user-offline', { userId, lastSeen });

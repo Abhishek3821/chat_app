@@ -147,10 +147,10 @@ Push activates only when **both** keys are set; bad keys are caught and logged (
 
 | Variable | Where used | Required? | Default if unset | What it does |
 |---|---|---|---|---|
-| `TURN_URL` | server — `utils/turnCredentials.js` (`relayGroups()`), served by `GET /api/v1/ice` | No (needed for calls across strict NATs) | *(unset → STUN only)* | One or more relays. `,` separates URLs **within** one relay, `\|` separates **relays**. Max 6 relays; extras are dropped with a boot warning. Order is preserved — the browser tries them in order, so list the relay nearest your users first. |
-| `TURN_SECRET` 🔴 | server — `utils/turnCredentials.js` (HMAC signing) | With `TURN_URL` | *(unset → STUN only)* | coturn's `static-auth-secret`. One value applies to every relay; `\|`-separated values are matched **positionally** to the `TURN_URL` relays. Never leaves the server — clients only ever get an expiring username/credential pair. |
-| `CLOUDFLARE_TURN_KEY_ID` | server — `utils/turnCredentials.js` (`cloudflareIceServers()`) | No | *(unset)* | Cloudflare TURN key id (dashboard → Calls → TURN keys). Additive to `TURN_URL`, not a replacement. |
-| `CLOUDFLARE_TURN_API_TOKEN` 🔴 | server — same | With the key id | *(unset)* | Account-level API token, exchanged server-side for time-limited credentials and cached to 80% of their life. Never reaches a browser. A bad token surfaces on the **first call**, not at boot. |
+| `TURN_URL` | server — `utils/iceCoturn.js` (`relays()`), assembled by `utils/iceServers.js`, served by `GET /api/v1/ice` | No (needed for calls across strict NATs) | *(unset → STUN only)* | One or more relays. `,` separates URLs **within** one relay, `\|` separates **relays**. Max 6 relays; extras are dropped with a boot warning. Order is preserved — the browser tries them in order, so list the relay nearest your users first. |
+| `TURN_SECRET` 🔴 | server — `utils/iceCoturn.js` (HMAC signing) | With `TURN_URL` | *(unset → STUN only)* | coturn's `static-auth-secret`. One value applies to every relay; `\|`-separated values are matched **positionally** to the `TURN_URL` relays. Never leaves the server — clients only ever get an expiring username/credential pair. |
+| `CLOUDFLARE_TURN_KEY_ID` | server — `utils/iceCloudflare.js` | No | *(unset)* | Cloudflare TURN key id (dashboard → Calls → TURN keys). Additive to `TURN_URL`, not a replacement. |
+| `CLOUDFLARE_TURN_API_TOKEN` 🔴 | server — `utils/iceCloudflare.js` | With the key id | *(unset)* | Account-level API token, exchanged server-side for time-limited credentials and cached to 80% of their life. Never reaches a browser. A bad token surfaces on the **first call**, not at boot. |
 
 With **both** providers configured, your own relays are offered first and Cloudflare is the
 fallback — the browser tries them in list order, so a working self-hosted relay is used and
