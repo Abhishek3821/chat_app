@@ -3,7 +3,8 @@
  *
  * Answers the questions that decide whether a deploy comes up or falls over, and
  * that no unit test asks:
- *   · does .env.example document every variable the code actually reads?
+ *   · does the single root .env.example document every variable the code reads —
+ *     server AND client?
  *   · is anything secret at risk of being committed?
  *   · are the production-only guards (secret strength, CORS, HTTPS) real?
  *
@@ -51,22 +52,38 @@ for (const f of serverFiles) {
   for (const m of src.matchAll(/process\.env\.([A-Z0-9_]+)/g)) read.add(m[1]);
 }
 
-const examplePath = path.join(SERVER_DIR, '.env.example');
+/* The client half. A single .env.example covers both runtimes, so checking only
+   the server variables would leave the VITE_* ones free to drift — and those are
+   the ones whose absence produces a bundle that silently talks to the wrong
+   origin rather than an error. */
+const CLIENT_SRC = path.join(ROOT, 'client', 'src');
+if (fs.existsSync(CLIENT_SRC)) {
+  for (const f of walk(CLIENT_SRC, (n) => /\.(js|jsx)$/.test(n))) {
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/import\.meta\.env\.([A-Z0-9_]+)/g)) read.add(m[1]);
+  }
+}
+
+const examplePath = path.join(ROOT, '.env.example');
 if (!fs.existsSync(examplePath)) {
-  fail('.env.example is missing — nobody can configure a deploy from the repo alone');
+  fail('.env.example is missing at the repo root — nobody can configure a deploy from the repo alone');
 } else {
   const exampleSrc = fs.readFileSync(examplePath, 'utf8');
   const documented = new Set([...exampleSrc.matchAll(/^\s*#?\s*([A-Z0-9_]+)\s*=/gm)].map((m) => m[1]));
 
-  // Set by the platform, not by the operator.
-  const PROVIDED = new Set(['NODE_ENV', 'PORT', 'npm_package_version', 'RENDER', 'RENDER_EXTERNAL_URL']);
+  /* Not operator-set: the first group is injected by the host, the second are
+     Vite build-time constants that exist whether or not anyone configures them. */
+  const PROVIDED = new Set([
+    'NODE_ENV', 'PORT', 'npm_package_version', 'RENDER', 'RENDER_EXTERNAL_URL',
+    'DEV', 'PROD', 'MODE', 'SSR', 'BASE_URL',
+  ]);
   const undocumented = [...read].filter((v) => !documented.has(v) && !PROVIDED.has(v)).sort();
 
   if (undocumented.length) {
     fail(`${undocumented.length} variable(s) read by the code but NOT in .env.example:`);
     for (const v of undocumented) console.log(`      ${v}`);
   } else {
-    ok(`.env.example documents all ${read.size - [...read].filter((v) => PROVIDED.has(v)).length} operator-set variables`);
+    ok(`.env.example documents all ${read.size - [...read].filter((v) => PROVIDED.has(v)).length} operator-set variables (server + client)`);
   }
 
   const stale = [...documented].filter((v) => !read.has(v) && !PROVIDED.has(v)).sort();

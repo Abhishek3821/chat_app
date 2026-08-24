@@ -78,11 +78,13 @@ npm run install:all
 
 ### 2. Configure environment
 ```bash
-# backend
-cp server/.env.example server/.env      # then edit values (MONGO_URI, JWT_SECRET, …)
+# One example file covers both runtimes. PART 1 is the minimum:
+# MONGO_URI, JWT_SECRET, CLIENT_URL, and the super-admin login.
+cp .env.example server/.env
 
-# frontend (optional — defaults to demo mode)
-cp client/.env.example client/.env
+# The frontend needs nothing for local dev: client/.env.development leaves the
+# URLs blank on purpose, which proxies to your own backend on :5000. Copy PART 5
+# into client/.env only to build against a REMOTE api.
 ```
 
 ### 3. (Optional) Seed demo data
