@@ -11,7 +11,7 @@ Compiled by grepping all `process.env.` / `import.meta.env.` references in `serv
 `MONGO_URI` (embeds the Atlas password) · `JWT_SECRET` · `SUPER_ADMIN_PASSWORD` (the platform admin's login) · `EMAIL_PASS` / `SMTP_PASS` · `BREVO_API_KEY` · `CLOUDINARY_URL` (embeds the API secret) · `CLOUDINARY_API_SECRET` · `CLOUDINARY_API_KEY` · `VAPID_PRIVATE_KEY` · `LIVEKIT_API_SECRET` · `LIVEKIT_API_KEY` · `TURN_SECRET` (mints relay credentials — bandwidth theft if leaked) · `CLOUDFLARE_TURN_API_TOKEN` · `TWILIO_AUTH_TOKEN` · `TWILIO_ACCOUNT_SID` · `REDIS_URL` (usually embeds a password) · `SEED_CONFIRM` (not secret, but destructive)
 
 ### 🟡 Public-by-construction — safe in the bundle, but still access-controlled resources
-Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. PART 5 of the root `.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` is therefore *exposed by design* — prefer the server-minted path (§2.8b). **Never** put a real secret behind a `VITE_` prefix.
+Every `VITE_*` var is **baked into the client JS at build time and is world-readable**. PART 5 of `server/.env.example` states this explicitly. `VITE_TURN_CREDENTIAL` is therefore *exposed by design* — prefer the server-minted path (§2.8b). **Never** put a real secret behind a `VITE_` prefix.
 
 ### 🟢 Non-secret configuration
 `PORT` · `NODE_ENV` · `CLIENT_URL` · `JWT_ACCESS_EXPIRES` · `REFRESH_TOKEN_DAYS` · `SESSION_IDLE_DAYS` · `EMAIL_HOST` · `EMAIL_PORT` · `EMAIL_USER` · `EMAIL_FROM` · `STORAGE_DRIVER` · `CLOUDINARY_CLOUD_NAME` · `VAPID_PUBLIC_KEY` · `VAPID_SUBJECT` · `LIVEKIT_URL` · `TURN_URL` · `DNS_SERVERS` · `EXTRA_CORS_ORIGINS` · `ENABLE_EMAIL_VERIFICATION` · `TWILIO_FROM` · all `VITE_*`
@@ -33,10 +33,10 @@ TWILIO_AUTH_TOKEN · TWILIO_FROM · EXTRA_CORS_ORIGINS · DNS_SERVERS · REDIS_U
 
 **Three keys in `server/.env` are dead** — no `process.env` reference exists anywhere in `server/`:
 - **`JWT_EXPIRES_IN`** — superseded by `JWT_ACCESS_EXPIRES` (which is *absent* from `server/.env`, so the access TTL is silently the `1h` code default). Anyone editing `JWT_EXPIRES_IN` expecting a change gets none.
-- **`JWT_COOKIE_EXPIRES_DAYS`** — present in the live `server/.env` but never read; the access cookie uses the hardcoded `ACCESS_COOKIE_MS` (1 h) and the refresh cookie uses `REFRESH_TOKEN_DAYS`. Absent from `.env.example` on purpose — `deploy-readiness.mjs` reports documented-but-unread keys.
+- **`JWT_COOKIE_EXPIRES_DAYS`** — present in the live `server/.env` but never read; the access cookie uses the hardcoded `ACCESS_COOKIE_MS` (1 h) and the refresh cookie uses `REFRESH_TOKEN_DAYS`. Absent from `server/.env.example` on purpose — `deploy-readiness.mjs` reports documented-but-unread keys.
 - **`ENABLE_LOGIN_OTP`** — no code path reads it. Login is single-step password auth; there is no login-OTP feature to toggle.
 
-All 52 server variables and all 7 `VITE_*` variables are documented in the single root `.env.example`, and `deploy-readiness.mjs` **fails** if the code reads one that is not there. It used to be possible for `TWILIO_*` to go missing; it is not any more.
+All 52 server variables and all 7 `VITE_*` variables are documented in `server/.env.example`, and `deploy-readiness.mjs` **fails** if the code reads one that is not there. It used to be possible for `TWILIO_*` to go missing; it is not any more.
 
 ---
 
@@ -109,7 +109,7 @@ the API still serves.
 | `TWILIO_AUTH_TOKEN` 🔴 | server — `sendSms.js:11,19` | No | *(unset)* | Twilio auth token (HTTP Basic). **Secret.** |
 | `TWILIO_FROM` | server — `sendSms.js:11,26` | No | *(unset)* | Twilio-owned sending phone number. |
 
-> All three are documented in the root `.env.example`, so the capability is discoverable.
+> All three are documented in `server/.env.example`, so the capability is discoverable.
 
 ## 2.6 Storage / uploads
 
@@ -205,8 +205,8 @@ The adapter gets its own dedicated pub/sub pair (`getAdapterPair()`) separate fr
 | `import.meta.env.DEV` | client — `hooks/useSocket.js:57` | built-in | — | Selects the direct-to-`:5000` socket connection in dev. |
 
 **Env files, after consolidation** (Vite layers `.env` < `.env.[mode]`, later wins):
-- `./.env.example` — **the only committed reference.** Every server and client variable, no values, grouped by whether you must fill it. Enforced complete by `deploy-readiness.mjs`.
-- `server/.env` — live, gitignored. Copy PART 1–4 here.
+- `server/.env.example` — **the only committed reference.** Every server and client variable, no values, grouped by whether you must fill it. Enforced complete by `deploy-readiness.mjs`.
+- `server/.env` — live, gitignored. Copy this file here and fill PART 1.
 - `client/.env` — gitignored, optional. Only needed to build against a remote API locally; in production these come from the host dashboard, which overrides any file.
 - `client/.env.development` — committed, blank URLs on purpose, so `npm run dev` proxies to the **local** backend and never drifts onto the deployed one.
 

@@ -64,9 +64,9 @@ if (fs.existsSync(CLIENT_SRC)) {
   }
 }
 
-const examplePath = path.join(ROOT, '.env.example');
+const examplePath = path.join(SERVER_DIR, '.env.example');
 if (!fs.existsSync(examplePath)) {
-  fail('.env.example is missing at the repo root — nobody can configure a deploy from the repo alone');
+  fail('server/.env.example is missing — nobody can configure a deploy from the repo alone');
 } else {
   const exampleSrc = fs.readFileSync(examplePath, 'utf8');
   const documented = new Set([...exampleSrc.matchAll(/^\s*#?\s*([A-Z0-9_]+)\s*=/gm)].map((m) => m[1]));

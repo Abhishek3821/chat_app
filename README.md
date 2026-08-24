@@ -80,7 +80,7 @@ npm run install:all
 ```bash
 # One example file covers both runtimes. PART 1 is the minimum:
 # MONGO_URI, JWT_SECRET, CLIENT_URL, and the super-admin login.
-cp .env.example server/.env
+cp server/.env.example server/.env
 
 # The frontend needs nothing for local dev: client/.env.development leaves the
 # URLs blank on purpose, which proxies to your own backend on :5000. Copy PART 5
