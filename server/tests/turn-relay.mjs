@@ -61,7 +61,7 @@ async function boot(extraEnv) {
   bootLog.length = 0;
   proc = spawn(process.execPath, ['server.js'], {
     cwd: SERVER_DIR,
-    env: { ...process.env, PORT: String(PORT), MONGO_URI: TEST_URI, NODE_ENV: 'development', ENABLE_EMAIL_VERIFICATION: 'false', CLIENT_URL: 'http://localhost:5290', TURN_URL: '', TURN_SECRET: '', ...extraEnv },
+    env: { ...process.env, PORT: String(PORT), MONGO_URI: TEST_URI, NODE_ENV: 'development', ENABLE_EMAIL_VERIFICATION: 'false', CLIENT_URL: 'http://localhost:5290', TURN_URL: '', TURN_SECRET: '', METERED_API_KEY: '', METERED_SUBDOMAIN: '', METERED_API_BASE: '', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stdout.on('data', (d) => bootLog.push(String(d)));
@@ -116,15 +116,42 @@ const CF_CRED = 'generated-credential-not-an-hmac';
 const cfHits = [];
 let cfMode = 'ok'; // 'ok' | 'legacy' | 'unauthorized'
 
+/* metered.ca answers a GET whose API KEY IS IN THE QUERY STRING, and returns a
+   bare array whose urls field is a STRING per entry — a different shape on all three
+   axes from Cloudflare. Answering it for real is the only way to prove the
+   normaliser handles both. */
+const METERED_KEY = 'metered-api-key-never-send-to-a-browser';
+const METERED_SUB = 'chatkonect-test';
+const METERED_USER = 'metered-generated-username';
+const METERED_CRED = 'metered-generated-credential';
+const meteredHits = [];
+let meteredMode = 'ok'; // 'ok' | 'unauthorized'
+
 const cfServer = http.createServer((req, res) => {
+  const send = (code, obj) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj));
+  };
+
+  // metered.ca — GET /api/v1/turn/credentials?apiKey=…
+  if (req.url.startsWith('/api/v1/turn/credentials')) {
+    meteredHits.push({ url: req.url });
+    if (meteredMode === 'unauthorized') return send(401, { error: 'invalid api key' });
+    const key = new URL(req.url, 'http://x').searchParams.get('apiKey');
+    if (key !== METERED_KEY) return send(401, { error: 'invalid api key' });
+    return send(200, [
+      { urls: 'stun:stun.relay.metered.test:80' },
+      { urls: 'turn:global.relay.metered.test:80', username: METERED_USER, credential: METERED_CRED },
+      { urls: 'turn:global.relay.metered.test:80?transport=tcp', username: METERED_USER, credential: METERED_CRED },
+      { urls: 'turn:global.relay.metered.test:443', username: METERED_USER, credential: METERED_CRED },
+      { urls: 'turns:global.relay.metered.test:443?transport=tcp', username: METERED_USER, credential: METERED_CRED },
+    ]);
+  }
+
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
     cfHits.push({ url: req.url, auth: String(req.headers.authorization || ''), body });
-    const send = (code, obj) => {
-      res.writeHead(code, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(obj));
-    };
     if (cfMode === 'unauthorized') return send(401, { errors: [{ message: 'invalid token' }] });
 
     const isNewApi = req.url.endsWith('/credentials/generate-ice-servers');
@@ -140,6 +167,7 @@ const cfServer = http.createServer((req, res) => {
     return send(200, { iceServers: isNewApi ? [entry] : entry });
   });
 });
+const meteredEnv = { METERED_API_KEY: METERED_KEY, METERED_SUBDOMAIN: METERED_SUB, METERED_API_BASE: 'http://127.0.0.1:' + CF_PORT };
 const cfEnv = { CLOUDFLARE_TURN_KEY_ID: CF_KEY_ID, CLOUDFLARE_TURN_API_TOKEN: CF_TOKEN, CLOUDFLARE_TURN_API_BASE: CF_BASE };
 
 /** Wait for a condition, since the boot credential check is not awaited. */
@@ -285,7 +313,7 @@ const relaysIn = (body) => {
   section('Boot proves the credentials work, instead of the first caller proving it');
   check(
     'boot VERIFIES the credentials against the API',
-    await until(() => /Cloudflare TURN credentials verified/.test(bootLog.join('\n'))),
+    await until(() => /cloudflare TURN credentials verified/.test(bootLog.join('\n'))),
     bootLog.join('').slice(-260)
   );
   check(
@@ -338,7 +366,7 @@ const relaysIn = (body) => {
   await boot({ TURN_URL: TURN_URLS, TURN_SECRET, ...cfEnv });
   check(
     'a bad token is reported AT BOOT, before any user places a call',
-    await until(() => /Cloudflare TURN did not answer at boot/.test(bootLog.join('\n'))),
+    await until(() => /cloudflare TURN did not answer at boot/.test(bootLog.join('\n'))),
     bootLog.join('').slice(-260)
   );
   const degraded = await iceFor(await signIn());
@@ -372,6 +400,94 @@ const relaysIn = (body) => {
     'the single-object response is read the same as the array one',
     relaysIn(legacy.body)[0]?.credential === CF_CRED,
     JSON.stringify(relaysIn(legacy.body))
+  );
+
+  /* ── metered.ca ──────────────────────────────────────────────────── */
+  section('metered.ca — a managed provider with a different API shape entirely');
+  await stop();
+  meteredMode = 'ok';
+  meteredHits.length = 0;
+  await boot(meteredEnv);
+  check('boot names the provider', /via metered/.test(bootLog.join('\n')), bootLog.join('').slice(-200));
+  check(
+    'boot VERIFIES the key rather than waiting for the first caller',
+    await until(() => /metered TURN credentials verified/.test(bootLog.join('\n'))),
+    bootLog.join('').slice(-260)
+  );
+
+  const metIce = await iceFor(await signIn());
+  const metRelays = relaysIn(metIce.body);
+  check('every transport is offered, not just the first', metRelays.length === 4, String(metRelays.length));
+  check(
+    'a urls STRING is read the same as an array',
+    metRelays.every((r) => Array.isArray(r.urls) && r.urls.length === 1),
+    JSON.stringify(metRelays[0]?.urls)
+  );
+  check(
+    'ports 80 and 443 survive — the ones restrictive networks allow',
+    JSON.stringify(metRelays).includes(':443') && JSON.stringify(metRelays).includes(':80'),
+    JSON.stringify(metRelays.map((r) => r.urls[0]))
+  );
+  check('credentials are the ones the API generated', metRelays[0]?.credential === METERED_CRED, JSON.stringify(metRelays[0]));
+  check("metered's own STUN entry is dropped", !JSON.stringify(metRelays).includes('stun:stun.relay.metered.test'));
+  check('status reports the provider', JSON.stringify(metIce.body.providers) === JSON.stringify(['metered']), JSON.stringify(metIce.body.providers));
+
+  section('The API key is in the query string, so the URL itself is a secret');
+  check('the key is not in the response', !JSON.stringify(metIce.body).includes(METERED_KEY));
+  check('the subdomain is not in the response', !JSON.stringify(metIce.body).includes(METERED_SUB));
+  check('the server did send it upstream, in the query string', String(meteredHits[0]?.url || '').includes('apiKey=' + METERED_KEY), meteredHits[0]?.url);
+
+  section('Never promise a lifetime the provider does not control');
+  check(
+    'ttl is capped at what metered can be trusted for, not the 4h requested',
+    metIce.body.ttlSeconds > 0 && metIce.body.ttlSeconds <= 3600,
+    metIce.body.ttlSeconds + ' — the API advertises no expiry, so 4h would be invented'
+  );
+
+  section('Cached, so a call start is never an upstream request');
+  const metBefore = meteredHits.length;
+  await iceFor(await signIn());
+  await iceFor(await signIn());
+  check('two more /ice requests, no more upstream calls', meteredHits.length === metBefore, String(meteredHits.length - metBefore) + ' extra');
+
+  section('A bad key degrades, it does not fail the call');
+  await stop();
+  meteredMode = 'unauthorized';
+  await boot(meteredEnv);
+  check(
+    'boot reports it at boot, not at the first call',
+    await until(() => /metered TURN did not answer at boot/.test(bootLog.join('\n'))),
+    bootLog.join('').slice(-260)
+  );
+  const metDead = await iceFor(await signIn());
+  check('the endpoint still answers 200', metDead.status === 200, String(metDead.status));
+  check('no relay is invented', relaysIn(metDead.body).length === 0, JSON.stringify(relaysIn(metDead.body)));
+  check('STUN is still returned', (metDead.body.iceServers || []).length >= 1);
+
+  section('A full URL pasted into METERED_SUBDOMAIN is called out');
+  await stop();
+  meteredMode = 'ok';
+  await boot({ ...meteredEnv, METERED_SUBDOMAIN: 'https://chatkonect.metered.live' });
+  check(
+    'boot says which field is wrong instead of looking like an outage',
+    /METERED_SUBDOMAIN should be just the subdomain/.test(bootLog.join('\n')),
+    bootLog.join('').slice(-240)
+  );
+
+  section('All three providers at once — order is the routing policy');
+  await stop();
+  meteredMode = 'ok';
+  cfMode = 'ok';
+  await boot({ TURN_URL: TURN_URLS, TURN_SECRET, ...meteredEnv, ...cfEnv });
+  const allIce = await iceFor(await signIn());
+  const allRelays = relaysIn(allIce.body);
+  check('boot names all three in order', /via self-hosted \+ metered \+ cloudflare/.test(bootLog.join('\n')), bootLog.join('').slice(-240));
+  check('self-hosted is still first', JSON.stringify(allRelays[0]?.urls).includes('relay.test'), JSON.stringify(allRelays[0]?.urls));
+  check('every provider contributed', allRelays.length === 1 + 4 + 1, String(allRelays.length));
+  check(
+    'the shortest ttl across providers wins',
+    allIce.body.ttlSeconds <= 3600,
+    String(allIce.body.ttlSeconds) + ' — metered is the shortest-lived of the three'
   );
 
   /* ── Not configured ─────────────────────────────────────────────── */

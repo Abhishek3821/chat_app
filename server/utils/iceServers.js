@@ -1,4 +1,5 @@
 import * as coturn from './iceCoturn.js';
+import * as metered from './iceMetered.js';
 import * as cloudflare from './iceCloudflare.js';
 
 /**
@@ -36,8 +37,15 @@ import * as cloudflare from './iceCloudflare.js';
    no-relay deployment still work on a LAN instead of not working. */
 const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
 
-/** Preference order. First match carries the call. */
-const PROVIDERS = [coturn, cloudflare];
+/**
+ * Preference order — this array IS the routing policy.
+ *
+ * Self-hosted first: it is yours, it costs a flat rate rather than per GB, and
+ * a metered provider should only be paid for when your own relay cannot carry
+ * the call. Between two managed providers the order is arbitrary and safe to
+ * change; only configured ones ever appear.
+ */
+const PROVIDERS = [coturn, metered, cloudflare];
 
 const clampTtl = (ttl) => Math.min(Math.max(Number(ttl) || 0, 300), 24 * 3600);
 
@@ -114,7 +122,7 @@ export function iceStatus() {
       relay: 'stun_only',
       relayCount: 0,
       providers,
-      note: 'No TURN relay configured on this deployment — calls will fail between strict/symmetric NATs. Set TURN_URL + TURN_SECRET, or CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN.',
+      note: 'No TURN relay configured on this deployment — calls will fail between strict/symmetric NATs. Set TURN_URL + TURN_SECRET (your own coturn), or METERED_API_KEY + METERED_SUBDOMAIN, or CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN.',
     };
   }
 
@@ -155,6 +163,7 @@ export function iceConfigWarnings() {
  */
 export async function reportIceReadiness(log = console.log, warn = console.warn) {
   const status = iceStatus();
+  const active = activeProviders();
 
   if (status.relay !== 'configured') {
     warn('⚠️  No TURN relay (STUN only). ' + status.note);
@@ -166,15 +175,24 @@ export async function reportIceReadiness(log = console.log, warn = console.warn)
   );
   iceConfigWarnings().forEach((w) => warn('⚠️  TURN config: ' + w));
 
-  if (cloudflare.configured()) {
-    const check = await cloudflare.verifyAtBoot();
-    if (check.ok) log(`   ✅ Cloudflare TURN credentials verified — ${check.note}`);
-    else warn(`⚠️  Cloudflare TURN did not answer at boot (${check.error}). Calls will fall back to whatever else is configured.`);
-  }
+  /* Every provider that can fail gets proved here, in parallel. A local HMAC
+     provider is correct at parse time; a managed one is only correct if its
+     credentials work, and without this that is discovered by the first user to
+     place a call — the worst moment and the hardest place to notice. */
+  await Promise.all(
+    active
+      .filter((p) => typeof p.verifyAtBoot === 'function')
+      .map(async (p) => {
+        const check = await p.verifyAtBoot();
+        if (check.skipped) return;
+        if (check.ok) log(`   ✅ ${p.id} TURN credentials verified — ${check.note}`);
+        else warn(`⚠️  ${p.id} TURN did not answer at boot (${check.error}). Calls will fall back to whatever else is configured.`);
+      })
+  );
 
   return status;
 }
 
 /* Re-exported so consumers and tests do not need to know which provider owns
    what. Kept deliberately small — anything more belongs behind resolveIceServers. */
-export { coturn, cloudflare };
+export { coturn, metered, cloudflare };
