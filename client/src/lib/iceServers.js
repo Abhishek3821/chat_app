@@ -113,41 +113,77 @@ export function ensureIceServers() {
   if (expiresAt && Date.now() < expiresAt && hasRelay()) return Promise.resolve(ICE_SERVERS);
 
   inFlight = (async () => {
-    const thirdParty = import.meta.env.VITE_TURN_CREDENTIALS_URL;
+    /* THE SERVER FIRST, the build-time URL only as a fallback.
+
+       These were the other way round, and that ordering had a trap in it: a
+       deployment that sets VITE_TURN_CREDENTIALS_URL to get calls working before
+       the server is ready would keep using it FOREVER, because the better path
+       is never tried again. The operator has to remember to remove a variable
+       for the correct behaviour to start — and nothing tells them, since calls
+       work either way.
+
+       This order makes the build-time URL a temporary bridge that resolves
+       itself: while the server has no relay it carries the calls, and the moment
+       the server can mint credentials it takes over on its own. Which matters
+       because the fallback is strictly worse — the URL contains a provider API
+       key, it ships inside this bundle, and anyone can read it from devtools and
+       spend the relay quota. */
     try {
-      if (thirdParty) {
+      /* Authenticated: relay bandwidth is billable, so the server will not hand
+         credentials to anonymous callers. Signing in is a precondition for
+         making a call anyway. */
+      /* `/v1/ice`, not `/v1/embed/ice`: same handler, but this is the app, not an
+         embed. Both exist; using the embed-named path here made the call read as
+         embed-only plumbing and contradicted this file's own header. */
+      const { data } = await api.get('/v1/ice');
+      addServers(extractServers(data));
+      const ttl = Number(data?.ttlSeconds) || 3600;
+      // Refresh at 80% of the lifetime so a long meeting never runs out.
+      expiresAt = Date.now() + ttl * 800;
+      if (data?.relay === 'stun_only' && import.meta.env.DEV) {
+        console.warn('[ice]', data?.note);
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        console.warn('[ice] the server offered no relay:', err?.message);
+      }
+      expiresAt = 0;
+    }
+
+    /* Only if the server produced nothing usable. A 404 means the deployment
+       predates the endpoint; `stun_only` means it is there but has no provider
+       configured. Both leave hasRelay() false, and both are exactly when the
+       bridge should carry the call. */
+    const thirdParty = import.meta.env.VITE_TURN_CREDENTIALS_URL;
+    if (!hasRelay() && thirdParty) {
+      try {
         const res = await fetch(thirdParty);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         addServers(extractServers(await res.json()));
         // No expiry advertised by a third-party endpoint; re-ask in an hour.
         expiresAt = Date.now() + 3600_000;
-      } else {
-        /* Authenticated: relay bandwidth is billable, so the server will not hand
-           credentials to anonymous callers. Signing in is a precondition for
-           making a call anyway. */
-        /* `/v1/ice`, not `/v1/embed/ice`: same handler, but this is the app, not an
-           embed. Both exist; using the embed-named path here made the call read as
-           embed-only plumbing and contradicted this file's own header. */
-        const { data } = await api.get('/v1/ice');
-        addServers(extractServers(data));
-        const ttl = Number(data?.ttlSeconds) || 3600;
-        // Refresh at 80% of the lifetime so a long meeting never runs out.
-        expiresAt = Date.now() + ttl * 800;
-        if (data?.relay === 'stun_only' && import.meta.env.DEV) {
-          console.warn('[ice]', data?.note);
+        if (import.meta.env.DEV) {
+          console.warn(
+            '[ice] using VITE_TURN_CREDENTIALS_URL because the server has no relay. ' +
+              'This exposes the provider key in the bundle — configure the relay on the API and drop this variable.'
+          );
         }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[ice] the fallback credentials endpoint failed too:', err?.message);
+        }
+        // Retry on the next call rather than caching the failure for an hour.
+        expiresAt = 0;
       }
-    } catch (err) {
-      if (import.meta.env.DEV) {
-        console.warn('[ice] no relay available — calls fall back to STUN only:', err?.message);
-      }
-      // Retry on the next call rather than caching the failure for an hour.
-      expiresAt = 0;
-    } finally {
-      inFlight = null;
     }
+
     return ICE_SERVERS;
-  })();
+  })().finally(() => {
+    /* In a finally, not inline: anything that escaped both catch blocks would
+       otherwise leave inFlight pointing at a settled promise, and every later
+       call would get that stale result instead of re-fetching. */
+    inFlight = null;
+  });
 
   return inFlight;
 }

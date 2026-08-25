@@ -69,6 +69,11 @@ jobs:
       # must carry application/wasm, and the CSP must allow WebAssembly at all.
       # A missing asset does NOT 404 here — the SPA fallback returns HTML — so
       # the failure is otherwise invisible until someone clicks the button.
+      # Three possible relay sources with a strict order between them. Getting it
+      # wrong does not throw — it silently picks the worse source, or none, and the
+      # only symptom is a call that connects and carries no audio.
+      - name: ICE source precedence — server first, build-time URL as fallback (18 checks)
+        run: node test-ice-order.mjs
       - name: background effects — assets, MIME types, CSP (18 checks)
         run: node test-video-effects.mjs
 
