@@ -24,6 +24,7 @@ import {
 } from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
 import { authLimiter } from '../middleware/rateLimit.js';
+import { getTurnCredentials } from '../controllers/rtpccred.js';
 
 const router = Router();
 
