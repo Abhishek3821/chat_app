@@ -71,11 +71,13 @@ Path is the Socket.IO default `/socket.io` (never overridden on either side).
 
 ```js
 io(url, {
-  auth: (cb) => cb({ token: localStorage.getItem('cc_token') }), // dynamic: re-read on every (re)connect
+  auth: (cb) => cb({ token: getToken() }), // dynamic: re-read on every (re)connect
   withCredentials: true,
   transports: ['websocket', 'polling'],  // native WS preferred, polling only as fallback
 })
 ```
+
+`getToken()` (`client/src/lib/token.js`) is memory-first with `localStorage` as a best-effort mirror, so the handshake still authenticates inside a cross-site iframe where storage is partitioned or denied — see [AUTHENTICATION.md §1.14](AUTHENTICATION.md).
 
 The socket is created once per authenticated `user._id` (keyed on the id, not the user object, so a profile edit doesn't tear down an in-progress call) and stashed on `window.__ccSocket` — `emitSocket(event, payload)` (`useSocket.js:258`) and `getSocket()` in the call/meeting hooks read it from there.
 
@@ -84,10 +86,14 @@ The socket is created once per authenticated `user._id` (keyed on the id, not th
 `server/server.js:109`:
 
 ```js
-const io = new SocketServer(server, { cors: { origin: corsOrigin, credentials: true } });
+const io = new SocketServer(server, {
+  cors: { origin: (origin, cb) => cb(null, isAllowedOrigin(origin)), credentials: true },
+});
 ```
 
-`corsOrigin` delegates to `isAllowedOrigin()` (`server/middleware/csrf.js:14`): `CLIENT_URL` + `EXTRA_CORS_ORIGINS`, plus any `localhost`/`127.0.0.1`/LAN-IP origin when `NODE_ENV !== 'production'`. A disallowed origin is *declined* (no throw / no 500).
+`isAllowedOrigin()` (`server/middleware/csrf.js`) accepts **either** trust tier: first-party (`CLIENT_URL` + `EXTRA_CORS_ORIGINS`, plus `localhost`/LAN in dev) **or** an origin an embedding tenant registered on its App. A disallowed origin is *declined* (no throw / no 500).
+
+Unlike the HTTP layer — where tenant origins are refused CORS credentials — the socket keeps `credentials: true` for both tiers, deliberately: the handshake reads the token from `handshake.auth.token` and has **no cookie path**, so there is no ambient credential for a hostile origin to ride. See [AUTHENTICATION.md §1.13](AUTHENTICATION.md#origin-trust-tiers).
 
 When `REDIS_URL` is set, `@socket.io/redis-adapter` is attached (`server.js:116-122`) and `initSocket(io, { hasAdapter: true })` — that flag is what makes `isUserOnline()` able to ask other instances via `io.in('user:<id>').fetchSockets()`.
 
@@ -186,7 +192,7 @@ All handlers live in `server/socket/index.js`. `isId(v)` = `typeof v === 'string
 | `call:ice-candidate` / `webrtc-ice-candidate` | `{ to, candidate, callId, chatId? }` | `canCallSignal` | relay only (SDP/ICE are opaque to the server) | `call:ice-candidate` **and** `webrtc-ice-candidate` `{ from, candidate, callId, chatId }` |
 | `call:cancel` / `call-missed` | `{ to, callId, chatId? }` | gate on relay only | `transitionCall(..., 'missed')`; `untrackPeer` | `call:cancelled` **and** `call-missed` `{ from, callId }` |
 | `call:end` / `end-call` | `{ to, callId, duration?, chatId? }` | gate on relay only | `transitionCall(..., 'end', {duration})` → `completed` (+duration) if it was live, else `missed`; `untrackPeer` | `call:ended` **and** `call-ended` `{ from, callId }` |
-| `meeting:join` | `({ meetingId, pass? }, cb)` | any authenticated socket — link-sharing is the point. `isId(meetingId)` required | Loads `Meeting.findById().select('status host settings participants')`. Rejects cancelled/missing. Computes `isHost`, `isInvited` (a participant **without** `viaLink`), `peers`, `hostPresent`. If `settings.joinAnytime === false && !isHost && !hostPresent` → waiting. If `settings.askToJoin !== false && !isHost && !isInvited` → verify `pass` (`scope==='meet-admit'`, matching `id` + `meetingId`); if no valid pass: host absent → waiting, host present → knock. On success: joins `mtg:<id>`, records host/joinAt/meetings on `socket.data`, best-effort `Meeting.updateOne({startedAt:null},{startedAt, status:'ongoing'})` and pushes an `attendees` row (name/email snapshot) once | ack `cb({ ok:true, peers:[{socketId,userId,name,avatar}], isHost })`, or `cb({ ok:false, error })` / `cb({ ok:false, waiting:true, error })` / `cb({ ok:false, knocking:true, error })`. Also `meeting:peer-joined` `{socketId,userId,name,avatar}` to the room (sender excluded), and `meeting:knock` `{meetingId,socketId,userId,name,avatar}` to **each host socket in the room** when knocking |
+| `meeting:join` | `({ meetingId, pass? }, cb)` | any authenticated socket — link-sharing is the point. `isId(meetingId)` required | Loads `Meeting.findById().select('status host settings participants')`. Rejects cancelled/missing. Computes `isHost`, `isInvited` (a participant **without** `viaLink`), `peers`, `hostPresent`. **Capacity gate** (`meetingCapacityCheck`, before the waiting/knock branches so a full room answers immediately instead of knocking for a seat that does not exist): if the room is at `MESH_MAX_PARTICIPANTS` (default 9) → refuse. Hosts and SFU-configured deployments are exempt. If `settings.joinAnytime === false && !isHost && !hostPresent` → waiting. If `settings.askToJoin !== false && !isHost && !isInvited` → verify `pass` (`scope==='meet-admit'`, matching `id` + `meetingId`); if no valid pass: host absent → waiting, host present → knock. On success: joins `mtg:<id>`, records host/joinAt/meetings on `socket.data`, best-effort `Meeting.updateOne({startedAt:null},{startedAt, status:'ongoing'})` and pushes an `attendees` row (name/email snapshot) once | ack `cb({ ok:true, peers:[{socketId,userId,name,avatar}], isHost })`, or `cb({ ok:false, error })` / `cb({ ok:false, waiting:true, error })` / `cb({ ok:false, knocking:true, error })` / **`cb({ ok:false, full:true, limit, error })`** (room at capacity — distinct from `waiting`/`knocking`, because retrying will not help). Also `meeting:peer-joined` `{socketId,userId,name,avatar}` to the room (sender excluded), and `meeting:knock` `{meetingId,socketId,userId,name,avatar}` to **each host socket in the room** when knocking |
 | `meeting:signal` | `{ meetingId, to, data }` (`to` = target **socketId**; `data` is opaque `{kind:'offer'\|'answer'\|'ice', sdp\|candidate}`) | sender must be in `mtg:<meetingId>` (prevents cross-room injection) | relay to one socket | `meeting:signal` `{ from: socket.id, data }` → `ioRef.to(to)` |
 | `meeting:presenting` | `{ meetingId, on }` | in-room | relay | `meeting:presenting` `{ socketId, on: !!on }` to room, sender excluded |
 | `meeting:chat` | `{ meetingId, text }` | in-room; text trimmed and `.slice(0, 2000)`; empty is dropped | relay (not persisted) | `meeting:chat` `{ socketId, userId, name, avatar, text, at: Date.now() }` to room, sender excluded (sender echoes optimistically) |

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getToken, setToken, clearToken } from './token';
 
 /**
  * Resolve the API base URL, tolerant of how VITE_API_URL is set:
@@ -32,7 +33,7 @@ if (typeof window !== 'undefined') {
 
 // Attach bearer token (kept in localStorage as a fallback to the httpOnly cookie).
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('cc_token');
+  const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -51,7 +52,7 @@ export async function refreshAccessToken() {
       .post('/auth/refresh')
       .then((r) => {
         const t = r.data?.token;
-        if (t) localStorage.setItem('cc_token', t);
+        if (t) setToken(t);
         return t || null;
       })
       .catch(() => null)
@@ -78,7 +79,7 @@ api.interceptors.response.use(
       }
       // Refresh failed → session revoked/expired. useAuth clears state and
       // ProtectedRoute redirects to /login. An event avoids an api ⇄ store cycle.
-      localStorage.removeItem('cc_token');
+      clearToken();
       window.dispatchEvent(new Event('cc:unauthorized'));
     }
 

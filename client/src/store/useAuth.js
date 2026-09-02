@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getToken, setToken, clearToken } from '../lib/token';
 import api, { DEMO_MODE, ensureMediaToken, clearMediaToken } from '../lib/api';
 import { resetIceServers } from '../lib/iceServers';
 import { resetFreshness } from '../lib/freshness';
@@ -16,14 +17,14 @@ export const useAuth = create((set, get) => ({
       set({ user: cached ? ME : null, loading: false });
       return;
     }
-    const token = localStorage.getItem('cc_token');
+    const token = getToken();
     if (!token) return set({ user: null, loading: false });
     try {
       const { data } = await api.get('/auth/me');
       set({ user: data.user, loading: false });
       ensureMediaToken();
     } catch {
-      localStorage.removeItem('cc_token');
+      clearToken();
       set({ user: null, loading: false });
     }
   },
@@ -40,7 +41,7 @@ export const useAuth = create((set, get) => ({
     }
     const id = identifier ?? email;
     const { data } = await api.post('/auth/login', { identifier: id, email: id, password });
-    if (data.token) localStorage.setItem('cc_token', data.token);
+    if (data.token) setToken(data.token);
     sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
     set({ user: data.user });
     ensureMediaToken(true);
@@ -70,7 +71,7 @@ export const useAuth = create((set, get) => ({
     }
     const { data } = await api.post('/auth/signup', payload);
     if (data.token) {
-      localStorage.setItem('cc_token', data.token);
+      setToken(data.token);
       sessionStorage.setItem('cc_unlocked', '1');
       set({ user: data.user });
       ensureMediaToken(true);
@@ -85,7 +86,7 @@ export const useAuth = create((set, get) => ({
       return ME;
     }
     const { data } = await api.post('/auth/verify-otp', { email, otp });
-    if (data.token) localStorage.setItem('cc_token', data.token);
+    if (data.token) setToken(data.token);
     sessionStorage.setItem('cc_unlocked', '1');
     set({ user: data.user });
     ensureMediaToken(true);
@@ -109,7 +110,7 @@ export const useAuth = create((set, get) => ({
   resetPassword: async (token, password) => {
     if (DEMO_MODE) return { success: true };
     const { data } = await api.post(`/auth/reset-password/${token}`, { password });
-    if (data.token) localStorage.setItem('cc_token', data.token);
+    if (data.token) setToken(data.token);
     if (data.user) set({ user: data.user });
     if (data.user) ensureMediaToken(true);
     return data;
@@ -119,14 +120,14 @@ export const useAuth = create((set, get) => ({
   changePassword: async ({ currentPassword, newPassword }) => {
     if (DEMO_MODE) return { success: true };
     const { data } = await api.patch('/auth/change-password', { currentPassword, newPassword });
-    if (data.token) localStorage.setItem('cc_token', data.token);
+    if (data.token) setToken(data.token);
     return data;
   },
 
   /** Permanently delete the account and all its data, then tear down the session. */
   deleteAccount: async () => {
     if (!DEMO_MODE) await api.delete('/users/me');
-    localStorage.removeItem('cc_token');
+    clearToken();
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
     /* TURN credentials are minted per user and signed with an expiry. Dropping
@@ -260,7 +261,7 @@ export const useAuth = create((set, get) => ({
    *  (below) still clears it, which is what the shared-browser case needs. */
   forceLogout: () => {
     sessionStorage.removeItem('cc_unlocked');
-    localStorage.removeItem('cc_token');
+    clearToken();
     localStorage.removeItem('cc_demo_authed');
     clearMediaToken();
     set({ user: null, loading: false });
@@ -274,7 +275,7 @@ export const useAuth = create((set, get) => ({
         /* ignore */
       }
     }
-    localStorage.removeItem('cc_token');
+    clearToken();
     localStorage.removeItem('cc_demo_authed');
     sessionStorage.removeItem('cc_unlocked');
     clearMediaToken();

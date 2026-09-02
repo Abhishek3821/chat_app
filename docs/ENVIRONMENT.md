@@ -178,6 +178,51 @@ Setup, sizing, and how to run several relays: **[SELF_HOSTED_TURN.md](SELF_HOSTE
 TURN Allocate: **[deploy/turn/](../deploy/turn/)** —
 `node deploy/turn/check-relay.mjs --env` answers "does this relay actually relay" in one
 command, which no amount of reading config can.
+## 2.8c Meeting capacity (mesh ceiling)
+
+| Variable | Where used | Required? | Default if unset | What it does |
+|---|---|---|---|---|
+| `MESH_MAX_PARTICIPANTS` 🟢 | server — `utils/meetingCapacity.js` | No | `9` (clamped 2–50) | Hard cap on people in one **mesh** meeting. Past this the `meeting:join` ack is `{ ok:false, full:true, limit }` with an explanation — the joiner is refused rather than admitted and allowed to freeze the video for everyone already talking. |
+
+Two exemptions, both deliberate:
+
+- **The host is never refused.** Being locked out of your own meeting, unable to
+  end it or remove anyone, is worse than one extra participant. A host still
+  *occupies* a seat, so a full room with the host present needs two departures
+  before the next guest fits.
+- **No cap at all when an SFU is configured** (`LIVEKIT_*`, §2.8). There each
+  device sends one stream and the server fans it out, so the mesh ceiling does not
+  apply — leaving it in place would be an invisible limit surviving the upgrade.
+
+The client also warns from ~6 participants (`client/src/lib/meshQuality.js`), but
+that is advisory; this is the control. See [SCALING_CALLS.md](SCALING_CALLS.md) for
+the arithmetic and [MEETINGS.md](MEETINGS.md) for the room behaviour.
+
+---
+
+## 2.8d Drop-in embed
+
+| Variable | Where used | Required? | Default if unset | What it does |
+|---|---|---|---|---|
+| `EMBED_URL` 🟢 | server — `controllers/embedController.js` | For embedding | falls back to `CLIENT_URL` | Origin serving the embeddable UI. Reported as `endpoints.embedUrl` (`<this>/embed`) by `GET /api/v1/embed/config`. A wrong value is why a host page frames a 404. |
+| `API_PUBLIC_URL` 🟢 | server — `controllers/embedController.js` | Rarely | derived from the request | This API's own public origin. Only needed when a proxy rewrites `Host` and the derived origin comes out wrong. |
+
+See [INTEGRATION.md](INTEGRATION.md) for the whole integration and
+[PLATFORM.md §10](PLATFORM.md) for the embed in depth.
+
+---
+
+## 2.8e Build identity
+
+| Variable | Where used | Required? | Default if unset | What it does |
+|---|---|---|---|---|
+| `GIT_COMMIT` 🟢 | server — `routes/index.js` | No | `unknown` | Commit this host is running, reported as `commit` by `GET /api/health`. Set it only where the platform exposes nothing. |
+| `RENDER_GIT_COMMIT` · `VERCEL_GIT_COMMIT_SHA` · `SOURCE_VERSION` 🟢 | same | No | — | Injected automatically by Render / Vercel / Heroku; checked in that order after `GIT_COMMIT`. Nothing to set. |
+
+Without this there was no way to tell which code a deployment was running, so a
+fix verified against source could not be confirmed as deployed except by retesting
+the integration by hand. `curl https://<host>/api/health` now answers it.
+
 ## 2.9 Redis / queue / scaling
 
 | Variable | Where used | Required? | Default if unset | What it does |
@@ -261,14 +306,49 @@ return /\/api$/i.test(raw) ? raw : `${raw}/api`;
 
 ## 2.14 Server-side CORS / origin handling
 
-One allowlist, two consumers. `isAllowedOrigin()` (`server/middleware/csrf.js:14`) is used by **both** `corsOrigin()` in `server.js:36` (Express **and** Socket.IO) and `csrfGuard`, so the two can never drift.
+**Two trust tiers.** Collapsing them into one list opened a critical hole (see
+[AUTHENTICATION.md](AUTHENTICATION.md#origin-trust-tiers)), so the distinction is a
+security boundary rather than a detail.
 
-- **Allowed always:** `CLIENT_URL` (default `http://localhost:5290`) + every entry in `EXTRA_CORS_ORIGINS`.
-- **Allowed in dev only** (`NODE_ENV !== 'production'`): any origin matching `/^https?:\/\/(localhost|127\.0\.0\.1|(?:\d{1,3}\.){3}\d{1,3})(:\d+)?$/`.
-- **No `Origin` header** → `true` (curl, server-to-server, same-origin requests) — such callers carry no ambient session cookie to abuse.
-- A `Referer` URL is normalized to its origin via `new URL(origin).origin`.
-- Both Express CORS and the Socket.IO server are created with `credentials: true`, which is mandatory for cookie-based auth.
-- `corsOrigin()` returns `cb(null, false)` — never throws — so a disallowed origin gets a clean CORS denial rather than a 500, leaving `csrfGuard` as the explicit 403 gate.
+| Tier | Source | Cookies allowed? |
+|---|---|---|
+| **First-party** | `CLIENT_URL` + `EXTRA_CORS_ORIGINS`, plus any `localhost`/`127.0.0.1`/LAN origin when `NODE_ENV !== 'production'` | **Yes** — the app relies on httpOnly session cookies |
+| **Tenant** | `App.allowedOrigins`, registered self-service by embedding tenants | **No** — Bearer user tokens only |
+
+`middleware/csrf.js` exposes `isFirstPartyOrigin()`, `isEmbedTenantOrigin()` and
+`isAllowedOrigin()` (either tier). Behaviour:
+
+- **Express CORS** uses a per-request options delegate (`corsOptions` in
+  `server.js`), because `Access-Control-Allow-Credentials` must vary by tier.
+  First-party → `credentials: true`. Tenant → CORS allowed but
+  **`credentials: false`**, so a `fetch(..., {credentials:'include'})` from a
+  tenant origin cannot read the response.
+- **`csrfGuard`** lets a first-party origin through as before. A tenant origin is
+  accepted **only** when the request carries `Authorization: Bearer` *and* sends
+  no auth cookie; otherwise `403 Embedded origins must authenticate with an
+  Authorization: Bearer user token, not cookies.`
+- **Socket.IO** keeps `credentials: true` for both tiers. Its handshake reads the
+  token from `handshake.auth.token` and has no cookie path, so there is no ambient
+  credential for a hostile origin to ride.
+- **No `Origin` header** → allowed (curl, server-to-server, same-origin): no
+  ambient cookie to abuse.
+- A `Referer` URL is normalised to its origin.
+- CORS never throws on a disallowed origin — it declines the headers and leaves
+  `csrfGuard` as the explicit 403.
+
+Tenant origins are cached (`utils/tenantOrigins.js`) so this stays a Set lookup
+rather than a query per request; the write path awaits a reload, so an origin an
+operator just saved is live on the very next request. `PATCH /api/apps/:id`
+validates entries as real `http(s)` origins — `"null"`, `"*"` and `javascript:`
+are rejected.
+
+> **Why the tiers exist.** `POST /api/apps` needs only a logged-in user, so anyone
+> who can sign up can create a tenant and register any origin. Auth cookies are
+> `SameSite=None; Secure` in production, `protect` accepts `req.cookies.token`, and
+> `POST /auth/refresh` is authenticated by the refresh cookie alone. Trusting a
+> tenant origin like a first-party one therefore let `evil.example` read a fresh
+> access token out of a logged-in victim's browser. Verified and fixed;
+> `server/tests/security-embed-origins.mjs` (23 checks) is the regression guard.
 
 ### Production checklist
 | Set on | Variable | Value |

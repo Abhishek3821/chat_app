@@ -433,7 +433,7 @@ array. Copy that pattern.
 
 Two things you must supply yourself:
 
-1. **The call UI and the `RTCPeerConnection` wiring.** There is no embed SDK (§9.2). The server
+1. **The call UI and the `RTCPeerConnection` wiring.** The drop-in embed (§10) renders calls for you; this applies only if you are building your own frontend (§9.2). The server
    relays signalling; creating peer connections, attaching tracks and rendering tiles is your
    frontend's job. `client/src/hooks/useWebRTC.js` is a working reference implementation.
 2. **TURN credentials.** Calls are peer-to-peer full mesh. Without a TURN server, any two users

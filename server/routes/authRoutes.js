@@ -56,5 +56,5 @@ router.post('/two-step/verify', protect, authLimiter, verifyTwoStep);
 // Forgot PIN → reset it with an email OTP (both rate-limited).
 router.post('/two-step/forgot', protect, authLimiter, requestTwoStepReset);
 router.post('/two-step/reset', protect, authLimiter, resetTwoStepPin);
-
+router.get('/turn-credentials', protect, getTurnCredentials);
 export default router;

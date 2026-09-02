@@ -154,6 +154,48 @@ When a host admits a knocker, the server mints a **`meet-admit` JWT** (`signMeet
 
 ---
 
+## 5b. Capacity — the ceiling is ENFORCED
+
+A mesh meeting refuses the joiner who would break it rather than admitting them
+and degrading the room for everyone already talking.
+
+| Room size | What happens |
+|---|---|
+| 2 | 720p, ~1.2 Mbps per stream |
+| 3 – 4 | 480p, ~700 kbps |
+| 5 – 6 | 360p, ~350 kbps |
+| 7 – 9 | 240p, ~180 kbps, plus an amber in-room warning |
+| 10+ | `meeting:join` is **refused**: `{ ok:false, full:true, limit, error }` |
+
+The limit is `MESH_MAX_PARTICIPANTS` (`server/utils/meetingCapacity.js`), default
+**9**, clamped 2–50 so a typo cannot silently disable the gate. Encoder tiers come
+from `client/src/lib/meshQuality.js` and are re-applied to every leg whenever
+someone joins or leaves.
+
+Checked **before** the waiting/knock branches, so a full room answers at once
+instead of making someone knock — and the host is not pestered to admit a guest
+who cannot fit.
+
+### Two exemptions
+
+- **The host is never refused.** Being locked out of your own meeting, unable to
+  end it or remove anyone, is worse than one extra participant. A host still
+  *occupies* a seat, so a full room with the host present needs **two** departures
+  before the next guest fits — surprising the first time you hit it, and asserted
+  explicitly in the suite for that reason.
+- **No cap when an SFU is configured** (`LIVEKIT_*`). Each device then sends one
+  stream and the server fans it out, so the mesh arithmetic does not apply.
+  Leaving the cap in place would be an invisible limit surviving the upgrade.
+
+The client-side warning from ~6 participants is advisory; this is the control. A
+banner cannot stop a twentieth person joining.
+
+Verified by `server/tests/meeting-capacity.mjs` (15 checks), validated by
+disabling the gate and confirming the suite fails.
+
+See [SCALING_CALLS.md](SCALING_CALLS.md) for why a mesh stops at about six.
+
+---
 ## 6. REST API
 
 All routes are `protect`-authenticated and gated by `requireFeature('meetings')` — a no-op for

@@ -25,7 +25,7 @@ Key sources:
 
 | # | Token | Signed by | Exact payload claims | TTL / expiry | Alg | Stored / transported as |
 |---|-------|-----------|----------------------|--------------|-----|------------------------|
-| 1 | **Access token** | `signAccessToken(user, sid)` — `server/utils/token.js:14` | `{ id, role, tokenVersion, sid, type: 'access' }` (plus `iat`, `exp`) | `JWT_ACCESS_EXPIRES`, default **`1h`** | HS256, `JWT_SECRET` | **Dual**: httpOnly cookie `token` (maxAge 1h) **and** returned in the JSON body as `token`, which the client stores in `localStorage['cc_token']` and sends as `Authorization: Bearer …` |
+| 1 | **Access token** | `signAccessToken(user, sid)` — `server/utils/token.js:14` | `{ id, role, tokenVersion, sid, type: 'access' }` (plus `iat`, `exp`) | `JWT_ACCESS_EXPIRES`, default **`1h`** | HS256, `JWT_SECRET` | **Dual**: httpOnly cookie `token` (maxAge 1h) **and** returned in the JSON body as `token`, which the client holds in **memory** (mirrored to `localStorage['cc_token']` when storage is available — see §1.14) and sends as `Authorization: Bearer …` |
 | 2 | **Refresh token** | *Not a JWT.* `crypto.randomBytes(32).toString('hex')` — `server/utils/session.js:13` | n/a — opaque 64-hex-char random string. Only its **SHA-256 hash** is persisted (`Session.refreshHash`, `select: false`) | `REFRESH_TOKEN_DAYS`, default **30 days** absolute (`Session.expiresAt`, backed by a Mongo TTL index) + **`SESSION_IDLE_DAYS`, default 14 days** idle cutoff | n/a (CSPRNG random, SHA-256 at rest) | **httpOnly cookie `refreshToken` only**, scoped `path=/api/auth`. Never in JS-readable storage, never in a body |
 | 3 | **Media token** | `signMediaToken(userId)` — `server/utils/token.js:29` | `{ id, scope: 'media' }` | **`6h`** | HS256, `JWT_SECRET` | Not persisted. Fetched from `GET /api/upload/access`, held in a **module-level JS variable** `mediaToken` in `client/src/lib/api.js:109` (deliberately *not* localStorage), appended as `?token=…` to `/uploads/*` URLs |
 | 4 | **Meeting-admission pass** | `signMeetingPass(userId, meetingId)` — `server/utils/token.js:41` | `{ id, meetingId, scope: 'meet-admit' }` | **`15m`** | HS256, `JWT_SECRET` | Emitted over the socket to an admitted guest; presented back on the next `meeting:join`. Stateless, no storage |
@@ -403,7 +403,7 @@ On `connection`, the same values are **also** copied to `socket.data.*` — deli
 **Client side** (`client/src/hooks/useSocket.js:76`):
 ```js
 io(url, {
-  auth: (cb) => cb({ token: localStorage.getItem('cc_token') }),   // callback form!
+  auth: (cb) => cb({ token: getToken() }),   // callback form! memory-first — see §1.14
   withCredentials: true,
   transports: ['websocket', 'polling'],
 })
@@ -493,7 +493,7 @@ A **4–8 digit** PIN, bcrypt-hashed at cost 10, that gates opening the app on a
 `D:\office\Office Projects\whatapp clone\server\server.js`
 
 - **`app.set('trust proxy', 1)`** — required behind Render/Vercel/NGINX for correct `req.ip` (rate-limit keys, `Session.ip`) and `Secure` cookie handling.
-- **Middleware order:** `helmet({ crossOriginResourcePolicy: 'cross-origin' })` → `compression()` → `cors({ origin: corsOrigin, credentials: true })` → `express.json({ limit: '2mb' })` → `urlencoded` → `cookieParser()` → `mongoSanitize` → `morgan` (`combined` in prod, `dev` otherwise).
+- **Middleware order:** `helmet({ crossOriginResourcePolicy: 'cross-origin' })` → `compression()` → `cors(corsOptions)` — a **per-request** delegate, because `Access-Control-Allow-Credentials` differs by origin tier (§1.13) → `express.json({ limit: '2mb' })` → `urlencoded` → `cookieParser()` → `mongoSanitize` → `morgan` (`combined` in prod, `dev` otherwise).
 - **`/uploads/:filename` is NOT `express.static`** — it routes to `serveUpload`, which requires a token and, for chat attachments, membership of the owning chat; status media must pass `assertAudience`; avatars are readable by any authenticated user. **A token in the query string must have `scope === 'media'`** (`mediaController.js:44`), so the session JWT can never be laundered through a URL. Path traversal is stripped via `path.basename` plus a `filePath.startsWith(uploadDir)` re-check. Response: `Cache-Control: private, max-age=3600` — `private`, never `public`, so a shared CDN/proxy can't store an access-controlled file and replay it to someone else.
 - **API mount:** `app.use('/api', apiLimiter, csrfGuard, apiRoutes)`.
 
@@ -523,4 +523,97 @@ The webhook limiter keys on the *token* by explicit design: webhook ingress is u
 - `MONGO_URI` missing → `process.exit(1)` in production (`config/db.js:13`); boots without a DB in dev.
 
 ---
+
+---
+
+## 1.13 Origin trust tiers
+
+<a id="origin-trust-tiers"></a>
+
+Origin is checked in **two tiers**, and the difference is a security boundary, not
+a detail.
+
+| Tier | Source | May use ambient cookies? |
+|---|---|---|
+| **First-party** | `CLIENT_URL` + `EXTRA_CORS_ORIGINS`, plus `localhost`/LAN when `NODE_ENV !== 'production'` | **Yes** |
+| **Tenant** | `App.allowedOrigins`, registered self-service by embedding tenants | **No — Bearer only** |
+
+Helpers live in `server/middleware/csrf.js`: `isFirstPartyOrigin()`,
+`isEmbedTenantOrigin()`, `isAllowedOrigin()` (either).
+
+**Enforcement**
+
+- **Express CORS** — a per-request options delegate, because
+  `Access-Control-Allow-Credentials` must differ by tier. First-party gets
+  credentials; a tenant origin is allowed for CORS but gets **`credentials:
+  false`**, so `fetch(..., {credentials:'include'})` from it cannot read the
+  response.
+- **`csrfGuard`** — first-party passes as before. A tenant origin passes **only**
+  with `Authorization: Bearer` present *and* no auth cookie on the request;
+  otherwise `403`.
+- **Socket.IO** — `credentials: true` for both, deliberately. The handshake reads
+  `handshake.auth.token` (or an Authorization header) and has **no cookie path**,
+  so there is no ambient credential to ride.
+
+### Why — the hole this closes
+
+Four facts documented elsewhere in this file combine badly:
+
+1. `POST /api/apps` requires only `protect`, so **any signed-up user** can create a
+   tenant and register any origin.
+2. Auth cookies are `SameSite=None; Secure` in production (§1.3), so they **are**
+   sent cross-site.
+3. `protect` accepts `req.cookies.token` (§1.4) — ambient cookie auth.
+4. `POST /auth/refresh` is authenticated by the refresh cookie **alone** and is not
+   behind `protect` (§1.7); it ignores headers entirely.
+
+Trusting a tenant-registered origin like a first-party one therefore let
+`evil.example`, in the browser of any logged-in user who visited it, call
+`/auth/refresh` with credentials and **read a fresh access token from the
+response** — account takeover reachable by anyone who could sign up. Confirmed by
+reintroducing the flaw: the vulnerable build returned `200` with a real JWT in the
+body.
+
+A Bearer token cannot be abused the same way — `evil.example` cannot read a token
+held by another origin, and `protect` prefers the header over the cookie, so a
+request presenting one never silently falls back to ambient credentials. The
+"no auth cookie" half of the rule closes the residual `/auth/refresh` write, which
+would otherwise still fire behind a junk Bearer.
+
+`PATCH /api/apps/:id` additionally validates origins as real `http(s)` values —
+`"null"` (what a sandboxed iframe sends), `"*"` and `javascript:` are rejected.
+
+Regression guard: `server/tests/security-embed-origins.mjs` (23 checks), validated
+by reintroducing the hole. Any future change that widens origin trust must keep the
+tiers apart.
+
+---
+
+## 1.14 Where the access token actually lives (client)
+
+**Memory is the authority; `localStorage` is a best-effort mirror.**
+`client/src/lib/token.js` — `getToken()` / `setToken()` / `clearToken()`. Nothing
+else in the client touches the `cc_token` key directly.
+
+| Context | Behaviour |
+|---|---|
+| Normal first-party page | Memory starts empty → falls back to storage, so a session survives a reload exactly as before |
+| After a login or rotation | Memory is set and **wins**, so a freshly issued token is never shadowed by a cached one |
+| Cross-site iframe (the embed) | Storage may be partitioned, or **throw** outright (Safari, third-party storage blocked). Memory carries it; every storage call is wrapped and tolerates failure |
+
+This was a real defect: the token was read straight from `localStorage` in ~15
+places, so the embed stored what its host handed it, read back `null`, sent
+unauthenticated requests, and sat on "Connecting…" — with no error logged anywhere.
+The embed is handed a fresh token by its host on every mount, so it never needs
+persistence at all.
+
+`canPersistToken()` exists for diagnostics only; nothing branches on it, because
+the memory path covers both cases.
+
+Note the parallel with the **media token** (§1.2), which was already deliberately
+held in a module variable rather than storage.
+
+Covered by `client/test-token-store.mjs` (20 checks — denied storage, storage that
+accepts writes and forgets them, and memory-wins-on-rotation), validated by
+reverting to storage-only reads.
 

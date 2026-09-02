@@ -5,7 +5,7 @@
 > auth requirement and body field here was read out of `server/routes/` and
 > `server/controllers/`, so this cannot silently disagree with the code.
 >
-> **182 endpoints across 27 routers.**
+> **184 endpoints across 28 routers.**
 
 ---
 
@@ -131,6 +131,7 @@ accounts are never feature-gated.
 | [uploadRoutes](#upload) | `/upload` | 2 | Session |
 | [userRoutes](#users) | `/users` | 15 | Session |
 | [v1Routes](#v1) | `/v1` | 10 | — |
+| [embedRoutes](#v1-embed) | `/v1/embed` | 2 | — |
 | [platformRoutes](#v1-platform) | `/v1/platform` | 5 | App secret |
 | [webhookRoutes](#webhooks) | `/webhooks` | 4 | Session |
 | [workspaceRoutes](#workspaces) | `/workspaces` | 7 | Session |
@@ -176,7 +177,7 @@ embeddable-platform TENANT management (admin console)
 | Method | Path | Body / notes | Description |
 |---|---|---|---|
 | `GET` | `/apps/:id/stats` | — | live counts for the console (users are counted here rather than trusted from the cached counter). |
-| `POST` | `/apps/:id/rotate` | — | mint a new secret and invalidate the old one. |
+| `POST` | `/apps/:id/rotate` | — | Must be real http(s) origins. |
 | `GET` | `/apps` | — | ───────────────────────── Admin-side (dashboard) ───────────────────────── These are session-authenticated (`protect`), not app-secret authenticated — they're what the ChatKonect admin console uses to create and manage tenants. |
 | `POST` | `/apps` | `name`, `features` | create a tenant. |
 | `PATCH` | `/apps/:id` | `name`, `active`, `features`, `allowedOrigins`, `limits` | rename, toggle features/limits/origins, enable/disable. |
@@ -436,12 +437,12 @@ one search across people/chats/messages/meetings
 
 | Method | Path | Body / notes | Description |
 |---|---|---|---|
-| `GET` | `/status` | — | my status + contacts' statuses, grouped by user. Viewer/reply lists are stripped from everyone else's entries — only the owner sees who watched |
-| `POST` | `/status` | `type`, `content`, `media`, `background`, `privacy` | Creates the status, then fans out socket `status-updated` `{ userId, statusId }` to the contacts this status's audience allows |
-| `POST` | `/status/:id/view` | — | Records ONE view per person. Returns `{ success, counted, viewerCount }`; `counted:false` for a re-view **or for the owner opening their own story** (a self-view is never recorded). On a new view only, emits socket `status-viewed` to the owner. The client calls this per item as the story advances, not once per story |
-| `POST` | `/status/:id/reply` | `text` | Appends the reply and emits `status-reply` to the owner |
-| `GET` | `/status/:id/viewers` | — | Owner only (403 otherwise) — the populated viewer list |
-| `DELETE` | `/status/:id` | — | Owner only. Fans out `status-updated` `{ userId, removedId }` so contacts drop it from their feed immediately |
+| `GET` | `/status` | — | my status + contacts' statuses, grouped by user |
+| `POST` | `/status` | `type`, `content`, `media`, `background`, `privacy` | POST /api/status |
+| `POST` | `/status/:id/view` | — | POST /api/status/:id/view |
+| `POST` | `/status/:id/reply` | `text` | POST /api/status/:id/reply { text } |
+| `GET` | `/status/:id/viewers` | — | GET /api/status/:id/viewers |
+| `DELETE` | `/status/:id` | — | DELETE /api/status/:id |
 
 ### `/upload`
 
@@ -467,10 +468,10 @@ one search across people/chats/messages/meetings
 | `DELETE` | `/users/me` | — | GDPR-style erasure: remove the account AND the data it produced / references to it, instead of leaving orphaned PII behind. |
 | `GET` | `/users/me/contacts` | — | Get contacts _(from handler name)_ |
 | `POST` | `/users/me/contacts/:id` | — | Add contact _(from handler name)_ |
-| `DELETE` | `/users/me/contacts/:id` | — | Remove contact _(from handler name)_ |
+| `DELETE` | `/users/me/contacts/:id` | — | Allowed shapes per privacy key. |
 | `POST` | `/users/me/favorites/:id` | — | Toggle favorite _(from handler name)_ |
 | `POST` | `/users/me/block/:id` | — | Toggle block _(from handler name)_ |
-| `PUT` | `/users/me/chats/:chatId/theme` | `wallpaper`, `bubble` | Allowed shapes per privacy key. |
+| `PUT` | `/users/me/chats/:chatId/theme` | `wallpaper`, `bubble` | Tell the other side live, so their contact list and any open chat header update without a reload — the same standard every other mutation here meets. |
 | `POST` | `/users/me/chats/:chatId/:action` | — | Toggle chat flag _(from handler name)_ |
 | `GET` | `/users/:id` | — | GET /api/users/:id |
 
@@ -492,6 +493,15 @@ public third-party API (X-API-Key)
 | `POST` | `/v1/calls` | API key: `calls:write` | `type`, `chatId`, `participants`, `isGroup` | legacy/group entry point: log a call and ring the callees |
 | `GET` | `/v1/meetings` | API key: `meetings:read` | — | Get meetings _(from handler name)_ |
 | `POST` | `/v1/meetings` | API key: `meetings:write` | — | Create meeting _(from handler name)_ |
+
+### `/v1/embed`
+
+**Auth:** varies per route — see the **Auth** column · **Source:** `server/routes/embedRoutes.js`
+
+| Method | Path | Auth | Body / notes | Description |
+|---|---|---|---|---|
+| `GET` | `/v1/embed/config` | public | — | GET /api/v1/embed/config?appId=app_xxx |
+| `GET` | `/v1/embed/ice` | Session | — | requires a user token (`protect` runs first) |
 
 ### `/v1/platform`
 

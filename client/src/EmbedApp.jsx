@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { setToken } from './lib/token';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout.jsx';
 import ChatsPage from './pages/ChatsPage.jsx';
@@ -169,7 +170,7 @@ export default function EmbedApp() {
       if (!msg || msg.source !== HOST) return;
 
       if (msg.type === 'auth' && typeof msg.token === 'string' && msg.token) {
-        localStorage.setItem('cc_token', msg.token);
+        setToken(msg.token);
         setHasToken(true);
         /* init() re-validates against /auth/me, so a ROTATED token is adopted
            without tearing the mounted UI down. */

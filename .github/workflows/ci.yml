@@ -51,6 +51,12 @@ jobs:
       # Executes the loader against a DOM shim: the iframe it builds (allow= for
       # camera/mic, token NOT in the URL), the token handshake, rotation, and the
       # messages it must ignore. Nothing had ever run this file.
+      # The auth token must survive a context where localStorage is DENIED — which
+      # is what a cross-site iframe gets in Safari and with third-party storage
+      # blocked. Reading straight from storage made the embed 401 and hang on
+      # "Connecting…" with nothing logged anywhere.
+      - name: token store survives blocked storage (20 checks)
+        run: node test-token-store.mjs
       - name: embed loader handshake (37 checks)
         run: node test-embed-loader.mjs
       - name: UI / production audit

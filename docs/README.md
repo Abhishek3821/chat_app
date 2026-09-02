@@ -9,7 +9,7 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 
 | Doc | What it covers |
 |---|---|
-| [**API.md**](API.md) | Full REST reference — **182 endpoints** across 27 routers, generated from source. Method, auth, params, body, exact success/error JSON, side effects. |
+| [**API.md**](API.md) | Full REST reference — **184 endpoints** across 27 routers, generated from source. Method, auth, params, body, exact success/error JSON, side effects. |
 | [**AUTHENTICATION.md**](AUTHENTICATION.md) | JWT + session flow: signup, login (email/username/phone), refresh/rotation, logout, RBAC, two-step PIN, Socket.IO handshake auth. |
 | [**DATABASE_MODELS.md**](DATABASE_MODELS.md) | All 20 Mongoose schemas — fields, types, defaults, indexes, hooks/methods, and how the models reference each other. |
 | [**SOCKET_EVENTS.md**](SOCKET_EVENTS.md) | Every Socket.IO event in both directions, plus the exact call-signaling sequences (accept/reject/cancel/busy/group mesh). |
@@ -18,6 +18,7 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 | [**SELF_HOSTED_TURN.md**](SELF_HOSTED_TURN.md) | Run your own coturn relay instead of a managed provider: install, config (including the two mistakes that make it silently useless), verification, bandwidth cost, and how to run a network of relays across regions. |
 | [**deploy/turn/**](../deploy/turn/) | The runnable half: a one-command coturn installer, and a prober that performs a real TURN Allocate to prove a relay actually relays (plus its own 25-check self-test). |
 | [**SCALING_CALLS.md**](SCALING_CALLS.md) | How many people fit in one call/meeting and why; adaptive mesh encoding; turning on the LiveKit SFU for 10+ rooms. |
+- [INTEGRATION.md](INTEGRATION.md) — put ChatKonect chat inside another project (start here)
 | [**PLATFORM.md**](PLATFORM.md) | Embedding ChatKonect in another product: App-as-tenant, the app-secret/user-token split, the `/v1/platform` API, capability flags, and the current gaps. **Hand this to an integrating customer.** |
 | [**ENVIRONMENT.md**](ENVIRONMENT.md) | Every environment variable actually read by the app — non-secret, by design. Base URL / Socket URL resolution. |
 | [**BUSINESS_LOGIC.md**](BUSINESS_LOGIC.md) | Feature flows and the business rules behind them — the "why", not just the "what". |
