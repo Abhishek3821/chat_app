@@ -71,20 +71,22 @@ export async function assertMember(chatId, userId) {
  * `req.user`, the dispatcher passes the populated sender it looked up.
  */
 /**
- * Refuse delivery between two people where either has blocked the other.
+ * Refuse delivery between two people where either has blocked the other or they
+ * are no longer mutual contacts.
  *
  * Blocking was only ever enforced at the DISCOVERY layer — excluded from user
  * search, and contact requests refused (contactController / userController).
- * Nothing checked it on the send path, so a block did not stop messages through
- * an already-existing 1:1 chat. Enforced here, inside the single funnel every
- * send goes through (REST send, polls, product shares, live location and the
- * scheduled dispatcher), so no caller can miss it.
+ * The same rule applies after an unfriend: the chat and its history remain, but
+ * neither participant can send again until a new contact request is accepted.
+ * Enforced here, inside the single funnel every send goes through (REST send,
+ * polls, product shares, live location and the scheduled dispatcher), so no
+ * caller can bypass it through an existing direct-chat id.
  *
  * DIRECT chats only, deliberately: in a group, blocking someone is not meant to
  * silence them for the whole room. System messages are exempt — they're the
  * app narrating itself, not one user reaching another.
  */
-async function assertNotBlocked(chat, sender) {
+async function assertDirectChatCanSend(chat, sender) {
   if (chat.isGroup) return;
   const senderId = String(sender?._id || sender);
   const other = (chat.participants || [])
@@ -92,14 +94,21 @@ async function assertNotBlocked(chat, sender) {
     .find((id) => id !== senderId);
   if (!other) return;
 
-  // One query, both directions: either party's block stops delivery.
-  const blocked = await User.exists({
-    $or: [
-      { _id: other, blockedUsers: senderId },
-      { _id: senderId, blockedUsers: other },
-    ],
-  });
-  if (blocked) throw new ApiError(403, 'You can no longer send messages to this person.');
+  // Fetch both current profiles rather than trusting req.user: an unfriend on
+  // another device must take effect immediately for an already-open chat.
+  const people = await User.find({ _id: { $in: [senderId, other] } }).select('contacts blockedUsers').lean();
+  const senderUser = people.find((user) => String(user._id) === senderId);
+  const otherUser = people.find((user) => String(user._id) === other);
+  const mutuallyConnected =
+    senderUser?.contacts?.some((id) => String(id) === other) &&
+    otherUser?.contacts?.some((id) => String(id) === senderId);
+  const blocked =
+    senderUser?.blockedUsers?.some((id) => String(id) === other) ||
+    otherUser?.blockedUsers?.some((id) => String(id) === senderId);
+
+  if (blocked || !mutuallyConnected) {
+    throw new ApiError(403, 'Send a contact request and get accepted before you can message this person.');
+  }
 }
 
 export async function deliverMessage({
@@ -115,7 +124,7 @@ export async function deliverMessage({
   viewOnce = false,
 }) {
   const chatId = String(chat._id);
-  if (type !== 'system') await assertNotBlocked(chat, sender);
+  if (type !== 'system') await assertDirectChatCanSend(chat, sender);
   // Disappearing messages: stamp an expiry so the TTL index self-deletes it.
   const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
 

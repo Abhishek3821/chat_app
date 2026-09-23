@@ -213,26 +213,28 @@ const waitFor = (socket, event, ms = 6000) =>
 
     // A fresh 1:1 must now be refused until they reconnect.
     const reopen = await http(`POST`, `/chats/direct/` + B.id, { token: A.token });
-    /* Documents the ACTUAL behaviour rather than an assumed one: accessDirectChat
-       gates only the CREATION of a chat on mutual contacts. An existing chat is
-       returned unchanged, so a previously-started conversation survives an
-       unfriend. Blocking is the separate tool for stopping messages. If that ever
-       changes to a hard stop, this assertion is where it must be updated. */
+    /* An existing conversation survives an unfriend so its history is retained. */
     check(
-      `an EXISTING chat is still returned after unfriending (creation is gated, not continuation)`,
+      `an EXISTING chat is still returned after unfriending (history is retained)`,
       reopen.status === 200,
       String(reopen.status)
     );
 
-    // The behaviour that actually matters to a user: does unfriending stop the
-    // conversation, or only hide the row? Asserted explicitly either way so the
-    // answer is recorded rather than assumed.
+    // The chat survives, but sending is blocked until a new request is accepted.
     const sendAfter = await http(`POST`, `/messages`, { token: A.token, body: { chatId, content: `after unfriending` } });
-    check(`messaging in the EXISTING chat after unfriending: ` + (sendAfter.status === 201 ? `still allowed` : `blocked (` + sendAfter.status + `)`), true, `documented, not asserted either way`);
+    check(`messaging in the EXISTING chat is blocked after unfriending`, sendAfter.status === 403, `${sendAfter.status} ${sendAfter.data?.message || ''}`);
     const again = await http(`DELETE`, `/users/me/contacts/` + B.id, { token: A.token });
     check(`removing a non-contact is a no-op, not an error`, again.status === 200 && again.data?.wasContact === false, String(again.status));
     const self = await http(`DELETE`, `/users/me/contacts/` + A.id, { token: A.token });
     check(`you cannot remove yourself`, self.status === 400, String(self.status));
+
+    const resend = await http(`POST`, `/contacts/request/` + B.id, { token: A.token });
+    const incoming = await http(`GET`, `/contacts/requests`, { token: B.token });
+    const newRequest = (incoming.data?.incoming || []).find((r) => String(r.from?._id) === String(A.id));
+    const reconnect = await http(`PATCH`, `/contacts/request/` + newRequest?._id, { token: B.token, body: { action: 'accept' } });
+    check(`a new request can reconnect unfriended users`, resend.status === 201 && reconnect.status === 200, `${resend.status}/${reconnect.status}`);
+    const sendAgain = await http(`POST`, `/messages`, { token: A.token, body: { chatId, content: `after reconnecting` } });
+    check(`messaging resumes in the retained chat after reconnecting`, sendAgain.status === 201, `${sendAgain.status} ${sendAgain.data?.message || ''}`);
   }
   /* ── Edit / delete / react — the everyday actions ───────────────── */
   section('Message edit, delete and reactions');
