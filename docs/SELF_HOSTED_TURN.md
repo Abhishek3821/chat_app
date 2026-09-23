@@ -207,7 +207,7 @@ Restart the API. It reports the state at boot:
 ```
 
 **Then rebuild and redeploy the frontend.** The browser fetches credentials from
-`GET /api/v1/ice` at call time, so a bundle built before that code existed never asks.
+`GET /api/auth/turn-credentials` at call time, so a bundle built before that code existed never asks.
 
 ---
 
@@ -229,7 +229,7 @@ those three are indistinguishable. The manual route, if you prefer it:
 **1. Get real credentials.** Sign in, then:
 
 ```bash
-curl -s https://api.yourdomain.com/api/v1/ice \
+curl -s https://api.yourdomain.com/api/auth/turn-credentials \
      -H "Authorization: Bearer <your access token>" | jq
 ```
 

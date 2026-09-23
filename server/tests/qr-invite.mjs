@@ -267,7 +267,7 @@ const resolve = async (scanner, username) => {
     (r) => String(r.from?._id) === String(DECLINED.id)
   );
   const declined = await http('PATCH', `/contacts/request/${toDecline?._id}`, { token: OWNER.token, body: { action: 'reject' } });
-  check('decline succeeds', declined.status === 200, `${declined.status} ${declined.data?.message}`);
+  check('decline deletes the request', declined.status === 200 && declined.data?.deleted === true, `${declined.status} ${declined.data?.message}`);
   check(
     'the card disappears',
     !((await http('GET', '/contacts/requests', { token: OWNER.token })).data?.incoming || []).some(
@@ -280,6 +280,8 @@ const resolve = async (scanner, username) => {
       (c) => String(c._id) === String(DECLINED.id)
     )
   );
+  const resent = await http('POST', `/contacts/request/${OWNER.id}`, { token: DECLINED.token });
+  check('the sender can submit a new request after a decline', resent.status === 201, `${resent.status} ${resent.data?.message || ''}`);
 
   section('Edge cases the page has to handle');
   const self = await http('POST', `/chats/direct/${OWNER.id}`, { token: OWNER.token });

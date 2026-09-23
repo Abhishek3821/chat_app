@@ -112,8 +112,12 @@ export const respondRequest = asyncHandler(async (req, res) => {
       url: '/contacts',
     });
   } else {
-    request.status = 'rejected';
-    await request.save();
+    // A declined request is terminal: remove it rather than retaining a hidden
+    // "rejected" row. This clears it from both A's outgoing list and B's inbox,
+    // and lets A create a completely new request later.
+    await ContactRequest.deleteOne({ _id: request._id });
+    emitToUser(String(request.from), 'contact-declined', { by: req.user.name });
+    return res.json({ success: true, deleted: true });
   }
   res.json({ success: true, request });
 });

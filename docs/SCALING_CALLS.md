@@ -121,10 +121,10 @@ TURN_URL=turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349
 TURN_SECRET=<coturn static-auth-secret>
 ```
 
-That is the whole setup. `GET /api/v1/ice` then mints short-lived, signed
-credentials for **every** surface — this app, the drop-in embed, and any partner
-frontend. coturn must run in `use-auth-secret` mode; the secret never leaves the
-server.
+That is the shared-secret setup. The first-party client obtains short-lived, signed
+credentials through `GET /api/auth/turn-credentials`; coturn must run in
+`use-auth-secret` mode and the secret never leaves the server. The general/embed ICE
+surface is separate (`GET /api/v1/ice`).
 
 > This used to be two separate settings, and the second one failed silently.
 > Server-side minting was reachable only at `/v1/embed/ice`, and the first-party
@@ -149,11 +149,10 @@ detail: [SELF_HOSTED_TURN.md §9](SELF_HOSTED_TURN.md).
 
 ### Why not static credentials in the frontend
 
-`VITE_TURN_URL` / `VITE_TURN_USERNAME` / `VITE_TURN_CREDENTIAL` still work as an
-explicit override, and take precedence when set. Avoid them in production: a
-static credential shipped to a browser is readable in devtools and usable by
-anyone to relay traffic on your bill. The minted ones carry their expiry inside
-the signed username, so a leaked pair stops working on its own.
+Do not use `VITE_TURN_URL` / `VITE_TURN_USERNAME` / `VITE_TURN_CREDENTIAL` for
+this client build. Static browser credentials are readable in devtools and can be
+used by anyone to relay traffic on your bill. The server-minted credentials carry
+their expiry inside the signed username, so a leaked pair stops working on its own.
 
 ### Where to get a relay
 
@@ -167,9 +166,9 @@ Relay bandwidth is the real cost, and in a mesh it scales with the square of the
 room — every pair that cannot connect directly relays separately. An SFU reduces
 that too, because each device holds one connection to the server.
 
-`GET /api/v1/ice` requires authentication precisely because that bandwidth is
-billable; it reports `relay: "stun_only"` with an explanatory note when nothing is
-configured, so "why does my call have no audio" is answerable in one request.
+`GET /api/auth/turn-credentials` requires authentication precisely because relay bandwidth is
+billable. If TURN is unavailable, diagnose it with the allocation check below rather than relying
+on a ringing call: signaling can succeed even when no media path can be created.
 
 ---
 

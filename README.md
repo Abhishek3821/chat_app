@@ -147,7 +147,7 @@ VITE_DEMO_MODE=false
 2. On the **Contacts** page, search the other person by **email or username** and add them (or just start a chat from **New chat → search**).
 3. Open the chat and message in real time. Use the header **phone/video** buttons to start a WebRTC call.
 
-> WebRTC calls are peer-to-peer. On the same LAN they connect directly. Across the internet/mobile networks you must add a **TURN** server (e.g. Twilio, Metered, or self-hosted coturn) — STUN alone won't traverse strict NATs.
+> **Updated — cross-city calls:** WebRTC calls are peer-to-peer. Same-LAN calls usually connect directly; calls across cities, mobile data, or strict office networks need TURN. Set `TURN_SECRET` in `server/.env` to the same value as coturn's `static-auth-secret`, restart the API, and run `node deploy/turn/check-relay.mjs --env` before relying on calls.
 
 ## 🌐 Deployment
 

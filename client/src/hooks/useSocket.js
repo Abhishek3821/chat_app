@@ -212,6 +212,9 @@ export function useSocket() {
       toast.success(`${by || 'Someone'} accepted your contact request`);
       useContacts.getState().load(); // the new contact appears instantly
     });
+    // The receiver declined an outgoing request. Reload so A's "Requested"
+    // state is removed right away and they can send a new request if needed.
+    socket.on('contact-declined', () => useContacts.getState().load());
     /* Someone unfriended me, or I unfriended them from another device. Removal is
        mutual server-side, so both parties get this — drop the row locally rather
        than refetching, and leave the chat history alone (it is not deleted). */

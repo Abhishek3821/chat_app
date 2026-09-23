@@ -2,14 +2,7 @@ import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { tenantScope, sameTenant } from '../utils/tenancy.js';
-import ContactRequest from '../models/ContactRequest.js';
 import Chat from '../models/Chat.js';
-import Message from '../models/Message.js';
-import Status from '../models/Status.js';
-import Notification from '../models/Notification.js';
-import Call from '../models/Call.js';
-import Meeting from '../models/Meeting.js';
-import Report from '../models/Report.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { getWorkspaceType } from '../utils/workspaceService.js';
 import { sessionCookieOptions } from '../utils/token.js';
@@ -18,6 +11,7 @@ import { applyPresencePrivacy } from '../utils/privacy.js';
 import { applyPresenceFreshness } from '../utils/presence.js';
 import { normalizePhone } from '../utils/sendSms.js';
 import { invalidateChatListCache } from '../utils/chatCache.js';
+import { deleteUserAccount } from '../utils/deleteUserAccount.js';
 
 const PUBLIC_FIELDS = 'name username email phone avatar bio isOnline lastSeen accountStatus createdAt';
 // PUBLIC_FIELDS plus the fields needed to evaluate presence privacy (stripped
@@ -410,40 +404,7 @@ export async function verifyTwoStepPin(userId, pin) {
 // large accounts this belongs in a background job/transaction, but this closes
 // the "findByIdAndDelete only" gap.
 export const deleteAccount = asyncHandler(async (req, res) => {
-  const uid = req.user._id;
-
-  // Chats the user belongs to: drop 1:1 chats (and their messages) entirely;
-  // for groups, remove the user and keep the conversation for the others.
-  const chats = await Chat.find({ 'participants.user': uid }).select('participants isGroup');
-  for (const chat of chats) {
-    const remaining = chat.participants.filter((p) => String(p.user) !== String(uid));
-    if (!chat.isGroup || remaining.length === 0) {
-      await Message.deleteMany({ chat: chat._id });
-      await Chat.deleteOne({ _id: chat._id });
-    } else {
-      chat.participants = remaining;
-      if (!chat.participants.some((p) => p.role === 'owner')) chat.participants[0].role = 'owner';
-      await chat.save();
-    }
-  }
-
-  await Promise.all([
-    Message.deleteMany({ sender: uid }), // their messages in surviving group chats
-    Status.deleteMany({ user: uid }),
-    ContactRequest.deleteMany({ $or: [{ from: uid }, { to: uid }] }),
-    Notification.deleteMany({ $or: [{ user: uid }, { from: uid }] }),
-    Call.deleteMany({ $or: [{ initiator: uid }, { 'participants.user': uid }] }),
-    Meeting.deleteMany({ host: uid }),
-    Meeting.updateMany({ 'participants.user': uid }, { $pull: { participants: { user: uid } } }),
-    Report.deleteMany({ reporter: uid }),
-    // Scrub references to this user from everyone else.
-    User.updateMany(
-      { $or: [{ contacts: uid }, { favorites: uid }, { blockedUsers: uid }] },
-      { $pull: { contacts: uid, favorites: uid, blockedUsers: uid } }
-    ),
-  ]);
-
-  await User.findByIdAndDelete(uid);
+  await deleteUserAccount(req.user._id);
   res.cookie('token', '', { ...sessionCookieOptions(), expires: new Date(0) });
   res.json({ success: true, message: 'Account and associated data deleted.' });
 });

@@ -413,12 +413,12 @@ it names anyone omitted with a reason (`not_found`, `blocked`, `privacy`).
 
 ### TURN is bring-your-own
 
-There is **no TURN server in this project and no endpoint that issues TURN
-credentials** — the server never touches ICE at all. `VITE_TURN_*` is a build-time
-variable for the first-party React client only; it has no bearing on a partner
-frontend, which must configure its own `RTCPeerConnection` `iceServers`.
+> **Updated:** This project issues short-lived TURN credentials. The first-party
+client uses `GET /api/auth/turn-credentials`; the server signs them with
+`TURN_SECRET`. Keep that secret on the server and make it identical to coturn's
+`static-auth-secret`.
 
-STUN alone (what `client/src/lib/iceServers.js` ships) covers same-LAN and most
+STUN alone (the fallback in `client/src/lib/iceServers.js`) covers same-LAN and most
 home networks and fails on mobile carriers, corporate wifi and symmetric NAT —
 where the call rings, "connects", and carries no media. A relay is required for
 production.
@@ -427,9 +427,9 @@ production.
 who opens devtools and can be used to relay arbitrary traffic at your expense. Mint
 short-lived credentials server-side instead — the coturn REST-API scheme
 (`TURN_REST_API` shared secret → HMAC username/password pairs) is the standard, and
-hosted providers expose the same shape. `iceServers.js` already supports it via
-`VITE_TURN_CREDENTIALS_URL`: an endpoint returning one ice-server object or an
-array. Copy that pattern.
+hosted providers expose the same shape. The application uses its authenticated
+credential endpoint, which returns one ICE-server object containing the URL(s),
+username and credential.
 
 Two things you must supply yourself:
 

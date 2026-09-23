@@ -5,7 +5,7 @@
 > auth requirement and body field here was read out of `server/routes/` and
 > `server/controllers/`, so this cannot silently disagree with the code.
 >
-> **184 endpoints across 28 routers.**
+> **185 endpoints across 28 routers.**
 
 ---
 
@@ -110,7 +110,7 @@ accounts are never feature-gated.
 | [adminRoutes](#admin) | `/admin` | 5 | Session, **Admin** |
 | [agentRoutes](#agent) | `/agent` | 9 | Session |
 | [appRoutes](#apps) | `/apps` | 6 | Session |
-| [authRoutes](#auth) | `/auth` | 21 | — |
+| [authRoutes](#auth) | `/auth` | 22 | — |
 | [broadcastRoutes](#broadcasts) | `/broadcasts` | 5 | Session |
 | [callRoutes](#calls) | `/calls` | 8 | Session |
 | [catalogRoutes](#catalog) | `/catalog` | 6 | Session |
@@ -210,6 +210,7 @@ embeddable-platform TENANT management (admin console)
 | `POST` | `/auth/two-step/verify` | Session | `pin` · _rate limited_ | unlock this session (rate-limited). |
 | `POST` | `/auth/two-step/forgot` | Session | _rate limited_ | email an OTP that lets the user reset a forgotten app-lock / chat-lock PIN. |
 | `POST` | `/auth/two-step/reset` | Session | `pin`, `otp` · _rate limited_ | verify the emailed OTP and set a new PIN. |
+| `GET` | `/auth/turn-credentials` | Session | — | Get turn credentials _(from handler name)_ |
 
 ### `/broadcasts`
 

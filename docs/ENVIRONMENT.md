@@ -145,6 +145,8 @@ Push activates only when **both** keys are set; bad keys are caught and logged (
 
 ## 2.8b TURN relay (server-minted ICE credentials)
 
+> **Updated — first-party call path:** The web client fetches `GET /api/auth/turn-credentials` before creating its call or meeting peer connection. It receives a short-lived username and credential signed with `TURN_SECRET`. Set `TURN_SECRET` to a real random value matching coturn's `static-auth-secret`; `YOUR_STRONG_SECRET` is only a placeholder and will not work as deployed.
+
 | Variable | Where used | Required? | Default if unset | What it does |
 |---|---|---|---|---|
 | `TURN_URL` | server — `utils/iceCoturn.js` (`relays()`), assembled by `utils/iceServers.js`, served by `GET /api/v1/ice` | No (needed for calls across strict NATs) | *(unset → STUN only)* | One or more relays. `,` separates URLs **within** one relay, `\|` separates **relays**. Max 6 relays; extras are dropped with a boot warning. Order is preserved — the browser tries them in order, so list the relay nearest your users first. |
@@ -245,10 +247,10 @@ The adapter gets its own dedicated pub/sub pair (`getAdapterPair()`) separate fr
 | `VITE_API_URL` | client — `lib/api.js:13,97`, `hooks/useSocket.js:55`, `pages/DevelopersPage.jsx:24,26`, `pages/SettingsPage.jsx:718` | **Yes in prod** | `'/api'` (dev proxy / same-origin) | API base. Accepts a bare origin **or** a full `/api` base — `resolveApiBase()` normalizes both. Also seeds socket-URL resolution and the docs/settings display. |
 | `VITE_SOCKET_URL` | client — `hooks/useSocket.js:54` | No | *(derived — see §2.13)* | Explicit Socket.IO URL; **highest priority**. Should be the backend **origin, no `/api`**. |
 | `VITE_DEMO_MODE` | client — `lib/api.js:93` | No | *(unset → `false`)* | Strict `=== 'true'`. Runs the whole UI on mock data. Previously a *blank* `VITE_API_URL` implicitly forced demo mode, which silently mocked login/chat/calls even with the backend running — now it must be opted into explicitly. |
-| `VITE_TURN_URL` 🟡 | client — `lib/iceServers.js:21,23` | No (needed for real calls) | *(unset → STUN only)* | Comma-separated TURN URLs. **Without a TURN relay, calls across strict NATs (mobile, corporate wifi) ring and "connect" but media never flows and the call auto-drops.** There is deliberately **no default** — the old `openrelay.metered.ca` fallback was shut down and only slowed ICE while still leaving calls medialess. |
-| `VITE_TURN_USERNAME` 🟡 | client — `lib/iceServers.js:24` | With `VITE_TURN_URL` | `''` | Static TURN username. |
-| `VITE_TURN_CREDENTIAL` 🟡 | client — `lib/iceServers.js:25` | With `VITE_TURN_URL` | `''` | Static TURN credential — **visible in the bundle**. Prefer the endpoint below. |
-| `VITE_TURN_CREDENTIALS_URL` 🟡 | client — `lib/iceServers.js:27,31` | No | *(unset)* | Endpoint returning **time-limited** TURN credentials (one ice-server object or an array), e.g. metered.ca's `/api/v1/turn/credentials?apiKey=…`. Fetched once at startup; connections created before it resolves fall back to STUN for that session, and every subsequent call/meeting is upgraded since `ICE_SERVERS` is read at `RTCPeerConnection` creation time. **Only used when `VITE_TURN_URL` is absent** (`else if`). |
+| `VITE_TURN_URL` 🟡 | Not read by the current client | No | n/a | Legacy static configuration. Use the authenticated server credential endpoint instead. |
+| `VITE_TURN_USERNAME` 🟡 | Not read by the current client | No | n/a | Legacy static credential setting. Do not put a real TURN credential in a browser bundle. |
+| `VITE_TURN_CREDENTIAL` 🟡 | Not read by the current client | No | n/a | Legacy static credential setting; it would be world-readable if used. |
+| `VITE_TURN_CREDENTIALS_URL` 🟡 | Not read by the current client | No | n/a | Legacy third-party credential URL. The current client uses `/auth/turn-credentials`. |
 | `import.meta.env.PROD` | client — `lib/api.js:97` | built-in | — | Guards the loud console error when a production build has no `VITE_API_URL`. |
 | `import.meta.env.DEV` | client — `hooks/useSocket.js:57` | built-in | — | Selects the direct-to-`:5000` socket connection in dev. |
 

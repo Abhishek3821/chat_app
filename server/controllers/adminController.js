@@ -6,6 +6,7 @@ import Report from '../models/Report.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { onlineUserIds } from '../socket/index.js';
 import { securityEvent } from '../utils/securityLog.js';
+import { deleteUserAccount } from '../utils/deleteUserAccount.js';
 
 /** Escape user input before using it in a RegExp (prevents ReDoS / regex injection). */
 const escapeRx = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -71,6 +72,19 @@ export const setUserStatus = asyncHandler(async (req, res) => {
   if (!user) throw new ApiError(404, 'User not found.');
   securityEvent('admin.user.status', req, { targetUserId: String(user._id), accountStatus });
   res.json({ success: true, user: user.toSafeJSON() });
+});
+
+// DELETE /api/admin/users/:id
+export const deleteUser = asyncHandler(async (req, res) => {
+  if (String(req.params.id) === String(req.user._id)) {
+    throw new ApiError(400, 'You cannot delete your own account.');
+  }
+  const user = await User.findById(req.params.id).select('_id name');
+  if (!user) throw new ApiError(404, 'User not found.');
+
+  await deleteUserAccount(user._id);
+  securityEvent('admin.user.delete', req, { targetUserId: String(user._id) });
+  res.json({ success: true, message: 'Account and associated data deleted.' });
 });
 
 // GET /api/admin/reports

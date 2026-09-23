@@ -413,7 +413,7 @@ apart in the UI.
 |---|---|
 | `CLIENT_URL` | Builds `link` (`/meet/<code>`) in invitation emails. A stale value mails everyone a dead link |
 | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | All three set ⇒ SFU. Otherwise mesh |
-| `VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL` | TURN relay. **Without it, calls between different NATs connect and then drop** |
+| `TURN_SECRET` | Signs TURN credentials used by the first-party client. It must match coturn's `static-auth-secret`; without a working relay, calls between different NATs can connect and then drop. |
 | Email (`BREVO_API_KEY` or `EMAIL_*`/`SMTP_*`) | Unset ⇒ invitations are logged, not sent |
 
 ---

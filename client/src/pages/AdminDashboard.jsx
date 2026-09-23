@@ -24,6 +24,7 @@ import {
   Ban,
   ShieldCheck,
   PauseCircle,
+  Trash2,
   Check,
   X,
 } from 'lucide-react';
@@ -199,6 +200,21 @@ function UserManagement() {
     toast.success(`${name} ${verb}`);
   };
 
+  const deleteUser = async (id) => {
+    const user = users.find((u) => u._id === id);
+    if (!user || !window.confirm(`Permanently delete ${user.name}'s account and associated data? This cannot be undone.`)) return;
+    if (!DEMO_MODE) {
+      try {
+        await api.delete(`/admin/users/${id}`);
+      } catch (err) {
+        toast.error(err.message || 'Could not delete the account.');
+        return;
+      }
+    }
+    setUsers((list) => list.filter((u) => u._id !== id));
+    toast.success(`${user.name}'s account deleted`);
+  };
+
   return (
     <motion.div variants={rise} className="glass rounded-3xl p-5 shadow-soft">
       <div className="mb-4 flex items-center justify-between">
@@ -274,6 +290,14 @@ function UserManagement() {
                         <ShieldCheck size={15} /> Activate
                       </Button>
                     )}
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => deleteUser(u._id)}
+                      className="!bg-rose-500/10 !text-rose-600 hover:!bg-rose-500/20 dark:!text-rose-400"
+                    >
+                      <Trash2 size={15} /> Delete
+                    </Button>
                   </div>
                 </td>
               </tr>

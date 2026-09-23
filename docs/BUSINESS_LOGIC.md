@@ -810,18 +810,15 @@ surface — this app, the drop-in embed, and any partner frontend):
 - `METERED_API_KEY` + `METERED_SUBDOMAIN`, or
 - `CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_API_TOKEN`.
 
-`GET /api/v1/ice` then mints short-lived credentials (`utils/iceServers.js`
-resolves across the configured providers). The client calls it via
+`GET /api/auth/turn-credentials` then mints short-lived credentials (`controllers/rtpccred.js`). The client calls it via
 `ensureIceServers()` at the start of every call and meeting — alongside the camera
 permission prompt, so it costs no extra latency — caches the result, and refreshes
 at 80% of the advertised TTL so a long meeting cannot outlive its credentials.
 Credentials are dropped on logout, since they are minted per user.
 
-Build-time overrides still exist and take precedence when set, but are **not**
-recommended in production: `VITE_TURN_URL` + `VITE_TURN_USERNAME` +
-`VITE_TURN_CREDENTIAL` are baked into the bundle and world-readable, so anyone can
-relay traffic on your bill. `VITE_TURN_CREDENTIALS_URL` points at a third-party
-endpoint returning time-limited credentials instead.
+The former build-time `VITE_TURN_*` options are not read by the current client. Keep
+TURN configuration and the signing secret on the server; static browser credentials
+are world-readable and allow others to relay traffic on your bill.
 
 See [SCALING_CALLS.md](SCALING_CALLS.md) and [SELF_HOSTED_TURN.md](SELF_HOSTED_TURN.md).
 
