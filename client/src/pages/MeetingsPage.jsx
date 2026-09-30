@@ -735,6 +735,22 @@ function InvitePeopleModal({ open, onClose, meeting }) {
 }
 
 function MeetingReportModal({ open, onClose, report, loading }) {
+  const exportAttendance = () => {
+    if (!report) return;
+    const csvCell = (value) => {
+      const raw = String(value ?? '');
+      const safe = /^[\s]*[=+@-]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    const rows = [['Name', 'Email', 'Joined', 'Left', 'Duration (seconds)'],
+      ...(report.attendees || []).map((a) => [a.name, a.email, a.joinedAt, a.leftAt, a.durationSeconds])];
+    const url = URL.createObjectURL(new Blob([rows.map((row) => row.map(csvCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `meeting-attendance-${report._id}.csv`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const isLive = report?.status === 'ongoing';
   // Longest presence anchors the attendance bars (falls back to meeting duration).
   const maxSec = Math.max(
@@ -752,6 +768,7 @@ function MeetingReportModal({ open, onClose, report, loading }) {
         </div>
       ) : (
         <div className="space-y-5 pb-3">
+          <Button variant="outline" size="sm" onClick={exportAttendance}>Export attendance CSV</Button>
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <ReportStat
               icon={CalendarDays}
@@ -773,6 +790,29 @@ function MeetingReportModal({ open, onClose, report, loading }) {
             />
             <ReportStat icon={Users} accent="text-brand-500" label="Attended" value={report.attendeeCount} />
           </div>
+          {(report.polls?.length > 0 || report.reactionHistory?.length > 0) && (
+            <div className="rounded-2xl border border-border p-4 text-sm text-content">
+              <p className="font-semibold">Polls and reactions</p>
+              {(report.polls || []).map((poll) => <p key={poll._id} className="mt-2">{poll.question} · {poll.votes?.length || 0} votes</p>)}
+              <p className="mt-2 text-content-muted">{report.reactionHistory?.length || 0} reactions recorded</p>
+            </div>
+          )}
+
+          {(report.polls?.length > 0 || report.reactionHistory?.length > 0) && (
+            <div className="max-h-48 overflow-y-auto rounded-2xl border border-border p-4 text-sm text-content">
+              {(report.polls || []).map((poll) => (
+                <div key={poll._id} className="mb-3">
+                  <p className="font-medium">{poll.question}</p>
+                  {(poll.options || []).map((option, index) => (
+                    <p key={index} className="ml-3 text-content-muted">{option}: {(poll.votes || []).filter((vote) => vote.choices?.includes(index)).length}</p>
+                  ))}
+                </div>
+              ))}
+              {(report.reactionHistory || []).slice().reverse().map((reaction, index) => (
+                <p key={index} className="text-content-muted">{reaction.emoji} {reaction.name || 'Participant'} · {reaction.at ? new Date(reaction.at).toLocaleString() : ''}</p>
+              ))}
+            </div>
+          )}
 
           {report.timezone && (
             <p className="text-center text-xs text-content-muted">

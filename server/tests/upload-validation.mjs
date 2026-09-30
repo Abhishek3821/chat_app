@@ -94,6 +94,13 @@ async function main() {
   check('valid .png upload succeeds (201)', good.status === 201, `got ${good.status}`);
   check('  → returns an attachments array', Array.isArray(good.data?.attachments) && good.data.attachments.length === 1);
 
+  const overImageLimit = await postFile(token, 'eleven-megabytes.png', new Uint8Array(11 * 1024 * 1024), 'image/png');
+  check('image over 10 MB → 413', overImageLimit.status === 413, `got ${overImageLimit.status}`);
+  check('  → message names the 10 MB image limit', /image.*under 10 MB/i.test(overImageLimit.data?.message || ''), JSON.stringify(overImageLimit.data?.message));
+
+  const videoOverImageLimit = await postFile(token, 'eleven-megabytes.webm', new Uint8Array(11 * 1024 * 1024), 'video/webm');
+  check('11 MB video remains accepted (50 MB non-image limit)', videoOverImageLimit.status === 201, `got ${videoOverImageLimit.status}`);
+
   const badType = await postFile(token, 'payload.exe', new Uint8Array(64));
   check('unsupported type → 400 (not 500)', badType.status === 400, `got ${badType.status}`);
   check('  → message names the reason', badType.data?.message === 'Unsupported file type.', JSON.stringify(badType.data?.message));

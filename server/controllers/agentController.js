@@ -1,6 +1,7 @@
 import Label from '../models/Label.js';
 import QuickReply from '../models/QuickReply.js';
 import Chat from '../models/Chat.js';
+import { logWorkspaceAction } from '../utils/workspaceAudit.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
 
@@ -43,6 +44,7 @@ export const createLabel = asyncHandler(async (req, res) => {
       color: (req.body.color || '#6366f1').slice(0, 20),
       createdBy: req.user._id,
     });
+    await logWorkspaceAction(req.user, 'label.create', label._id, label.name);
     res.status(201).json({ success: true, label });
   } catch (err) {
     if (err?.code === 11000) throw new ApiError(409, 'A label with that name already exists.');
@@ -56,6 +58,7 @@ export const deleteLabel = asyncHandler(async (req, res) => {
   const result = await Label.deleteOne({ _id: req.params.id, workspace: req.user.workspace });
   if (!result.deletedCount) throw new ApiError(404, 'Label not found.');
   await Chat.updateMany({ labels: req.params.id }, { $pull: { labels: req.params.id } });
+  await logWorkspaceAction(req.user, 'label.delete', req.params.id);
   res.json({ success: true });
 });
 
@@ -72,6 +75,7 @@ export const applyLabel = asyncHandler(async (req, res) => {
     { _id: chat._id },
     apply ? { $addToSet: { labels: label._id } } : { $pull: { labels: label._id } }
   );
+  await logWorkspaceAction(req.user, apply ? 'label.apply' : 'label.remove', chat._id, label.name);
   res.json({ success: true, applied: apply });
 });
 
@@ -112,6 +116,7 @@ export const createQuickReply = asyncHandler(async (req, res) => {
       text: text.slice(0, 2000),
       createdBy: req.user._id,
     });
+    await logWorkspaceAction(req.user, 'quick_reply.create', quickReply._id, quickReply.shortcut);
     res.status(201).json({ success: true, quickReply });
   } catch (err) {
     if (err?.code === 11000) throw new ApiError(409, 'A quick reply with that shortcut already exists.');
@@ -134,6 +139,7 @@ export const updateQuickReply = asyncHandler(async (req, res) => {
     if (err?.code === 11000) throw new ApiError(409, 'A quick reply with that shortcut already exists.');
     throw err;
   }
+  await logWorkspaceAction(req.user, 'quick_reply.update', quickReply._id, quickReply.shortcut);
   res.json({ success: true, quickReply });
 });
 
@@ -142,5 +148,6 @@ export const deleteQuickReply = asyncHandler(async (req, res) => {
   if (!canManage(req.user)) throw new ApiError(403, 'Only workspace owners/admins can manage quick replies.');
   const result = await QuickReply.deleteOne({ _id: req.params.id, workspace: req.user.workspace });
   if (!result.deletedCount) throw new ApiError(404, 'Quick reply not found.');
+  await logWorkspaceAction(req.user, 'quick_reply.delete', req.params.id);
   res.json({ success: true });
 });

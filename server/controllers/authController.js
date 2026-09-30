@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import EmailVerification from '../models/EmailVerification.js';
 import Workspace from '../models/Workspace.js';
+import WorkspaceGuestInvite from '../models/WorkspaceGuestInvite.js';
+import Chat from '../models/Chat.js';
 import Session from '../models/Session.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken, generateOTP } from '../utils/token.js';
@@ -12,6 +14,7 @@ import { sendEmailWithin, otpEmailTemplate, isEmailConfigured, classifySendError
 import { normalizePhone } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
+import { logWorkspaceAction } from '../utils/workspaceAudit.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
 
@@ -193,6 +196,12 @@ export const signup = asyncHandler(async (req, res) => {
     (typeof req.body.inviteCode === 'string' && req.body.inviteCode.trim()) ||
     (typeof req.body.invite === 'string' && req.body.invite.trim()) ||
     '';
+  const guestToken = typeof req.body.guestToken === 'string' ? req.body.guestToken.trim() : '';
+  if (guestToken && inviteCode) throw new ApiError(400, 'Choose one invitation.');
+  const guestInvite = guestToken && /^[a-f0-9]{48}$/i.test(guestToken)
+    ? await WorkspaceGuestInvite.findOne({ tokenHash: crypto.createHash('sha256').update(guestToken).digest('hex'), claimedBy: null, expiresAt: { $gt: new Date() } })
+    : null;
+  if (guestToken && !guestInvite) throw new ApiError(400, 'Guest invitation is invalid or expired.');
   if (inviteCode && !(await Workspace.exists({ inviteCode }))) {
     throw new ApiError(400, 'That invite code is invalid or has expired.');
   }
@@ -200,7 +209,7 @@ export const signup = asyncHandler(async (req, res) => {
   // DEFAULTING to 'personal': a client that never sends accountType (older
   // clients, API consumers, tests) must not end up alone in a private workspace
   // where they can never contact anyone. Company workspaces are explicit opt-in.
-  const accountType = inviteCode || req.body.accountType === 'workspace' ? 'workspace' : 'personal';
+  const accountType = inviteCode || guestInvite || req.body.accountType === 'workspace' ? 'workspace' : 'personal';
 
   const baseDoc = {
     name: name.trim().slice(0, 60),
@@ -230,7 +239,26 @@ export const signup = asyncHandler(async (req, res) => {
 
   // Attach the account: join by invite, join the shared Personal space, or
   // create a new company workspace.
-  if (inviteCode) await joinWorkspaceByCode(user, inviteCode);
+  if (guestInvite) {
+    const claimed = await WorkspaceGuestInvite.findOneAndUpdate(
+      { _id: guestInvite._id, claimedBy: null, expiresAt: { $gt: new Date() } },
+      { $set: { claimedBy: user._id } }, { new: true }
+    );
+    if (!claimed) {
+      await User.deleteOne({ _id: user._id });
+      throw new ApiError(409, 'This guest invitation has already been used.');
+    }
+    user.workspace = guestInvite.workspace;
+    user.workspaceRole = 'guest';
+    user.guestExpiresAt = guestInvite.accessDays ? new Date(Date.now() + guestInvite.accessDays * 86400000) : null;
+    user.guestAllowedChats = guestInvite.chats;
+    await user.save({ validateBeforeSave: false });
+    await Chat.updateMany(
+      { _id: { $in: guestInvite.chats }, workspace: guestInvite.workspace, isGroup: true },
+      { $addToSet: { participants: { user: user._id, role: 'member' } } }
+    );
+    await logWorkspaceAction(user, 'guest.join', user._id, user.name);
+  } else if (inviteCode) await joinWorkspaceByCode(user, inviteCode);
   else if (accountType === 'personal') await joinPersonalSpace(user);
   else await createWorkspaceForUser(user, req.body.workspaceName);
 
@@ -350,6 +378,7 @@ async function checkCredentials(req, identifier, password) {
   if (user.accountStatus !== 'active') {
     throw new ApiError(403, `Your account is ${user.accountStatus}.`);
   }
+  if (user.workspaceRole === 'guest' && user.guestExpiresAt && user.guestExpiresAt <= new Date()) throw new ApiError(403, 'Guest access has expired.');
   return user;
 }
 
@@ -392,7 +421,7 @@ export const refresh = asyncHandler(async (req, res) => {
     throw new ApiError(401, 'Session expired. Please log in again.');
   }
   const user = await User.findById(session.user);
-  if (!user || user.accountStatus !== 'active') {
+  if (!user || user.accountStatus !== 'active' || (user.workspaceRole === 'guest' && user.guestExpiresAt && user.guestExpiresAt <= new Date())) {
     await Session.updateOne({ _id: session._id }, { $set: { revokedAt: new Date() } });
     clearAuthCookies(res);
     throw new ApiError(401, 'Account is not active.');

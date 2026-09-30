@@ -1,7 +1,7 @@
 # Meetings
 
 Scheduled and instant video/audio meetings with shareable Google-Meet-style links,
-knock-and-admit admission, in-meeting collaboration (polls, Q&A, captions) and an
+knock-and-admit admission, in-meeting collaboration (polls, Q&A, shared notes) and an
 attendance record.
 
 - **Model:** `server/models/Meeting.js`
@@ -47,19 +47,21 @@ SFU. That is arithmetic, not tuning — see [SCALING_CALLS.md](SCALING_CALLS.md)
 | `chat` | ObjectId → Chat | optional chat the meeting was created from |
 | `startAt` | Date, required | instant meetings use `now` |
 | `durationMinutes` | Number | default 30 |
-| `timezone` | String | default `UTC`, truncated to 64 chars. Used for the invitation email and `.ics` |
+| `timezone` | String | default `UTC`, truncated to 64 chars. Used for invitation-email display |
 | `type` | `audio \| video` | default `video` |
 | `roomCode` | String, unique, indexed | `abc-defg-hij` — see §3 |
 | `link` | String | `${CLIENT_URL}/meet/<roomCode>` |
 | `settings` | object | `joinAnytime`, `muteOnEntry`, `autoRecord`, `askToJoin` — see §5 |
 | `recurrence` | `none \| daily \| weekly \| monthly` | default `none`. See the caveat in §12 |
-| `reminderMinutes` | Number | default 10. **Not implemented** — see §12 |
+| `reminderMinutes` | Number | default 10; scheduled meetings trigger in-app/push reminders before start |
 | `status` | `scheduled \| ongoing \| completed \| cancelled` | see §4 |
 | `startedAt` / `endedAt` | Date | first join / last leave — written by the socket layer, not the API |
 | `attendees[]` | `attendeeSchema` | `{ user, name, email, joinedAt, leftAt, durationSeconds }` |
 | `polls[]` | `pollSchema` | `{ question, options[], multi, closed, createdBy, votes[{user, choices[]}] }` |
 | `questions[]` | `questionSchema` | `{ text, askedBy, askedByName, anonymous, upvotes[], answered, answerText }` |
-| `transcript[]` | `{ user, name, text, at }` | live captions, **capped at 500 lines** in the socket handler |
+| `notes` / `notesUpdatedAt` | String / Date | shared editable notes with conflict detection |
+| `reactionHistory[]` | object | last 200 reactions for the host report |
+| `parentMeeting` | ObjectId | links breakout rooms to their main meeting |
 
 Indexes: `roomCode` (unique), `host`, `startAt`.
 
@@ -99,8 +101,8 @@ which is what makes "anyone with the link can join" safe to offer.
         DELETE /meetings/:id (host) → [ cancelled ]   — terminal, from any state
 ```
 
-- `ongoing` is set by **both** `joinMeetingByCode` (REST) and `meeting:join` (socket), so a
-  meeting is live the moment anyone arrives by any door.
+- `ongoing` is set when someone enters the live socket room, not merely when they open
+  the link or complete the pre-join device check.
 - `completed` is written by the socket `meeting:leave` / `disconnect` path when the room
   empties — never by the API.
 - `cancelled` makes every join route answer **410 Gone**.
@@ -112,7 +114,7 @@ which is what makes "anyone with the link can join" safe to offer.
 Three doors lead to the same room:
 
 1. **Invited** — the host put you on `participants` at creation or via `/invite`. The meeting
-   appears in your list, you get an in-app notification, a push, and an email with an `.ics`.
+   appears in your list, and you get an in-app notification, a push, and an email invitation.
 2. **The link** — `/meet/:roomCode`. Anyone signed in can open it. `POST /code/:code/join`
    adds you with `viaLink: true`.
 3. **The meeting ID** — the same endpoints accept the raw `_id`.
@@ -242,7 +244,7 @@ payloads lives in [SOCKET_EVENTS.md](SOCKET_EVENTS.md#meeting-mesh-mtgid); in su
 | Signalling | `meeting:signal` — opaque `{kind:'offer'\|'answer'\|'ice'}` relayed to one socket |
 | Admission | `meeting:knock`, `meeting:admit`, `meeting:admitted`, `meeting:denied`, `meeting:knock-handled` |
 | Interaction | `meeting:chat`, `meeting:reaction`, `meeting:hand`, `meeting:presenting` |
-| Collaboration | `meeting:poll-create/vote/close` → `meeting:polls` · `meeting:qa-ask/upvote/answer` → `meeting:questions` · `meeting:caption` |
+| Collaboration | `meeting:poll-create/vote/close` → `meeting:polls` · `meeting:qa-ask/upvote/answer` → `meeting:questions` · shared-notes notifications |
 | Host control | `meeting:mute-all`, `meeting:force-mute`, `meeting:remove` → `meeting:removed` |
 
 Three contract details that cost time if you guess:
@@ -296,8 +298,6 @@ Two consequences worth knowing:
 
 - Meeting-room events are keyed by **socketId on mesh and userId on SFU**, which is why several
   client handlers accept both. SFU tiles are per-user.
-- **Background blur is not wired into the SFU path** — LiveKit owns the capture, so it needs a
-  custom `LocalVideoTrack`. See §10.
 
 ---
 
@@ -312,34 +312,11 @@ Two consequences worth knowing:
 | Raise hand | both | Toggle, mirrored on every tile |
 | Polls | both | Host creates/closes; anyone votes. Server-authoritative |
 | Q&A | both | Anyone asks (optionally anonymous) and upvotes; host answers |
-| Live captions | both | Browser speech recognition per participant, broadcast to everyone **except the speaker** (their UI already has the text). Appended to `transcript`, capped at 500 lines |
+| Shared notes | both | Every participant who has joined the meeting can edit; optimistic version checks prevent overwriting another person's edits |
+| Device check | pre-join | Camera preview, microphone level, speaker test, device selection, noise suppression |
+| Breakout rooms | both | Host creates 2–4 rooms; assigned participants join from invitation or main room |
+| Meeting password | pre-join | Optional password on scheduled meetings; guests must enter it before joining |
 | Recording | both | **Local only** — see below |
-| Background blur / virtual backgrounds | **mesh only** | MediaPipe selfie segmentation, self-hosted wasm. Swaps the outgoing track with `replaceTrack`, so it can be turned on mid-call without interrupting anyone. See §10.1 for what it needs to load |
-
-### 10.1 What background effects need to load
-
-Three things, and **all three have failed in practice** — each producing the same
-unhelpful "background effects could not start", which is why the error now names the
-actual cause:
-
-1. **Both wasm variants must be served.** MediaPipe builds its own filename from a
-   runtime SIMD feature test — `vision_wasm${simd ? '' : '_nosimd'}_internal.js` — so
-   shipping only the SIMD pair breaks every browser (or CSP) where that test says no.
-   `copy-mediapipe.mjs` stages all four files on `predev`/`prebuild`; `public/mediapipe/`
-   is gitignored because it is a build artifact.
-2. **The CSP must permit WebAssembly.** Chrome refuses to compile *any* wasm without
-   `'wasm-unsafe-eval'` in `script-src`, including MediaPipe's own SIMD probe — which
-   then reports "no SIMD" and requests the other filename. `client/vercel.json` grants it.
-3. **`.wasm` must be served as `application/wasm`.** A wrong MIME type makes
-   instantiation refuse the bytes.
-
-**A missing asset does not 404.** The host rewrites unmatched paths to `index.html`, so
-an absent file returns **200 with HTML**, and the runtime tries to execute HTML as
-JavaScript. That is what made the original failure so opaque. `node test-video-effects.mjs`
-(in CI) pins all of the above.
-
-The GPU delegate is tried first and falls back to CPU — a VM or a locked-down driver
-without WebGL2 is not a reason to have no blur at all.
 
 ### Recording is local, not cloud
 
@@ -372,21 +349,17 @@ Creating or inviting fans out four ways, all best-effort and off the response pa
 
 1. `meeting-invited` socket event → the meeting appears in their list with no reload.
 2. A persisted `Notification` + Web Push, so it survives being offline.
-3. An **email** with the join link.
-4. An **`.ics` attachment** (`utils/ics.js`) — a `VEVENT` with UTC start/end and
-   `METHOD:REQUEST`, so it lands properly in Google Calendar, Outlook and Apple Calendar.
-   `recurrence` becomes an `RRULE:FREQ=…`.
+3. An **email** with the join link and meeting ID.
 
 Email addresses are validated, de-duplicated and **capped at 50** per call. `invitesQueued` in
 the response is the count actually handed to the mailer — not the count you asked for.
 
-### Two fields that are stored but do nothing
+### Reminder delivery and recurring meetings
 
-- **`reminderMinutes`** — saved, editable through `PATCH`, and **read by no job anywhere**. No
-  reminder is ever sent. Either wire it to the scheduler or drop it from the UI.
-- **`recurrence`** — reaches the calendar client correctly as an `RRULE`, so repeats show up in
-  Google Calendar. But the app itself never creates the later instances: `GET /api/meetings`
-  returns one row, and the room code is shared across every occurrence.
+- **`reminderMinutes`** — the server checks scheduled meetings every 30 seconds and sends
+  an in-app/push notification once, before start, to the host and invitees who have not declined.
+- **`recurrence`** — saved with the meeting, but the app does not yet create later instances:
+  `GET /api/meetings` returns one row, and the room code is shared across every occurrence.
 
 ---
 
@@ -400,7 +373,8 @@ the response is the count actually handed to the mailer — not the count you as
 | `hooks/useMeetingRoom.js` | Mesh: peers, signalling, media, recording, effects, and every meeting socket event |
 | `hooks/useLiveKitRoom.js` | SFU: same public surface, LiveKit-backed |
 | `components/meeting/MeetingPollsPanel.jsx` | Polls + Q&A drawer |
-| `components/meeting/CaptionOverlay.jsx` | Live caption lines |
+| `components/meeting/MeetingNotesPanel.jsx` | Shared notes for all joined participants |
+| `components/meeting/DeviceCheck.jsx` | Pre-join camera, microphone, speaker, and noise check |
 
 `RoomView` takes whichever hook's return value it is given, so the two transports cannot drift
 apart in the UI.
@@ -424,18 +398,16 @@ apart in the UI.
 |---|---:|---|
 | `meeting-mesh.mjs` | 28 | a 3rd/4th joiner sees everyone already in the room |
 | `meeting-room-realtime.mjs` | 12 | join, chat, hand, reactions, host controls |
-| `meeting-collab-realtime.mjs` | 24 | polls, Q&A, captions, knock/deny |
+| `meeting-collab-realtime.mjs` | 24 | polls, Q&A, knock/deny |
 | `meeting-visibility.mjs` | 20 | who can see a meeting, and the `/rtc` admission gate |
-| `meeting-invites.mjs` | 15 | invite dedup/validation, `.ics`, absolute join link |
+| `meeting-invites.mjs` | 15 | invite dedup/validation and absolute join link |
 
 ---
 
 ## 16. Known gaps
 
 - **No cloud recording** — local `.webm` download only (§10).
-- **No breakout rooms, no whiteboard.**
-- **Background blur is mesh-only** (§9).
-- **`reminderMinutes` does nothing** (§12).
+- **No whiteboard.**
 - **`recurrence` doesn't generate instances** (§12).
 - **No dial-in / PSTN**, no live streaming to a view-only audience.
 - **Meeting chat isn't persisted** — it exists only for the duration of the room.

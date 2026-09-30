@@ -78,6 +78,8 @@ const meetingSchema = new mongoose.Schema(
     host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     participants: [rsvpSchema],
     chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat' },
+    parentMeeting: { type: mongoose.Schema.Types.ObjectId, ref: 'Meeting', default: null },
+    parentRoomCode: { type: String },
 
     startAt: { type: Date, required: true },
     durationMinutes: { type: Number, default: 30 },
@@ -88,6 +90,8 @@ const meetingSchema = new mongoose.Schema(
     // the code/link can join the live room. Unguessable so it can't be brute-forced.
     roomCode: { type: String, unique: true, index: true },
     link: { type: String },
+    passwordHash: { type: String, select: false },
+    hasPassword: { type: Boolean, default: false },
     // Host-controlled meeting policy — enforced for participants (not the host):
     //  • joinAnytime  — if false, guests can only join once the host is present.
     //  • muteOnEntry  — guests join with their mic muted.
@@ -100,6 +104,9 @@ const meetingSchema = new mongoose.Schema(
       muteOnEntry: { type: Boolean, default: false },
       autoRecord: { type: Boolean, default: false },
       askToJoin: { type: Boolean, default: true },
+      locked: { type: Boolean, default: false },
+      allowChat: { type: Boolean, default: true },
+      allowScreenShare: { type: Boolean, default: true },
     },
     recurrence: { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
     reminderMinutes: { type: Number, default: 10 },
@@ -113,18 +120,12 @@ const meetingSchema = new mongoose.Schema(
     attendees: [attendeeSchema],
     polls: [pollSchema],
     questions: [questionSchema],
-    // Rolling transcript of live captions, kept so the meeting report can include
+    reactionHistory: [{ _id: false, user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, name: String, emoji: String, at: Date }],
+    notes: { type: String, default: '', maxlength: 20000 },
+    notesUpdatedAt: { type: Date },
+    reminderSentAt: { type: Date },
     // what was said. Capped in the socket handler — an unbounded array on a hot
     // document would grow without limit over a long meeting.
-    transcript: [
-      {
-        _id: false,
-        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        name: { type: String },
-        text: { type: String, maxlength: 1000 },
-        at: { type: Date, default: Date.now },
-      },
-    ],
   },
   { timestamps: true }
 );

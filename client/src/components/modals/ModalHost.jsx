@@ -11,7 +11,7 @@ import { Chip } from '../ui/Badge';
 
 // Scheduling no longer asks for a zone — meetings are created in whatever zone
 // the scheduler is in, which is what they typed the time in. Still sent to the
-// server, which needs it to render invitation emails and the .ics attachment.
+// server, which needs it to render invitation emails accurately.
 const BROWSER_TZ = (() => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 })();
@@ -171,11 +171,12 @@ function CreateGroupModal({ open, onClose }) {
   );
 }
 
-const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none' });
+const EMPTY_SCHEDULE = () => ({ title: '', date: '', time: '', type: 'video', recurrence: 'none', reminderMinutes: '10' });
 const EMPTY_SETTINGS = { joinAnytime: true, muteOnEntry: false, autoRecord: false, askToJoin: true };
 
 function ScheduleMeetingModal({ open, onClose }) {
   const [form, setForm] = useState(EMPTY_SCHEDULE);
+  const [password, setPassword] = useState('');
   const [settings, setSettings] = useState(EMPTY_SETTINGS);
   const [invitees, setInvitees] = useState([]);
   const [emails, setEmails] = useState([]);
@@ -187,7 +188,7 @@ function ScheduleMeetingModal({ open, onClose }) {
 
   useEffect(() => {
     if (open) load();
-    if (!open) { setForm(EMPTY_SCHEDULE()); setSettings(EMPTY_SETTINGS); setInvitees([]); setEmails([]); setEmailInput(''); }
+    if (!open) { setForm(EMPTY_SCHEDULE()); setSettings(EMPTY_SETTINGS); setInvitees([]); setEmails([]); setEmailInput(''); setPassword(''); }
   }, [open, load]);
 
   const toggleInvitee = (id) => setInvitees((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
@@ -226,13 +227,15 @@ function ScheduleMeetingModal({ open, onClose }) {
         type: form.type,
         recurrence: form.recurrence,
         // The picker is gone, but the value is NOT cosmetic: the server formats
-        // the invitation email and the .ics attachment with it, and it defaults
+        // the invitation email with it, and it defaults
         // to UTC when absent — which would tell invitees the wrong hour. The
         // time above was typed in the scheduler's own zone, so send that.
         timezone: BROWSER_TZ,
         participants: invitees,
         inviteEmails,
         settings,
+        password,
+        reminderMinutes: Number(form.reminderMinutes),
       });
       // Say what actually happened — a bare "scheduled" gave no clue whether the
       // email invitations went out. The count is the server's, so it reflects
@@ -266,6 +269,17 @@ function ScheduleMeetingModal({ open, onClose }) {
             <TypeChip active={form.type === 'video'} onClick={() => setForm((f) => ({ ...f, type: 'video' }))} icon={Video} label="Video" />
             <TypeChip active={form.type === 'audio'} onClick={() => setForm((f) => ({ ...f, type: 'audio' }))} icon={Phone} label="Audio" />
           </div>
+        </Field>
+
+        <Field label="Meeting password (optional)">
+          <Input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" />
+        </Field>
+        <Field label="Remind everyone before the meeting">
+          <select value={form.reminderMinutes} onChange={set('reminderMinutes')} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-content">
+            <option value="5">5 minutes before</option>
+            <option value="10">10 minutes before</option>
+            <option value="30">30 minutes before</option>
+          </select>
         </Field>
         <Field label="Repeat">
           <div className="flex flex-wrap gap-2">

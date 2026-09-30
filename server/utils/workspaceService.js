@@ -61,6 +61,8 @@ export async function createWorkspaceForUser(user, name) {
   });
   user.workspace = ws._id;
   user.workspaceRole = 'owner';
+  user.guestExpiresAt = null;
+  user.guestAllowedChats = [];
   await user.save({ validateBeforeSave: false });
   return ws;
 }

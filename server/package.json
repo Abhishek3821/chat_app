@@ -10,7 +10,7 @@
     "dev": "nodemon server.js",
     "seed": "node utils/seed.js",
     "test:e2e": "node tests/e2e.mjs",
-    "build": "rm -rf dist && mkdir dist && cp server.js dist/server.js",
+    "build": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.mkdirSync('dist',{recursive:true}); fs.copyFileSync('server.js','dist/server.js')\"",
     "test:features": "node tests/new-features.mjs"
   },
   "dependencies": {

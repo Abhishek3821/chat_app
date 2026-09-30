@@ -269,6 +269,7 @@ function populateInPlace(doc) {
 
 // GET /api/messages/:chatId?before=&limit=
 export const getMessages = asyncHandler(async (req, res) => {
+  if (req.user.workspaceRole === 'guest' && !(req.user.guestAllowedChats || []).some((id) => String(id) === req.params.chatId)) throw new ApiError(403, 'This group was not shared with you.');
   // Needs the chat document (not just a membership yes/no) because the pinned
   // set rides along on this response — see below.
   const chat = await assertMember(req.params.chatId, req.user._id);
@@ -296,6 +297,7 @@ export const getMessages = asyncHandler(async (req, res) => {
 // POST /api/messages  — send a message (persist + realtime broadcast)
 export const sendMessage = asyncHandler(async (req, res) => {
   const { chatId, content = '', type = 'text', replyTo, location, mentions, forwardedFrom } = req.body;
+  if (req.user.workspaceRole === 'guest' && (!(req.user.guestAllowedChats || []).some((id) => String(id) === chatId) || type !== 'text' || replyTo || location || mentions || forwardedFrom || req.body.attachments)) throw new ApiError(403, 'Guests can only send text to invited groups.');
   const chat = await assertMember(chatId, req.user._id);
 
   assertMayPost(chat, req.user._id);

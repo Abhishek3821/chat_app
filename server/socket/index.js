@@ -37,7 +37,6 @@ const WRITE_EVENTS = new Set([
   'message:delivered',
   'message-read',
   'message-reaction',
-  'meeting:caption',
   'meeting:poll-create',
   'meeting:poll-vote',
   'meeting:poll-close',
@@ -84,10 +83,6 @@ function installRateLimit(socket) {
     // Deliberately no next() — the packet is dropped without a reply.
   });
 }
-// Live-caption transcript is capped per meeting: it's appended to on every final
-// caption, so an unbounded array on a hot document would grow all meeting long.
-const MAX_TRANSCRIPT_LINES = 500;
-
 let ioRef = null;
 let usingAdapter = false; // true once the Redis adapter is attached (multi-instance)
 /** userId -> Set<socketId> (THIS instance only) */
@@ -234,9 +229,12 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       const decoded = verifyToken(token);
       // Scoped tokens (media token — lives in URLs) can't open a socket session.
       if (decoded.scope) return next(new Error('Invalid auth token'));
-      const user = await User.findById(decoded.id).select('accountStatus tokenVersion privacy name avatar email');
+      const user = await User.findById(decoded.id).select('accountStatus tokenVersion privacy name avatar email workspaceRole guestExpiresAt');
       if (!user) return next(new Error('User no longer exists'));
       if (user.accountStatus !== 'active') return next(new Error('Account is not active'));
+      // Guest accounts use the intentionally narrow REST portal. Do not let a
+      // guest reach the much broader call/meeting/chat socket event surface.
+      if (user.workspaceRole === 'guest') return next(new Error('Guest sockets are not available'));
       if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
         return next(new Error('Session revoked'));
       }
@@ -537,7 +535,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         const sockets = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
         return sockets
           .filter((s) => s.id !== exceptId)
-          .map((s) => ({ socketId: s.id, userId: s.data.userId, name: s.data.name, avatar: s.data.avatar }));
+          .map((s) => ({ socketId: s.id, userId: s.data.userId, name: s.data.name, avatar: s.data.avatar, handRaisedAt: s.data.handRaisedAt?.[String(meetingId)] || null }));
       } catch {
         return [];
       }
@@ -545,13 +543,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // Join a room → get the list of peers already inside, and announce yourself
     // to them. The NEWCOMER initiates the offer to each existing peer (no glare).
-    socket.on('meeting:join', async ({ meetingId, pass } = {}, cb) => {
+    socket.on('meeting:join', async ({ meetingId, pass, passwordPass } = {}, cb) => {
       if (!isId(meetingId)) return typeof cb === 'function' && cb({ ok: false, error: 'Invalid meeting.' });
       let meeting;
       try {
         // polls/questions ride along on this existing fetch (rather than a second
         // query) so a late joiner receives the poll + Q&A state already in flight.
-        meeting = await Meeting.findById(meetingId).select('status host settings participants polls questions');
+        meeting = await Meeting.findById(meetingId).select('status host settings participants polls questions hasPassword parentMeeting');
       } catch {
         meeting = null;
       }
@@ -559,6 +557,19 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         return typeof cb === 'function' && cb({ ok: false, error: 'Meeting not available.' });
       }
       const isHost = String(meeting.host) === userId;
+      if (meeting.parentMeeting && !isHost &&
+          !meeting.participants.some((p) => String(p.user) === userId)) {
+        return typeof cb === 'function' && cb({ ok: false, error: 'You were not assigned to this breakout room.' });
+      }
+      if (meeting.settings?.locked && !isHost) return typeof cb === 'function' && cb({ ok: false, error: 'The host locked this meeting.' });
+      if (meeting.hasPassword && !isHost) {
+        let verified = false;
+        try {
+          const d = verifyToken(String(passwordPass || ''));
+          verified = d.scope === 'meet-password' && String(d.id) === userId && String(d.meetingId) === String(meetingId);
+        } catch { /* invalid or expired */ }
+        if (!verified) return typeof cb === 'function' && cb({ ok: false, error: 'Meeting password required.' });
+      }
       // Genuinely invited only — link-joiners (viaLink) must still be admitted.
       const isInvited = (meeting.participants || []).some((p) => String(p.user) === userId && !p.viaLink);
       const peers = await meetingPeers(meetingId, socket.id);
@@ -606,6 +617,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
                   userId,
                   name: socket.data.name,
                   avatar: socket.data.avatar,
+                  knockedAt: Date.now(),
                 });
               });
           } catch { /* knock is best-effort */ }
@@ -625,7 +637,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       // join, and add this person's row once (name/email snapshot).
       const nowJoin = new Date();
       Meeting.updateOne({ _id: meetingId, startedAt: null }, { $set: { startedAt: nowJoin, status: 'ongoing' } }).catch(() => {});
-      Meeting.updateOne(
+      await Meeting.updateOne(
         { _id: meetingId, 'attendees.user': { $ne: userId } },
         { $push: { attendees: { user: userId, name: socket.data.name, email: socket.data.email, joinedAt: nowJoin, durationSeconds: 0 } } }
       ).catch(() => {});
@@ -649,8 +661,12 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // Screen-share announcements: everyone in the room learns who is presenting
     // so they can spotlight that stream (Google-Meet style) instead of cropping it.
-    socket.on('meeting:presenting', ({ meetingId, on } = {}) => {
+    socket.on('meeting:presenting', async ({ meetingId, on } = {}) => {
       if (!meetingId || !socket.rooms.has(meetingRoom(meetingId))) return;
+      if (on && !isRoomHost(meetingId)) {
+        const allowed = await Meeting.exists({ _id: meetingId, 'settings.allowScreenShare': { $ne: false } });
+        if (!allowed) return;
+      }
       socket.to(meetingRoom(meetingId)).emit('meeting:presenting', { socketId: socket.id, on: !!on });
     });
 
@@ -660,9 +676,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // In-meeting text chat — broadcast to the whole room (incl. the sender's other
     // tabs is unnecessary; use socket.to so the sender renders its own optimistically).
-    socket.on('meeting:chat', ({ meetingId, text } = {}) => {
+    socket.on('meeting:chat', async ({ meetingId, text } = {}) => {
       const body = String(text || '').trim().slice(0, 2000);
       if (!inRoom(meetingId) || !body) return;
+      if (!isRoomHost(meetingId)) {
+        const allowed = await Meeting.exists({ _id: meetingId, 'settings.allowChat': { $ne: false } });
+        if (!allowed) return;
+      }
       socket.to(meetingRoom(meetingId)).emit('meeting:chat', {
         socketId: socket.id, userId, name: socket.data.name, avatar: socket.data.avatar, text: body, at: Date.now(),
       });
@@ -675,46 +695,26 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       const e = String(emoji || '').slice(0, 8);
       if (!inRoom(meetingId) || !e) return;
       socket.to(meetingRoom(meetingId)).emit('meeting:reaction', { socketId: socket.id, userId, name: socket.data.name, emoji: e });
+      Meeting.updateOne({ _id: meetingId }, { $push: { reactionHistory: { $each: [{ user: userId, name: socket.data.name, emoji: e, at: new Date() }], $slice: -200 } } }).catch(() => {});
     });
 
     // Raise / lower hand.
     socket.on('meeting:hand', ({ meetingId, up } = {}) => {
       if (!inRoom(meetingId)) return;
-      socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, userId, name: socket.data.name, up: !!up });
+      if (!socket.data.handRaisedAt) socket.data.handRaisedAt = {};
+      const at = up ? Date.now() : null;
+      if (up) socket.data.handRaisedAt[String(meetingId)] = at;
+      else delete socket.data.handRaisedAt[String(meetingId)];
+      socket.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: socket.id, userId, name: socket.data.name, up: !!up, at });
     });
-
-    // ── Live captions ──────────────────────────────────────────────
-    // Each participant transcribes their OWN microphone locally (Web Speech API)
-    // and broadcasts the text. Deliberately a plain relay with no server state:
-    // there is no STT cost, it scales with the room, and speaker attribution is
-    // free because a caption can only ever come from the person who spoke it.
-    // Interim results are relayed but never persisted — only finals land in the
-    // transcript, and that array is capped so a long meeting can't grow the doc
-    // without bound.
-    socket.on('meeting:caption', async ({ meetingId, text, final } = {}) => {
-      const body = String(text || '').trim().slice(0, 1000);
-      if (!inRoom(meetingId) || !body) return;
-      socket.to(meetingRoom(meetingId)).emit('meeting:caption', {
-        socketId: socket.id,
-        userId,
-        name: socket.data.name,
-        text: body,
-        final: !!final,
-        at: Date.now(),
-      });
-      if (!final) return;
-      try {
-        await Meeting.updateOne({ _id: meetingId }, {
-          $push: {
-            transcript: {
-              $each: [{ user: userId, name: socket.data.name, text: body, at: new Date() }],
-              $slice: -MAX_TRANSCRIPT_LINES, // keep only the most recent N
-            },
-          },
-        });
-      } catch {
-        /* the transcript is a nice-to-have — never break live captions over it */
-      }
+    socket.on('meeting:lower-hand', async ({ meetingId, to } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !to) return;
+      const peers = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
+      const target = peers.find((peer) => peer.id === to || String(peer.data.userId) === String(to));
+      if (!target) return;
+      if (target.data.handRaisedAt) delete target.data.handRaisedAt[String(meetingId)];
+      ioRef.to(target.id).emit('meeting:lower-hand', { meetingId });
+      ioRef.to(meetingRoom(meetingId)).emit('meeting:hand', { socketId: target.id, userId: target.data.userId, up: false, at: null });
     });
 
     // ── In-meeting polls (server-authoritative) ────────────────────
@@ -916,6 +916,7 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.leave(meetingRoom(meetingId));
       socket.data.meetings?.delete(String(meetingId));
       if (socket.data.meetingHost) delete socket.data.meetingHost[String(meetingId)];
+      if (socket.data.handRaisedAt) delete socket.data.handRaisedAt[String(meetingId)];
       socket.to(meetingRoom(meetingId)).emit('meeting:peer-left', { socketId: socket.id });
       finalizeAttendance(meetingId);
     };

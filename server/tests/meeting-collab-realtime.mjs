@@ -1,12 +1,11 @@
 /**
- * In-meeting collaboration over real sockets: polls, Q&A, live captions, and
- * the two halves of the knock/deny flow.
+ * In-meeting collaboration over real sockets: polls, Q&A, and the two halves
+ * of the knock/deny flow.
  *
  * These five were documented but unproven. Each is a "why didn't that appear?"
  * bug waiting to happen, and none of them can be caught by name-matching: the
  * event names were always consistent — what wasn't verified is that voting
- * actually re-broadcasts, that a denied guest is told, and that captions do NOT
- * echo to the speaker.
+ * actually re-broadcasts and that a denied guest is told.
  *
  * Polls and Q&A are SERVER-AUTHORITATIVE: the whole collection is re-sent on
  * every change, so a client never merges deltas and a late joiner is correct
@@ -212,16 +211,6 @@ async function makeUser(tag) {
   const afterAnswer = await answered;
   check('the answer reaches the asker', afterAnswer?.questions?.[0]?.answered === true, JSON.stringify(afterAnswer?.questions?.[0]));
   check('with the text', afterAnswer?.questions?.[0]?.answerText === 'Friday.');
-
-  section('Live captions go to everyone EXCEPT the speaker');
-  const heard = waitFor(sg, 'meeting:caption', { match: (p) => p?.text === 'hello everyone' });
-  const echoed = expectNone(sh, 'meeting:caption', 2500);
-  sh.emit('meeting:caption', { meetingId, text: 'hello everyone', final: true });
-  const cap = await heard;
-  check('the other participant receives the line', !!cap, 'no meeting:caption within 4s');
-  check('attributed to the speaker', String(cap?.userId) === String(HOST.id) && !!cap?.name, JSON.stringify(cap));
-  check('carrying the text and its final flag', cap?.text === 'hello everyone' && cap?.final === true);
-  check('the SPEAKER does not receive their own caption back', (await echoed) === null);
 
   /* ── Knock / deny ───────────────────────────────────────────────── */
   section('A denied guest is told, and the host\'s other tabs stop asking');

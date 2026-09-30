@@ -80,7 +80,7 @@ end users:
 | `403` | Authenticated but not permitted (not a member, not the host, feature off) |
 | `404` | Not found, or not visible to you |
 | `409` | Conflict (duplicate, or an action invalid in the current state) |
-| `413` | Upload too large (50 MB per file) |
+| `413` | Upload too large (10 MB per image; 50 MB for other files) |
 | `429` | Rate limited — back off and retry |
 
 ## 4. Conventions
@@ -361,6 +361,11 @@ real-time location sharing
 | `GET` | `/meetings/code/:code/rtc` | — | Get meeting rtc _(from handler name)_ |
 | `POST` | `/meetings/code/:code/join` | — | Join meeting by code _(from handler name)_ |
 | `GET` | `/meetings/:id/report` | — | Get meeting report _(from handler name)_ |
+| `GET` | `/meetings/:id/notes` | — | Shared meeting notes for joined participants |
+| `PUT` | `/meetings/:id/notes` | `notes`, `updatedAt` | Save shared notes with conflict check |
+| `GET` | `/meetings/:id/breakouts` | — | Active breakouts assigned to the caller (all for host) |
+| `POST` | `/meetings/:id/breakouts` | `count` (2–4) | Host creates breakout rooms |
+| `DELETE` | `/meetings/:id/breakouts` | — | Host ends breakout rooms |
 | `PATCH` | `/meetings/:id` | — | Update meeting _(from handler name)_ |
 | `POST` | `/meetings/:id/rsvp` | `response` | POST /api/meetings/:id/rsvp { response } |
 | `POST` | `/meetings/:id/invite` | `userIds`, `emails` | Look a meeting up by its shareable room code OR its raw id ("join by meeting ID"). |

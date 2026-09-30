@@ -85,6 +85,7 @@ export default function Signup() {
   const { signup, sendEmailCode, verifyEmailCode, loading } = useAuth();
   const [params] = useSearchParams();
   const inviteCode = (params.get('invite') || '').trim();
+  const guestToken = (params.get('guest') || '').trim();
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [touched, setTouched] = useState({});
@@ -193,14 +194,14 @@ export default function Signup() {
         password: form.password,
         confirmPassword: form.confirmPassword,
         emailToken,
-        ...(inviteCode ? { inviteCode } : { accountType }),
-        ...(!inviteCode && accountType === 'workspace' && form.workspaceName.trim()
+        ...(guestToken ? { guestToken } : inviteCode ? { inviteCode } : { accountType }),
+        ...(!inviteCode && !guestToken && accountType === 'workspace' && form.workspaceName.trim()
           ? { workspaceName: form.workspaceName.trim() }
           : {}),
         ...(avatar ? { avatar } : {}),
       });
       toast.success('Your ChatKonect account is ready!');
-      navigate(redirectAfterAuth, { replace: true });
+      navigate(guestToken ? '/guest' : redirectAfterAuth, { replace: true });
     } catch (err) {
       toast.error(err?.message || 'Could not create your account. Please try again.');
     } finally {
@@ -237,6 +238,7 @@ export default function Signup() {
           <p className="mt-1.5 text-sm text-content-muted">Join ChatKonect and connect in a whole new way.</p>
         </motion.div>
 
+        {guestToken && <motion.div variants={rise} className="mt-4 rounded-xl border border-brand-500/30 bg-brand-500/10 px-3 py-2.5 text-sm text-content">You’re joining as a guest with access only to the groups selected by the team.</motion.div>}
         {inviteCode && (
           <motion.div variants={rise} className="mt-4 flex items-center gap-2 rounded-xl border border-brand-500/30 bg-brand-500/10 px-3 py-2.5 text-sm text-content">
             <Building2 size={16} className="shrink-0 text-brand-500 dark:text-brand-300" />
@@ -244,7 +246,7 @@ export default function Signup() {
           </motion.div>
         )}
 
-        {!inviteCode && (
+        {!inviteCode && !guestToken && (
           <motion.div variants={rise} className="mt-5">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-content-muted">I'm signing up for</p>
             {/* Two columns leave ~80px of text width at 320px — stack until xs. */}
@@ -332,7 +334,7 @@ export default function Signup() {
             </Field>
           </motion.div>
 
-          {!inviteCode && accountType === 'workspace' && (
+          {!inviteCode && !guestToken && accountType === 'workspace' && (
             <motion.div variants={rise}>
               <Field label="Workspace name" hint="Your team or company name — you can rename it later.">
                 <Input

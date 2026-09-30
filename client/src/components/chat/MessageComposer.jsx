@@ -32,6 +32,7 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
   const stopLiveLocation = useChat((s) => s.stopLiveLocation);
   const isTeamWorkspace = useWorkspace((s) => s.workspace && s.workspace.type !== 'personal');
   const products = useBusiness((s) => s.products);
+  const quickReplies = useBusiness((s) => s.quickReplies);
   const loadBusiness = useBusiness((s) => s.load);
   const shareProductToChat = useBusiness((s) => s.shareProduct);
   const [liveShare, setLiveShare] = useState(null); // { messageId, watchId } while sharing
@@ -177,6 +178,15 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
     setMention(null);
     onClearReply?.();
     emitSocket('typing-stop', { chatId });
+  };
+
+  const quickMatches = isTeamWorkspace && /^\/[a-z0-9_-]*$/i.test(text.trim())
+    ? quickReplies.filter((q) => q.shortcut.toLowerCase().startsWith(text.trim().slice(1).toLowerCase())).slice(0, 6)
+    : [];
+  const insertQuickReply = (reply) => {
+    setText(reply.text);
+    saveDraft(reply.text);
+    textareaRef.current?.focus();
   };
 
   // ── Poll creation ──────────────────────────────────────────────
@@ -727,6 +737,10 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         )}
       </AnimatePresence>
 
+      {quickMatches.length > 0 && !mentionMatches.length && <div className="glass-strong absolute bottom-full left-3 z-30 mb-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl p-1">
+        {quickMatches.map((q) => <button key={q._id} type="button" onClick={() => insertQuickReply(q)} className="block w-full rounded-xl px-3 py-2 text-left hover:bg-content/5"><span className="block text-xs font-semibold text-brand-500">/{q.shortcut}</span><span className="block truncate text-sm text-content">{q.text}</span></button>)}
+      </div>}
+
       {recording ? (
         // ── Recording bar ──
         <div className="neu-inset flex items-center gap-2 rounded-[22px] px-2 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
@@ -799,6 +813,16 @@ function toLocalInput(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** A datetime-local control only stores whole minutes. Round UP, never down,
+ * so its advertised one-minute minimum is genuinely at least one minute away. */
+function minimumScheduleInput() {
+  const earliest = Date.now() + 60_000;
+  const d = new Date(earliest);
+  d.setSeconds(0, 0);
+  if (d.getTime() < earliest) d.setMinutes(d.getMinutes() + 1);
+  return toLocalInput(d);
+}
+
 /** One-tap times, so the common cases don't need the date picker at all. */
 function quickTimes() {
   const now = new Date();
@@ -848,7 +872,7 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, onScheduled }) {
     if (Number.isNaN(at.getTime())) return toast.error('Pick a valid date and time.');
     // Matches the server's MIN_SCHEDULE_LEAD_MS, so the common mistake is caught
     // here with a useful sentence instead of bouncing off a 400.
-    if (at.getTime() - Date.now() < 10_000) return toast.error('Pick a time at least a minute from now.');
+    if (at.getTime() - Date.now() < 60_000) return toast.error('Pick a time at least a minute from now.');
     setBusy(true);
     try {
       await scheduleMessage({ chatId, sendAt: at.toISOString(), content, type: 'text', replyTo });
@@ -914,7 +938,7 @@ function ScheduleModal({ open, onClose, chatId, text, replyTo, onScheduled }) {
           <input
             type="datetime-local"
             value={when}
-            min={toLocalInput(new Date(Date.now() + 60_000))}
+            min={minimumScheduleInput()}
             onChange={(e) => setWhen(e.target.value)}
             className="neu-inset ring-brand h-11 w-full rounded-2xl bg-surface-2 px-3 text-base text-content disabled:opacity-50 sm:h-10 sm:text-sm"
           />

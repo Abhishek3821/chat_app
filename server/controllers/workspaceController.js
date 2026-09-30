@@ -5,6 +5,7 @@ import { createWorkspaceForUser } from '../utils/workspaceService.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
 import { invalidateAutoReplyCache } from '../utils/autoReply.js';
+import { logWorkspaceAction } from '../utils/workspaceAudit.js';
 
 const MEMBER_FIELDS = 'name username avatar isOnline lastSeen workspaceRole accountStatus createdAt';
 
@@ -92,6 +93,7 @@ export const updateWorkspace = asyncHandler(async (req, res) => {
   }
 
   await ws.save();
+  await logWorkspaceAction(req.user, 'workspace.update', ws._id);
   // The send path caches "this recipient has no auto-replies"; without this,
   // switching them on wouldn't take effect until that cache expired.
   if (autoRepliesChanged) invalidateAutoReplyCache(ws._id).catch(() => {});
@@ -114,6 +116,7 @@ export const rotateInvite = asyncHandler(async (req, res) => {
       throw err;
     }
   }
+  await logWorkspaceAction(req.user, 'workspace.invite.rotate', ws._id);
   res.json({ success: true, workspace: publicWorkspace(ws, { includeInvite: true }) });
 });
 
@@ -125,8 +128,10 @@ export const setMemberRole = asyncHandler(async (req, res) => {
   const member = await User.findOne({ _id: req.params.userId, workspace: req.user.workspace });
   if (!member) throw new ApiError(404, 'Member not found in this workspace.');
   if (member.workspaceRole === 'owner') throw new ApiError(400, "The owner's role can't be changed.");
+  if (member.workspaceRole === 'guest') throw new ApiError(400, 'Guest access is managed through guest invitations.');
   member.workspaceRole = role;
   await member.save({ validateBeforeSave: false });
+  await logWorkspaceAction(req.user, 'member.role', member._id, role);
   res.json({ success: true, member: { _id: member._id, workspaceRole: member.workspaceRole } });
 });
 
@@ -149,6 +154,7 @@ export const setMemberStatus = asyncHandler(async (req, res) => {
   member.accountStatus = status;
   if (status !== 'active') member.tokenVersion = (member.tokenVersion || 0) + 1; // kill live sessions now
   await member.save({ validateBeforeSave: false });
+  await logWorkspaceAction(req.user, 'member.status', member._id, status);
   res.json({ success: true, member: { _id: member._id, accountStatus: member.accountStatus } });
 });
 
@@ -182,6 +188,7 @@ export const removeMember = asyncHandler(async (req, res) => {
   // Give them their own empty workspace and revoke sessions (forces a re-login).
   await createWorkspaceForUser(member, `${member.name}'s workspace`);
   await User.updateOne({ _id: member._id }, { $inc: { tokenVersion: 1 } });
+  await logWorkspaceAction(req.user, 'member.remove', member._id, member.name);
   res.json({ success: true, message: 'Member removed from the workspace.' });
 });
 
@@ -199,11 +206,13 @@ export const transferOwnership = asyncHandler(async (req, res) => {
   const target = await User.findOne({ _id: targetId, workspace: req.user.workspace });
   if (!target) throw new ApiError(404, 'Member not found in this workspace.');
   if (target.accountStatus !== 'active') throw new ApiError(400, 'That member is not active.');
+  if (target.workspaceRole === 'guest') throw new ApiError(400, 'A guest cannot own the workspace.');
 
   target.workspaceRole = 'owner';
   await target.save({ validateBeforeSave: false });
   await User.updateOne({ _id: req.user._id }, { $set: { workspaceRole: 'admin' } });
   await Workspace.updateOne({ _id: req.user.workspace }, { $set: { owner: target._id } });
+  await logWorkspaceAction(req.user, 'workspace.transfer', target._id, target.name);
 
   res.json({ success: true, message: `Ownership transferred to ${target.name}.` });
 });

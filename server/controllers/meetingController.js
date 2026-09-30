@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import Meeting, { generateRoomCode } from '../models/Meeting.js';
 import User from '../models/User.js';
 import { tenantScope } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { emitToUser } from '../socket/index.js';
+import { emitToUser, getIO } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
 import { sendEmail, classifySendError } from '../utils/sendEmail.js';
-import { buildMeetingICS } from '../utils/ics.js';
 import { livekitEnabled, livekitUrl, createLivekitToken } from '../utils/livekit.js';
-import { verifyToken } from '../utils/token.js';
+import { verifyToken, signMeetingPasswordPass } from '../utils/token.js';
 
 const USER_FIELDS = 'name username avatar email';
 
@@ -33,6 +33,9 @@ function sanitizeSettings(s) {
   if (s.muteOnEntry !== undefined) out.muteOnEntry = Boolean(s.muteOnEntry);
   if (s.autoRecord !== undefined) out.autoRecord = Boolean(s.autoRecord);
   if (s.askToJoin !== undefined) out.askToJoin = Boolean(s.askToJoin);
+  if (s.locked !== undefined) out.locked = Boolean(s.locked);
+  if (s.allowChat !== undefined) out.allowChat = Boolean(s.allowChat);
+  if (s.allowScreenShare !== undefined) out.allowScreenShare = Boolean(s.allowScreenShare);
   return out;
 }
 
@@ -63,30 +66,12 @@ function sendMeetingInvites({ meeting, hostName, emails }) {
       </div>
     </div>`;
   const text = `${hostName || 'Someone'} invited you to "${meeting.title}" on ${when} (${tz}). Join: ${meeting.link} (meeting ID ${meeting.roomCode})`;
-  // Attach a calendar invite (.ics) so recipients can one-tap "Add to calendar"
-  // in Gmail / Outlook / Apple Calendar.
-  let attachments;
-  try {
-    const ics = buildMeetingICS({
-      _id: String(meeting._id),
-      title: meeting.title,
-      startAt: meeting.startAt,
-      durationMinutes: meeting.durationMinutes,
-      link: meeting.link,
-      roomCode: meeting.roomCode,
-      recurrence: meeting.recurrence,
-      hostName,
-    });
-    attachments = [{ filename: 'invite.ics', content: ics, contentType: 'text/calendar; method=REQUEST' }];
-  } catch {
-    attachments = undefined;
-  }
   // Deliberately not awaited — a slow relay must not hold up the 201. But the
   // outcome IS logged: swallowing errors here meant a host saw "scheduled" while
   // every invitation silently failed (e.g. the host blocks outbound SMTP), with
   // nothing in the logs to explain it.
   unique.forEach((to) => {
-    sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text, attachments })
+    sendEmail({ to, subject: `Invitation: ${meeting.title}`, html, text })
       .then((r) => {
         if (r?.logged) {
           console.warn(`✉️  meeting invite for ${to} was NOT sent — no mailer configured (set BREVO_API_KEY or EMAIL_HOST/USER/PASS).`);
@@ -126,6 +111,9 @@ export const createMeeting = asyncHandler(async (req, res) => {
   if (!Array.isArray(participants)) throw new ApiError(400, 'participants must be a list.');
   if (!Array.isArray(inviteEmails)) throw new ApiError(400, 'inviteEmails must be a list.');
   const instant = !startAt;
+  if (req.body.password && (typeof req.body.password !== 'string' || req.body.password.length < 6 || req.body.password.length > 72)) {
+    throw new ApiError(400, 'Meeting password must be 6 to 72 characters.');
+  }
 
   /**
    * Who can be pre-invited.
@@ -166,6 +154,8 @@ export const createMeeting = asyncHandler(async (req, res) => {
     chat: chatId,
     status: instant ? 'ongoing' : 'scheduled',
     settings: sanitizeSettings(req.body.settings),
+    hasPassword: !!req.body.password,
+    passwordHash: req.body.password ? await bcrypt.hash(req.body.password, 12) : undefined,
     participants: invited.map((u) => ({ user: u._id, response: 'pending' })),
   });
 
@@ -201,6 +191,10 @@ export const getMeetingByCode = asyncHandler(async (req, res) => {
   const meeting = await findByCodeOrId(req.params.code);
   if (!meeting) throw new ApiError(404, 'This meeting link is invalid or has expired.');
   if (meeting.status === 'cancelled') throw new ApiError(410, 'This meeting has been cancelled.');
+  if (meeting.parentMeeting && String(meeting.host) !== String(req.user._id) &&
+      !meeting.participants.some((p) => String(p.user) === String(req.user._id))) {
+    throw new ApiError(403, 'You were not assigned to this breakout room.');
+  }
   await meeting.populate('host', 'name username avatar');
   res.json({
     success: true,
@@ -214,6 +208,7 @@ export const getMeetingByCode = asyncHandler(async (req, res) => {
       roomCode: meeting.roomCode,
       host: meeting.host,
       settings: meeting.settings,
+      hasPassword: !!meeting.hasPassword,
       isHost: String(meeting.host?._id || meeting.host) === String(req.user._id),
     },
   });
@@ -223,20 +218,28 @@ export const getMeetingByCode = asyncHandler(async (req, res) => {
 // style: anyone signed in with the link may join). Adds you to the roster so the
 // host sees who joined and the meeting appears in your list.
 export const joinMeetingByCode = asyncHandler(async (req, res) => {
-  const meeting = await findByCodeOrId(req.params.code);
+  const meeting = await Meeting.findOne({
+    $or: [{ roomCode: req.params.code }, ...(mongoose.isValidObjectId(req.params.code) ? [{ _id: req.params.code }] : [])],
+  }).select('+passwordHash');
   if (!meeting) throw new ApiError(404, 'This meeting link is invalid or has expired.');
   if (meeting.status === 'cancelled') throw new ApiError(410, 'This meeting has been cancelled.');
+  const isHost = String(meeting.host) === String(req.user._id);
+  if (meeting.parentMeeting && !isHost &&
+      !meeting.participants.some((p) => String(p.user) === String(req.user._id))) {
+    throw new ApiError(403, 'You were not assigned to this breakout room.');
+  }
+  if (meeting.hasPassword && !isHost && !(await bcrypt.compare(String(req.body.password || ''), meeting.passwordHash || ''))) {
+    throw new ApiError(403, 'Meeting password is incorrect.');
+  }
 
   const already = meeting.participants.some((p) => String(p.user) === String(req.user._id));
-  const isHost = String(meeting.host) === String(req.user._id);
   // viaLink: a link-join is NOT an invite — the socket-level ask-to-join gate
   // still makes these users knock (the host admits them Google-Meet style).
   if (!already && !isHost) meeting.participants.push({ user: req.user._id, response: 'going', viaLink: true });
-  if (meeting.status === 'scheduled') meeting.status = 'ongoing'; // it's live the moment someone joins
   await meeting.save();
 
   const populated = await populate(Meeting.findById(meeting._id));
-  res.json({ success: true, meeting: populated });
+  res.json({ success: true, meeting: populated, passwordPass: meeting.hasPassword ? signMeetingPasswordPass(req.user._id, meeting._id) : null });
 });
 
 // GET /api/meetings/code/:code/rtc?pass=… — media-transport config for the room.
@@ -256,8 +259,27 @@ export const getMeetingRtc = asyncHandler(async (req, res) => {
   const meeting = await findByCodeOrId(req.params.code);
   if (!meeting) throw new ApiError(404, 'This meeting link is invalid or has expired.');
   if (meeting.status === 'cancelled') throw new ApiError(410, 'This meeting has been cancelled.');
+  if (meeting.parentMeeting && String(meeting.host) !== String(req.user._id) &&
+      !meeting.participants.some((p) => String(p.user) === String(req.user._id))) {
+    throw new ApiError(403, 'You were not assigned to this breakout room.');
+  }
+  if (meeting.hasPassword && String(meeting.host) !== String(req.user._id)) {
+    let validPasswordPass = false;
+    try {
+      const d = verifyToken(String(req.query.passwordPass || ''));
+      validPasswordPass = d.scope === 'meet-password' && String(d.id) === String(req.user._id) && String(d.meetingId) === String(meeting._id);
+    } catch { /* invalid or expired */ }
+    if (!validPasswordPass) throw new ApiError(403, 'Meeting password required.');
+  }
 
   const isHost = String(meeting.host) === String(req.user._id);
+  if (meeting.settings?.locked && !isHost) throw new ApiError(403, 'The host locked this meeting.');
+  if (meeting.settings?.joinAnytime === false && !isHost) {
+    const sockets = await getIO()?.in(`mtg:${meeting._id}`).fetchSockets();
+    if (!(sockets || []).some((socket) => String(socket.data.userId) === String(meeting.host))) {
+      return res.json({ success: true, enabled: true, requiresAdmission: true });
+    }
+  }
   const isInvited = (meeting.participants || []).some((p) => String(p.user) === String(req.user._id) && !p.viaLink);
   let admitted = isHost || isInvited || meeting.settings?.askToJoin === false;
 
@@ -292,6 +314,7 @@ const durationBetween = (startedAt, endedAt) =>
 export const getMeetings = asyncHandler(async (req, res) => {
   const docs = await populate(
     Meeting.find({
+      parentMeeting: null,
       $or: [{ host: req.user._id }, { 'participants.user': req.user._id }],
     }).sort({ startAt: 1 })
   );
@@ -300,11 +323,76 @@ export const getMeetings = asyncHandler(async (req, res) => {
     const isHost = String(m.host?._id || m.host) === String(req.user._id);
     o.attendeeCount = (o.attendees || []).length;
     o.durationSeconds = durationBetween(o.startedAt, o.endedAt);
+    delete o.notes;
     // The detailed attendance record (names + emails) is HOST-ONLY.
     if (!isHost) delete o.attendees;
     return o;
   });
   res.json({ success: true, meetings });
+});
+
+export const createBreakouts = asyncHandler(async (req, res) => {
+  const main = await Meeting.findById(req.params.id);
+  if (!main) throw new ApiError(404, 'Meeting not found.');
+  if (String(main.host) !== String(req.user._id)) throw new ApiError(403, 'Only the host can create breakout rooms.');
+  if (main.parentMeeting) throw new ApiError(400, 'Create breakouts from the main meeting.');
+  const count = Number(req.body.count);
+  if (!Number.isInteger(count) || count < 2 || count > 4) throw new ApiError(400, 'Choose 2 to 4 breakout rooms.');
+  if (await Meeting.exists({ parentMeeting: main._id, status: { $ne: 'cancelled' } })) {
+    throw new ApiError(409, 'End the current breakout rooms before creating new ones.');
+  }
+  const sockets = await getIO()?.in(`mtg:${main._id}`).fetchSockets();
+  const people = [...new Map((sockets || [])
+    .filter((s) => String(s.data.userId) !== String(main.host))
+    .map((s) => [String(s.data.userId), s])).values()];
+  if (!people.length) throw new ApiError(400, 'Wait for participants before creating breakout rooms.');
+  if (people.length < count) throw new ApiError(400, 'There must be at least one participant per breakout room.');
+  const rooms = [];
+  for (let i = 0; i < count; i += 1) {
+    const assigned = people.filter((_, index) => index % count === i);
+    const room = await createWithRoomCode({
+      title: `${main.title} · Breakout ${i + 1}`,
+      host: main.host,
+      parentMeeting: main._id,
+      parentRoomCode: main.roomCode,
+      startAt: new Date(),
+      status: 'ongoing',
+      type: main.type,
+      settings: { joinAnytime: true, askToJoin: false, muteOnEntry: main.settings?.muteOnEntry },
+      participants: assigned.map((s) => ({ user: s.data.userId, response: 'going' })),
+    });
+    rooms.push({ id: room._id, roomCode: room.roomCode, title: room.title, participants: assigned.map((s) => s.data.name) });
+    for (const person of assigned) emitToUser(String(person.data.userId), 'meeting:breakout-invite', {
+      meetingId: String(main._id), roomCode: room.roomCode, title: room.title,
+    });
+  }
+  res.status(201).json({ success: true, rooms });
+});
+
+export const getBreakouts = asyncHandler(async (req, res) => {
+  const main = await Meeting.findById(req.params.id).select('host parentMeeting');
+  if (!main) throw new ApiError(404, 'Meeting not found.');
+  if (main.parentMeeting) throw new ApiError(400, 'Breakouts belong to the main meeting.');
+  const isHost = String(main.host) === String(req.user._id);
+  const query = { parentMeeting: main._id, status: { $ne: 'cancelled' } };
+  if (!isHost) query['participants.user'] = req.user._id;
+  const docs = await Meeting.find(query).select('title roomCode participants');
+  res.json({ success: true, rooms: docs.map((room) => ({
+    id: room._id, roomCode: room.roomCode, title: room.title,
+    ...(isHost ? { participants: room.participants.map((p) => String(p.user)) } : {}),
+  })) });
+});
+
+export const endBreakouts = asyncHandler(async (req, res) => {
+  const main = await Meeting.findById(req.params.id);
+  if (!main) throw new ApiError(404, 'Meeting not found.');
+  if (String(main.host) !== String(req.user._id)) throw new ApiError(403, 'Only the host can end breakout rooms.');
+  const rooms = await Meeting.find({ parentMeeting: main._id, status: { $ne: 'cancelled' } }).select('_id');
+  for (const room of rooms) {
+    getIO()?.to(`mtg:${room._id}`).emit('meeting:breakout-return', { roomCode: main.roomCode });
+  }
+  await Meeting.updateMany({ parentMeeting: main._id, status: { $ne: 'cancelled' } }, { $set: { status: 'cancelled' } });
+  res.json({ success: true });
 });
 
 // GET /api/meetings/:id/report — full attendance record (host only)
@@ -333,8 +421,48 @@ export const getMeetingReport = asyncHandler(async (req, res) => {
       durationSeconds: durationBetween(meeting.startedAt, meeting.endedAt),
       attendeeCount: attendees.length,
       attendees,
+      polls: meeting.polls || [],
+      questions: meeting.questions || [],
+      reactionHistory: meeting.reactionHistory || [],
+      notes: meeting.notes || '',
     },
   });
+});
+
+export const getMeetingNotes = asyncHandler(async (req, res) => {
+  const meeting = await Meeting.findById(req.params.id).select('host attendees notes notesUpdatedAt');
+  if (!meeting) throw new ApiError(404, 'Meeting not found.');
+  if (String(meeting.host) !== String(req.user._id) &&
+      !meeting.attendees.some((a) => String(a.user) === String(req.user._id))) {
+    throw new ApiError(403, 'Join the meeting to view its notes.');
+  }
+  res.json({ success: true, notes: meeting.notes || '', updatedAt: meeting.notesUpdatedAt || null });
+});
+
+export const updateMeetingNotes = asyncHandler(async (req, res) => {
+  const meeting = await Meeting.findById(req.params.id).select('host attendees notesUpdatedAt');
+  if (!meeting) throw new ApiError(404, 'Meeting not found.');
+  if (String(meeting.host) !== String(req.user._id) &&
+      !meeting.attendees.some((a) => String(a.user) === String(req.user._id))) {
+    throw new ApiError(403, 'Join the meeting to edit its notes.');
+  }
+  if (typeof req.body.notes !== 'string' || req.body.notes.length > 20000) {
+    throw new ApiError(400, 'Notes must be text under 20,000 characters.');
+  }
+  const previous = meeting.notesUpdatedAt?.toISOString() || null;
+  if ((req.body.updatedAt || null) !== previous) {
+    throw new ApiError(409, 'Notes changed on another device. Reload them before editing.');
+  }
+  const updatedAt = new Date();
+  const result = await Meeting.updateOne(
+    { _id: meeting._id, notesUpdatedAt: meeting.notesUpdatedAt || null },
+    { $set: { notes: req.body.notes, notesUpdatedAt: updatedAt } }
+  );
+  if (!result.modifiedCount) throw new ApiError(409, 'Notes changed on another device. Reload them before editing.');
+  const event = { meetingId: String(meeting._id), notes: req.body.notes, updatedAt };
+  emitToUser(String(meeting.host), 'meeting-notes', event);
+  for (const attendee of meeting.attendees) emitToUser(String(attendee.user), 'meeting-notes', event);
+  res.json({ success: true, notes: req.body.notes, updatedAt });
 });
 
 // PATCH /api/meetings/:id
@@ -346,9 +474,11 @@ export const updateMeeting = asyncHandler(async (req, res) => {
   // link/chat/status via mass assignment.
   const ALLOWED = ['title', 'description', 'startAt', 'durationMinutes', 'timezone', 'type', 'recurrence', 'reminderMinutes'];
   for (const k of ALLOWED) if (req.body[k] !== undefined) meeting[k] = req.body[k];
+  if (req.body.startAt !== undefined || req.body.reminderMinutes !== undefined) meeting.reminderSentAt = null;
   const nextSettings = sanitizeSettings(req.body.settings);
   if (nextSettings) { meeting.settings = { ...(meeting.settings?.toObject?.() ?? meeting.settings), ...nextSettings }; meeting.markModified('settings'); }
   await meeting.save();
+  if (nextSettings) getIO()?.to(`mtg:${meeting._id}`).emit('meeting:policy', { settings: meeting.settings });
   res.json({ success: true, meeting: await populate(Meeting.findById(meeting._id)) });
 });
 

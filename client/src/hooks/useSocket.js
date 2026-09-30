@@ -252,6 +252,11 @@ export function useSocket() {
          invitation not having worked. */
       useMeetings.getState().load();
     });
+    socket.on('meeting-reminder', ({ title, startAt }) => {
+      const when = startAt ? new Date(startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'soon';
+      useNotifications.getState().pushLocal({ type: 'meeting_reminder', title: 'Meeting starting soon', body: `${title || 'Your meeting'} starts at ${when}.` });
+      toast(`Meeting starting soon: ${title || 'Your meeting'}`);
+    });
 
     // Delivery / read receipts → update tick state for my messages.
     socket.on('message:status', ({ chatId, messageId, userId: uid, status }) => {

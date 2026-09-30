@@ -24,7 +24,7 @@ import api from '../lib/api';
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
 const uidOf = (identity) => String(identity || '').split('_')[0]; // "userId_rand" → userId
 
-export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, autoRecord = false, isHost = false, code, rtc } = {}) {
+export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, autoRecord = false, isHost = false, code, rtc, passwordPass = null, devices = {} } = {}) {
   const me = useAuth((s) => s.user);
   const [localStream, setLocalStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
@@ -36,6 +36,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
   const [sharingScreen, setSharingScreen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [mediaError, setMediaError] = useState(null);
+  const [networkQuality, setNetworkQuality] = useState('Checking');
   const [chatMessages, setChatMessages] = useState([]);
   const [reactions, setReactions] = useState([]);
   const [raisedHands, setRaisedHands] = useState({});
@@ -119,12 +120,18 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
       })
       .on(RoomEvent.Disconnected, () => { if (mountedRef.current && !closedRef.current) { setStatus('error'); setMediaError('Disconnected from the meeting server.'); } })
       .on(RoomEvent.LocalTrackPublished, () => refreshLocal());
+    room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+      if (participant === room.localParticipant) setNetworkQuality(quality === 'poor' || quality === 'lost' ? 'Poor' : quality === 'good' || quality === 'excellent' ? 'Good' : 'Checking');
+    });
 
     try {
       await room.connect(url, token);
       if (!mountedRef.current) { room.disconnect(); return; }
-      await room.localParticipant.setMicrophoneEnabled(!(muteOnEntry && !isHost));
-      if (video) await room.localParticipant.setCameraEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(!(muteOnEntry && !isHost), {
+        echoCancellation: true, noiseSuppression: devices.noiseSuppression !== false, autoGainControl: true,
+        ...(devices.microphoneId ? { deviceId: devices.microphoneId } : {}),
+      });
+      if (video) await room.localParticipant.setCameraEnabled(true, devices.cameraId ? { deviceId: devices.cameraId } : undefined);
       refreshLocal();
       setStatus('connected');
       if (autoRecord) setTimeout(() => startRecordingRef.current?.(), 900);
@@ -148,7 +155,8 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
       setReactions((prev) => [...prev, { id, socketId: String(userId), emoji }]);
       setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 4000);
     };
-    const onHand = ({ userId, up }) => setRaisedHands((prev) => { const n = { ...prev }; if (up) n[String(userId)] = true; else delete n[String(userId)]; return n; });
+    const onHand = ({ userId, up, at }) => setRaisedHands((prev) => { const n = { ...prev }; if (up) n[String(userId)] = at || Date.now(); else delete n[String(userId)]; return n; });
+    const onLowerHand = () => setRaisedHands((prev) => { const n = { ...prev }; delete n.me; return n; });
     const onForceMute = ({ by }) => { roomRef.current?.localParticipant.setMicrophoneEnabled(false); setMuted(true); toast(`${by || 'The host'} muted you`, { icon: '🔇' }); };
     const onRemoved = ({ by }) => { toast.error(`${by || 'The host'} removed you from the meeting`); setStatus('left'); };
     // Someone is knocking (host only — the server sends this just to host sockets).
@@ -174,7 +182,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
         return;
       }
       try {
-        const { data } = await api.get(`/meetings/code/${encodeURIComponent(code)}/rtc`, { params: passRef.current ? { pass: passRef.current } : undefined });
+        const { data } = await api.get(`/meetings/code/${encodeURIComponent(code)}/rtc`, { params: { ...(passRef.current ? { pass: passRef.current } : {}), ...(passwordPass ? { passwordPass } : {}) } });
         if (cancelled) return;
         if (data?.token && data?.url) {
           rtcRef.current = data;
@@ -188,7 +196,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
       }
     };
 
-    const join = () => socket.emit('meeting:join', { meetingId, pass: passRef.current || undefined }, (res) => {
+    const join = () => socket.emit('meeting:join', { meetingId, pass: passRef.current || undefined, passwordPass }, (res) => {
       if (cancelled) return;
       if (!res?.ok) {
         // "Join anytime" is off and the host isn't here yet → wait & retry.
@@ -213,6 +221,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
       setMediaError(null);
       setStatus('connecting');
       (res.peers || []).forEach((p) => { if (p.userId) rosterRef.current.set(String(p.userId), { name: p.name, avatar: p.avatar }); });
+      setRaisedHands((current) => ({ ...current, ...Object.fromEntries((res.peers || []).filter((p) => p.handRaisedAt).map((p) => [String(p.userId), p.handRaisedAt])) }));
       resolveLiveKitAndConnect();
     });
 
@@ -235,6 +244,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
     socket.on('meeting:chat', onChat);
     socket.on('meeting:reaction', onReaction);
     socket.on('meeting:hand', onHand);
+    socket.on('meeting:lower-hand', onLowerHand);
     socket.on('meeting:force-mute', onForceMute);
     socket.on('meeting:removed', onRemoved);
     socket.on('meeting:knock', onKnock);
@@ -254,6 +264,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:chat', onChat);
       socket.off('meeting:reaction', onReaction);
       socket.off('meeting:hand', onHand);
+      socket.off('meeting:lower-hand', onLowerHand);
       socket.off('meeting:force-mute', onForceMute);
       socket.off('meeting:removed', onRemoved);
       socket.off('meeting:knock', onKnock);
@@ -340,7 +351,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
     setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 4000);
   }, [meetingId]);
   const toggleHand = useCallback(() => {
-    setRaisedHands((prev) => { const up = !prev.me; getSocket()?.emit('meeting:hand', { meetingId, up }); const n = { ...prev }; if (up) n.me = true; else delete n.me; return n; });
+    setRaisedHands((prev) => { const up = !prev.me; getSocket()?.emit('meeting:hand', { meetingId, up }); const n = { ...prev }; if (up) n.me = Date.now(); else delete n.me; return n; });
   }, [meetingId]);
   const muteEveryone = useCallback(() => { getSocket()?.emit('meeting:mute-all', { meetingId }); toast.success('Asked everyone to mute'); }, [meetingId]);
   const muteParticipant = useCallback((userId) => { getSocket()?.emit('meeting:force-mute', { meetingId, toUser: userId }); toast.success('Asked them to mute'); }, [meetingId]);
@@ -353,7 +364,7 @@ export function useLiveKitRoom(meetingId, { video = true, muteOnEntry = false, a
   }, [meetingId]);
 
   return {
-    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
+    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError, networkQuality,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised, knocks, admitGuest,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,

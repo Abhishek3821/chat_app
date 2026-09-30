@@ -865,10 +865,7 @@ own policy rather than by contacts.
    `meeting_reminder` notification (bell + push).
 6. Email invitations go to in-workspace invitees **and** any raw `inviteEmails` (max **50**,
    de-duplicated, shape-validated), fire-and-forget so a mail failure can never fail the
-   request. Each carries an **.ics** attachment (`method=REQUEST`) built by `utils/ics.js` with
-   UTC `DTSTART`/`DTEND`, an `RRULE` for daily/weekly/monthly recurrence, and the join link in
-   both `URL` and `LOCATION` — that is what produces one-tap "Add to calendar" in Gmail, Outlook
-   and Apple Calendar.
+   request. Each includes the meeting time, time zone, join link, and meeting ID.
 
 `PATCH /api/meetings/:id` is host-only and whitelists `title`, `description`, `startAt`,
 `durationMinutes`, `timezone`, `type`, `recurrence`, `reminderMinutes` plus the sanitised
@@ -1547,7 +1544,7 @@ membership-gated files for unguessable public URLs. Keep `local` if strict per-f
 matters more than multi-instance scaling. An S3 driver can slot in behind the same
 `persistFile()` contract.
 
-Upload limits are driver-independent: **50 MB** per file, **10** files per request, and an
+Upload limits are driver-independent: **10 MB** per image, **50 MB** for every other file type, **10** files per request, and an
 **anchored** extension allowlist (the whole extension must match, so `.docm` / `.fakepdf` /
 `.xmp4` do not sneak through). The extension is the gate; MIME type is checked loosely because
 browsers vary.
@@ -1579,7 +1576,7 @@ host moderation and attendance are unchanged either way. See [§7.5](#75-mesh-vs
 | `automsg.maybe` (business auto-reply) | Queue — enqueued on **every** 1:1 send |
 | Socket emits (`receive-message`, `chat-updated`, …) | **Inline**, synchronously in the request |
 | Chat-list cache invalidation | Inline, fire-and-forget, never throws |
-| Meeting invitation emails + .ics | Inline but **fire-and-forget** (`.catch(() => {})`), off the response |
+| Meeting invitation emails | Inline but **fire-and-forget** (`.catch(() => {})`), off the response |
 | Signup / OTP / reset emails | Inline with a **bounded wait** — only a fast rejection surfaces as an error |
 | Status audience fan-out | Inline, after the response, best-effort |
 | Meeting attendance writes | Inline in socket handlers, best-effort |

@@ -53,6 +53,14 @@ export function signMeetingPass(userId, meetingId) {
   );
 }
 
+export function signMeetingPasswordPass(userId, meetingId) {
+  return jwt.sign(
+    { id: String(userId), meetingId: String(meetingId), scope: 'meet-password' },
+    process.env.JWT_SECRET,
+    { algorithm: 'HS256', expiresIn: '4h' }
+  );
+}
+
 export function verifyToken(token) {
   // Pin the algorithm so a token can't be validated under an unexpected alg.
   return jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });

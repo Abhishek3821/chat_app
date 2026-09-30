@@ -145,7 +145,7 @@ export default function ContactsPage() {
           title="Contacts"
           subtitle={`${contacts.length} ${contacts.length === 1 ? 'connection' : 'connections'} · search anyone by email, username or phone`}
           actions={
-            <>
+            <div className="flex items-center gap-2 xl:hidden">
               <Button variant="outline" onClick={() => setQrOpen(true)}>
                 <QrCodeIcon size={16} />
                 <span className="hidden xs:inline">My QR</span>
@@ -154,7 +154,7 @@ export default function ContactsPage() {
                 <ScanLine size={16} />
                 <span className="hidden xs:inline">Scan</span>
               </Button>
-            </>
+            </div>
           }
         />
 

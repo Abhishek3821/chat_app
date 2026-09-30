@@ -17,6 +17,8 @@ import { cn } from '../../lib/utils';
 import { inviteUrlForGroup } from '../../lib/invite';
 import InviteQrModal from '../InviteQrModal';
 import { DEMO_MODE } from '../../lib/api';
+import { useWorkspace } from '../../store/useWorkspace';
+import { useBusiness } from '../../store/useBusiness';
 import toast from 'react-hot-toast';
 
 const REPORT_REASONS = ['Spam or scam', 'Harassment or bullying', 'Inappropriate content', 'Impersonation', 'Something else'];
@@ -37,6 +39,12 @@ export default function RightPanel({ chat, currentUser }) {
   const setDisappearing = useChat((s) => s.setDisappearing);
   const { toggleBlock, report } = useContacts();
   const navigate = useNavigate();
+  const isTeamWorkspace = useWorkspace((s) => s.workspace?.type === 'team');
+  const labels = useBusiness((s) => s.labels);
+  const loadBusiness = useBusiness((s) => s.load);
+  const fetchChatLabels = useBusiness((s) => s.chatLabels);
+  const applyLabel = useBusiness((s) => s.applyLabel);
+  const [activeLabels, setActiveLabels] = useState([]);
   const [muted, setMuted] = useState(chat?.muted || false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -77,6 +85,19 @@ export default function RightPanel({ chat, currentUser }) {
      leave a group via "Exit group" rather than removing yourself — so neither
      row has an action worth offering. */
   const canActOn = (m) => canManageMembers && !isOwner(m) && String(m._id) !== String(currentUser?._id);
+
+  useEffect(() => {
+    if (!isTeamWorkspace || !chat?._id || !rightPanelOpen) return;
+    loadBusiness();
+    fetchChatLabels(chat._id).then((items) => setActiveLabels(items.map((item) => String(item._id)))).catch(() => setActiveLabels([]));
+  }, [isTeamWorkspace, chat?._id, rightPanelOpen, loadBusiness, fetchChatLabels]);
+  const toggleLabel = async (id) => {
+    const apply = !activeLabels.includes(String(id));
+    try {
+      await applyLabel(id, chat._id, apply);
+      setActiveLabels((prev) => apply ? [...prev, String(id)] : prev.filter((item) => item !== String(id)));
+    } catch (e) { toast.error(e?.message || 'Could not update label.'); }
+  };
 
   // Goes to the real screen now. This used to fetch the list purely to count it
   // and report the number in a toast, then throw every row away.
@@ -268,6 +289,9 @@ export default function RightPanel({ chat, currentUser }) {
         </Section>
 
         {/* Shared media */}
+        {isTeamWorkspace && <Section title="Team labels" icon={Star}>
+          <div className="flex flex-wrap gap-2">{labels.map((label) => <button key={label._id} onClick={() => toggleLabel(label._id)} aria-pressed={activeLabels.includes(String(label._id))} className={cn('rounded-full border px-3 py-1.5 text-xs', activeLabels.includes(String(label._id)) ? 'border-brand-500 bg-brand-500/10 text-content' : 'border-border text-content-muted')}><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: label.color }}/>{label.name}</button>)}{!labels.length && <p className="text-xs text-content-muted">Create labels in Business to organize chats.</p>}</div>
+        </Section>}
         <Section title="Shared media" icon={ImageIcon}>
           <div className="grid grid-cols-3 gap-1.5">
             {MEDIA.map((src, i) => (

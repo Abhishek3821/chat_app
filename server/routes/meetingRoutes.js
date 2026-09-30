@@ -10,6 +10,11 @@ import {
   joinMeetingByCode,
   getMeetingReport,
   getMeetingRtc,
+  getMeetingNotes,
+  updateMeetingNotes,
+  createBreakouts,
+  getBreakouts,
+  endBreakouts,
 } from '../controllers/meetingController.js';
 import { protect } from '../middleware/auth.js';
 import { requireFeature } from '../utils/appAuth.js';
@@ -27,6 +32,11 @@ router.get('/code/:code', getMeetingByCode);
 router.get('/code/:code/rtc', getMeetingRtc); // media transport config (LiveKit SFU or mesh)
 router.post('/code/:code/join', joinMeetingByCode);
 router.get('/:id/report', getMeetingReport); // host-only attendance record
+router.get('/:id/notes', getMeetingNotes);
+router.put('/:id/notes', updateMeetingNotes);
+router.post('/:id/breakouts', createBreakouts);
+router.get('/:id/breakouts', getBreakouts);
+router.delete('/:id/breakouts', endBreakouts);
 router.patch('/:id', updateMeeting);
 router.post('/:id/rsvp', rsvp);
 // Invite more people to an already-scheduled meeting (host only).

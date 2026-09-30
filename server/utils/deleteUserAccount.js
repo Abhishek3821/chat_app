@@ -108,7 +108,6 @@ export async function deleteUserAccount(userId) {
           attendees: { user: uid },
           'polls.$[].votes': { user: uid },
           'questions.$[].upvotes': uid,
-          transcript: { user: uid },
         },
       }
     ),

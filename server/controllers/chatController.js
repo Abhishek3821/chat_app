@@ -61,7 +61,7 @@ export const getChats = asyncHandler(async (req, res) => {
   // .lean(): this response is read-only (never .save()'d), so skip Mongoose
   // document hydration entirely on the single most-hit endpoint in the app.
   const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked } })
+    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked }, ...(req.user.workspaceRole === 'guest' ? { _id: { $in: req.user.guestAllowedChats || [] }, workspace: req.user.workspace, isGroup: true } : {}) })
       .sort({ updatedAt: -1 })
       .lean()
   );
@@ -136,6 +136,7 @@ export const accessDirectChat = asyncHandler(async (req, res) => {
 
 // GET /api/chats/:id
 export const getChatById = asyncHandler(async (req, res) => {
+  if (req.user.workspaceRole === 'guest' && !(req.user.guestAllowedChats || []).some((id) => String(id) === req.params.id)) throw new ApiError(403, 'This group was not shared with you.');
   const chat = await populateChat(Chat.findById(req.params.id).lean());
   if (!chat) throw new ApiError(404, 'Chat not found.');
   const isMember = chat.participants.some((p) => String(p.user._id) === String(req.user._id));

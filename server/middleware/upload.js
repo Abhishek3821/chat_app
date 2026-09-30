@@ -33,6 +33,7 @@ const storage = cloudStorageEnabled() ? multer.memoryStorage() : diskStorage;
 const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/;
 
 export const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 export const MAX_FILES = 10;
 
 function fileFilter(req, file, cb) {
@@ -51,6 +52,22 @@ export const upload = multer({
   fileFilter,
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
 });
+
+/** Multer has one global byte limit; apply the stricter image rule afterward. */
+export function validateUploadSizes(req, _res, next) {
+  const oversizeImage = (req.files || []).find((file) =>
+    /\.(jpeg|jpg|png|gif|webp)$/i.test(path.extname(file.originalname)) && file.size > MAX_IMAGE_BYTES
+  );
+  if (!oversizeImage) return next();
+
+  // Disk storage has already created these files; do not retain refused uploads.
+  for (const file of req.files || []) {
+    if (file.path) {
+      try { fs.unlinkSync(file.path); } catch { /* best-effort cleanup */ }
+    }
+  }
+  return next(new ApiError(413, `Image too large. Each image must be under ${MAX_IMAGE_BYTES / (1024 * 1024)} MB.`));
+}
 
 /**
  * Translate multer's own MulterErrors into user-facing 4xx responses.

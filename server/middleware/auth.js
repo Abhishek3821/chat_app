@@ -41,6 +41,13 @@ export const protect = asyncHandler(async (req, res, next) => {
   if (!user) throw new ApiError(401, 'User no longer exists.');
   if (user.accountStatus === 'banned') throw new ApiError(403, 'This account has been banned.');
   if (user.accountStatus === 'suspended') throw new ApiError(403, 'This account is suspended.');
+  if (user.workspaceRole === 'guest') {
+    const path = req.originalUrl.split('?')[0];
+    if (path !== '/api/auth/logout' && user.guestExpiresAt && user.guestExpiresAt <= new Date()) throw new ApiError(403, 'Guest access has expired.');
+    const allowed = (req.method === 'GET' && (/^\/api\/auth\/me$/.test(path) || /^\/api\/chats(?:\/[a-f\d]{24})?$/.test(path) || /^\/api\/messages\/[a-f\d]{24}$/.test(path)))
+      || (req.method === 'POST' && (path === '/api/messages' || path === '/api/auth/logout'));
+    if (!allowed) throw new ApiError(403, 'Guest access is limited to invited groups.');
+  }
   // Session revocation: a password change bumps tokenVersion, invalidating every
   // token issued before it (including copies sitting in localStorage on old devices).
   if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {

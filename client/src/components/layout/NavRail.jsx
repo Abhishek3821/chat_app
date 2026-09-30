@@ -8,6 +8,7 @@ import {
   Users,
   Users2,
   Store,
+  BriefcaseBusiness,
   Contact,
   Star,
   Settings,
@@ -50,7 +51,7 @@ export default function NavRail() {
 
   // Business tools only make sense for team workspaces (not the shared Personal space).
   const items = wsType && wsType !== 'personal'
-    ? [...baseItems, { to: '/business', icon: Store, label: 'Business' }]
+    ? [...baseItems, { to: '/business', icon: Store, label: 'Business' }, { to: '/workspace', icon: BriefcaseBusiness, label: 'Workspace' }]
     : baseItems;
 
   return (

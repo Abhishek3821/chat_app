@@ -171,7 +171,7 @@ export default function GlobalSearch() {
   return (
     <>
       {/* ── Desktop: inline input + dropdown ── */}
-      <div className="relative mx-auto hidden w-full max-w-md md:block xl:max-w-lg 2xl:max-w-2xl">
+      <div className="relative mx-auto hidden min-w-0 flex-1 max-w-xs md:block xl:max-w-sm 2xl:max-w-md">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-content-muted" size={18} />
         <input
           ref={inputRef}

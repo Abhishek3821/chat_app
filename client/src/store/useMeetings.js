@@ -19,7 +19,7 @@ export const useMeetings = create((set, get) => ({
     }
   },
 
-  create: async ({ title, description = '', startAt, durationMinutes = 30, type = 'video', recurrence = 'none', participants = [], timezone, settings, inviteEmails = [] }) => {
+  create: async ({ title, description = '', startAt, durationMinutes = 30, type = 'video', recurrence = 'none', participants = [], timezone, settings, inviteEmails = [], password = '' }) => {
     if (DEMO_MODE) {
       const me = useAuth.getState().user;
       const meeting = {
@@ -30,7 +30,7 @@ export const useMeetings = create((set, get) => ({
       set((s) => ({ meetings: [meeting, ...s.meetings] }));
       return meeting;
     }
-    const { data } = await api.post('/meetings', { title, description, startAt, durationMinutes, type, recurrence, participants, timezone, settings, inviteEmails });
+    const { data } = await api.post('/meetings', { title, description, startAt, durationMinutes, type, recurrence, participants, timezone, settings, inviteEmails, password });
     set((s) => ({ meetings: [data.meeting, ...s.meetings].sort((a, b) => new Date(a.startAt) - new Date(b.startAt)) }));
     // invitesQueued comes from the server (validated + de-duplicated), so the UI
     // reports what was really mailed rather than what was typed.
@@ -81,9 +81,9 @@ export const useMeetings = create((set, get) => ({
   },
 
   // Join a meeting via its shareable link (Google-Meet style) → returns the meeting.
-  joinByCode: async (code) => {
-    const { data } = await api.post(`/meetings/code/${encodeURIComponent(code)}/join`);
-    return data.meeting;
+  joinByCode: async (code, password = '') => {
+    const { data } = await api.post(`/meetings/code/${encodeURIComponent(code)}/join`, { password });
+    return { meeting: data.meeting, passwordPass: data.passwordPass };
   },
 
   // Host-only attendance record: date/time, duration, who attended (name/email).

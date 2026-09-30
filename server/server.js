@@ -28,6 +28,9 @@ import { initQueue } from './utils/queue.js';
 import { registerFanoutJobs } from './utils/jobs.js';
 import { sweepStaleCalls } from './utils/callService.js';
 import { startScheduledDispatcher } from './utils/scheduledDispatcher.js';
+import { startMeetingReminders } from './utils/meetingReminders.js';
+import { startWorkspaceTaskReminders } from './utils/workspaceTaskReminders.js';
+import { startWorkspaceGuestExpiry } from './utils/workspaceGuestExpiry.js';
 import { startPinSweeper } from './utils/pins.js';
 
 const PORT = process.env.PORT || 5000;
@@ -223,6 +226,9 @@ async function start() {
   // Scheduled-message dispatcher. Claims due rows with an atomic compare-and-set,
   // so running several instances behind a load balancer can't double-send.
   startScheduledDispatcher();
+  startMeetingReminders();
+  startWorkspaceTaskReminders();
+  startWorkspaceGuestExpiry();
 
   // Pinned messages expire on the schedule their pinner chose. Reads already
   // filter lapsed pins out, so this is about telling open clients on time and

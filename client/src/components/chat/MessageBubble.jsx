@@ -10,6 +10,8 @@ import { Rich } from '../../lib/format';
 import PollCard from './PollCard';
 import { useAuth } from '../../store/useAuth';
 import { useChat } from '../../store/useChat';
+import { useWorkspace } from '../../store/useWorkspace';
+import api from '../../lib/api';
 
 const QUICK = ['❤️', '😂', '👍', '😮', '😢', '🙏'];
 // Kept in step with PIN_DURATIONS in server/utils/pins.js, which validates them.
@@ -81,6 +83,9 @@ function MessageBubble({
   // trigger is pure CSS now (see its `group-hover:` classes) and so cannot get
   // stuck in the open state.
   const [sheet, setSheet] = useState(null);
+  const isTeamWorkspace = useWorkspace((s) => s.workspace?.type === 'team');
+  const workspaceId = useWorkspace((s) => s.workspace?._id);
+  const teamChat = useChat((s) => s.chats.find((chat) => String(chat._id) === String(message.chat?._id || message.chat) && String(chat.workspace) === String(workspaceId)));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content || '');
   const bubbleRef = useRef(null);
@@ -155,6 +160,12 @@ function MessageBubble({
         : [{ kind: 'pin', icon: Pin, label: 'Pin…', keepOpen: true }]
       : []),
     { icon: Forward, label: 'Forward', run: () => onForward?.(message) },
+    ...(isTeamWorkspace && teamChat ? [{ icon: Clock, label: 'Create team task', run: async () => {
+      const title = window.prompt('Task title', (message.content || 'Follow up on message').slice(0, 180));
+      if (!title?.trim()) return;
+      try { await api.post('/workspaces/me/tasks', { title: title.trim(), description: (message.content || '').slice(0, 3000), source: { kind: 'message', id: message._id } }); toast.success('Team task created'); }
+      catch (e) { toast.error(e?.response?.data?.message || 'Could not create task.'); }
+    } }] : []),
     ...(message.content
       ? [{
           icon: Copy,

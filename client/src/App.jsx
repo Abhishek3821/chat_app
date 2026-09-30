@@ -27,6 +27,9 @@ const StatusPage = lazy(() => import('./pages/StatusPage.jsx'));
 const GroupsPage = lazy(() => import('./pages/GroupsPage.jsx'));
 const CommunitiesPage = lazy(() => import('./pages/CommunitiesPage.jsx'));
 const BusinessPage = lazy(() => import('./pages/BusinessPage.jsx'));
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage.jsx'));
+const GuestPortal = lazy(() => import('./pages/GuestPortal.jsx'));
+const TeamContactPage = lazy(() => import('./pages/TeamContactPage.jsx'));
 const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage.jsx'));
 const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
 const StarredPage = lazy(() => import('./pages/StarredPage.jsx'));
@@ -73,6 +76,8 @@ function ProtectedRoute({ children }) {
      that wasn't signed in: you'd log in and land on the chat list with the
      invite silently dropped. Login and Signup both return here afterwards. */
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  if (user.workspaceRole === 'guest' && location.pathname !== '/guest') return <Navigate to="/guest" replace />;
+  if (user.workspaceRole !== 'guest' && location.pathname === '/guest') return <Navigate to="/" replace />;
   if (user.twoStepEnabled && !unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />;
   return children;
 }
@@ -196,6 +201,8 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
+          <Route path="/guest" element={<ProtectedRoute><GuestPortal /></ProtectedRoute>} />
+          <Route path="/team/:workspaceId" element={<ProtectedRoute><TeamContactPage /></ProtectedRoute>} />
 
           {/* Immersive meeting room — protected but OUTSIDE the app shell (its own
               full-screen layout, like a Google Meet link). */}
@@ -242,6 +249,7 @@ export default function App() {
             <Route path="/groups" element={<GroupsPage />} />
             <Route path="/communities" element={<CommunitiesPage />} />
             <Route path="/business" element={<BusinessPage />} />
+            <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/broadcasts" element={<BroadcastsPage />} />
             <Route path="/contacts" element={<ContactsPage  />} />
             <Route path="/starred" element={<StarredPage />} />

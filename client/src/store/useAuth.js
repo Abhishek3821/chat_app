@@ -22,7 +22,7 @@ export const useAuth = create((set, get) => ({
     try {
       const { data } = await api.get('/auth/me');
       set({ user: data.user, loading: false });
-      ensureMediaToken();
+      if (data.user?.workspaceRole !== 'guest') ensureMediaToken();
     } catch {
       clearToken();
       set({ user: null, loading: false });
@@ -44,7 +44,7 @@ export const useAuth = create((set, get) => ({
     if (data.token) setToken(data.token);
     sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
     set({ user: data.user });
-    ensureMediaToken(true);
+    if (data.user?.workspaceRole !== 'guest') ensureMediaToken(true);
     return data;
   },
 
@@ -74,7 +74,7 @@ export const useAuth = create((set, get) => ({
       setToken(data.token);
       sessionStorage.setItem('cc_unlocked', '1');
       set({ user: data.user });
-      ensureMediaToken(true);
+      if (data.user?.workspaceRole !== 'guest') ensureMediaToken(true);
     }
     return data;
   },

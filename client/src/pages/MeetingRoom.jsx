@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Captions, Maximize2, Minimize2, Sparkles, MoreHorizontal } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, MonitorUp, MonitorX, PhoneOff, Copy, Users, Loader2, AlertTriangle, Disc, Hourglass, RectangleHorizontal, RectangleVertical, MessageSquare, Hand, Smile, Send, X, UserX, MicOff as MicOffIcon, ShieldCheck, Check, DoorOpen, BarChart3, Maximize2, Minimize2, MoreHorizontal } from 'lucide-react';
 
 import Avatar from '@/components/ui/Avatar';
 import Button from '@/components/ui/Button';
 import MeetingPollsPanel from '@/components/meeting/MeetingPollsPanel';
-import CaptionOverlay from '@/components/meeting/CaptionOverlay';
+import MeetingNotesPanel from '@/components/meeting/MeetingNotesPanel';
+import DeviceCheck from '@/components/meeting/DeviceCheck';
 import { useSocket } from '@/hooks/useSocket';
 import { useViewportSize } from '@/hooks/useViewportSize';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
-import { useLiveCaptions } from '@/hooks/useLiveCaptions';
 import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
 import { meshCapacityWarning } from '@/lib/meshQuality';
 import api from '@/lib/api';
@@ -18,7 +18,6 @@ import { useMeetings } from '@/store/useMeetings';
 import { useAuth } from '@/store/useAuth';
 import { useUI } from '@/store/useUI';
 import { cn, videoGridCols } from '@/lib/utils';
-import { EFFECTS, BACKGROUND_PRESETS, effectsSupported, gradientDataUrl } from '@/lib/videoEffects';
 
 /* Module scope, not inside RoomView: the phone control sheet (<MoreControls>)
    renders the same set, and a per-render local const wasn't reachable from it. */
@@ -70,8 +69,12 @@ export default function MeetingRoom() {
   const { getByCode, joinByCode } = useMeetings();
   useSocket(); // ensure the socket is live even when opened directly from a shared link
 
-  const [phase, setPhase] = useState('loading'); // loading | ready | notfound
+  const [phase, setPhase] = useState('loading'); // loading | check | joining | ready | notfound
   const [meeting, setMeeting] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [passwordPass, setPasswordPass] = useState(null);
+  const [devices, setDevices] = useState({});
+  const [breakoutInvite, setBreakoutInvite] = useState(null);
   const [error, setError] = useState('');
 
   // While in the meeting, incoming calls answer "busy" + show a side banner.
@@ -83,13 +86,18 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     let cancelled = false;
+    setPhase('loading');
+    setMeeting(null);
+    setSummary(null);
+    setPasswordPass(null);
+    setBreakoutInvite(null);
+    setError('');
     (async () => {
       try {
-        await getByCode(code); // validate the link exists / isn't cancelled
-        const joined = await joinByCode(code); // register + get the room id
+        const found = await getByCode(code);
         if (cancelled) return;
-        setMeeting(joined);
-        setPhase('ready');
+        setSummary(found);
+        setPhase('check');
       } catch (err) {
         if (cancelled) return;
         setError(err?.message || 'This meeting link is invalid or has expired.');
@@ -98,6 +106,30 @@ export default function MeetingRoom() {
     })();
     return () => { cancelled = true; };
   }, [code, getByCode, joinByCode]);
+  useEffect(() => {
+    const socket = window.__ccSocket;
+    if (!socket) return undefined;
+    const onInvite = (event) => { if (String(event.meetingId) === String(meeting?._id)) setBreakoutInvite(event); };
+    const onReturn = (event) => { if (meeting?.parentRoomCode && event.roomCode === meeting.parentRoomCode) navigate(`/meet/${event.roomCode}`); };
+    socket.on('meeting:breakout-invite', onInvite);
+    socket.on('meeting:breakout-return', onReturn);
+    return () => { socket.off('meeting:breakout-invite', onInvite); socket.off('meeting:breakout-return', onReturn); };
+  }, [meeting?._id, meeting?.parentRoomCode, navigate]);
+
+  const join = async (choices) => {
+    setPhase('joining');
+    setError('');
+    try {
+      const joined = await joinByCode(code, choices.password);
+      setMeeting(joined.meeting);
+      setPasswordPass(joined.passwordPass);
+      setDevices(choices);
+      setPhase('ready');
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'Could not join the meeting.');
+      setPhase('check');
+    }
+  };
 
   if (phase === 'loading') {
     return (
@@ -119,7 +151,20 @@ export default function MeetingRoom() {
     );
   }
 
-  return <Room meeting={meeting} code={code} me={me} onLeave={() => navigate('/meetings')} />;
+  if (phase === 'check' || phase === 'joining') {
+    return <DeviceCheck video={summary?.type !== 'audio'} hasPassword={summary?.hasPassword} isHost={summary?.isHost} busy={phase === 'joining'} error={error} onJoin={join} />;
+  }
+
+  return <>
+    <Room meeting={meeting} code={code} me={me} passwordPass={passwordPass} devices={devices} onLeave={() => navigate('/meetings')} onReturnToMain={meeting.parentRoomCode ? () => navigate(`/meet/${meeting.parentRoomCode}`) : null} />
+    {breakoutInvite && <div className="fixed bottom-24 left-1/2 z-50 w-[min(92vw,360px)] -translate-x-1/2 rounded-2xl bg-navy-900 p-4 text-white shadow-xl ring-1 ring-white/20">
+      <p className="font-semibold">Join {breakoutInvite.title}?</p>
+      <div className="mt-3 flex gap-2">
+        <button onClick={() => { navigate(`/meet/${breakoutInvite.roomCode}`); setBreakoutInvite(null); }} className="rounded-lg bg-brand-500 px-4 py-2">Join breakout</button>
+        <button onClick={() => setBreakoutInvite(null)} className="rounded-lg bg-white/10 px-4 py-2">Stay here</button>
+      </div>
+    </div>}
+  </>;
 }
 
 /**
@@ -127,17 +172,17 @@ export default function MeetingRoom() {
  * SFU (scales past ~6 people) or the peer-to-peer mesh, then mount the matching
  * room. Both render the identical RoomView UI.
  */
-function Room({ meeting, code, me, onLeave }) {
+function Room({ meeting, code, me, passwordPass, devices, onLeave, onReturnToMain }) {
   const isHost = String(meeting.host?._id || meeting.host) === String(me?._id);
   const [rtc, setRtc] = useState(undefined); // undefined=checking · null=mesh · {url,token}=sfu
 
   useEffect(() => {
     let cancelled = false;
-    api.get(`/meetings/code/${encodeURIComponent(code)}/rtc`)
+    api.get(`/meetings/code/${encodeURIComponent(code)}/rtc`, { params: passwordPass ? { passwordPass } : undefined })
       .then(({ data }) => { if (!cancelled) setRtc(data?.enabled ? data : null); })
       .catch(() => { if (!cancelled) setRtc(null); }); // any failure → mesh
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, passwordPass]);
 
   if (rtc === undefined) {
     return (
@@ -146,21 +191,23 @@ function Room({ meeting, code, me, onLeave }) {
       </div>
     );
   }
-  const props = { meeting, code, me, isHost, onLeave };
+  const props = { meeting, code, me, isHost, onLeave, passwordPass, devices, onReturnToMain };
   return rtc ? <SfuRoom {...props} rtc={rtc} /> : <MeshRoom {...props} />;
 }
 
-function MeshRoom({ meeting, code, me, isHost, onLeave }) {
+function MeshRoom({ meeting, code, me, isHost, onLeave, passwordPass, devices, onReturnToMain }) {
   const room = useMeetingRoom(meeting._id, {
     video: meeting.type !== 'audio',
     muteOnEntry: meeting.settings?.muteOnEntry,
     autoRecord: meeting.settings?.autoRecord,
     isHost,
+    passwordPass,
+    devices,
   });
-  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} />;
+  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} onReturnToMain={onReturnToMain} />;
 }
 
-function SfuRoom({ meeting, code, me, isHost, rtc, onLeave }) {
+function SfuRoom({ meeting, code, me, isHost, rtc, onLeave, passwordPass, devices, onReturnToMain }) {
   const room = useLiveKitRoom(meeting._id, {
     video: meeting.type !== 'audio',
     muteOnEntry: meeting.settings?.muteOnEntry,
@@ -168,43 +215,89 @@ function SfuRoom({ meeting, code, me, isHost, rtc, onLeave }) {
     isHost,
     code,
     rtc,
+    passwordPass,
+    devices,
   });
-  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} isSfu />;
+  return <RoomView room={room} meeting={meeting} code={code} me={me} isHost={isHost} onLeave={onLeave} onReturnToMain={onReturnToMain} isSfu />;
 }
 
-function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
+function RoomView({ room, meeting, code, me, isHost, onLeave, onReturnToMain, isSfu = false }) {
   const {
-    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
+    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError, networkQuality,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,
     knocks = [], admitGuest,
     polls = [], questions = [], createPoll, votePoll, closePoll, askQuestion, upvoteQuestion, answerQuestion,
-    videoEffect = EFFECTS.NONE, effectLoading = false, setVideoEffect,
   } = room;
   const [portrait, setPortrait] = useState(false); // tile orientation option
   const [showChat, setShowChat] = useState(false);
   const [showPolls, setShowPolls] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [policy, setPolicy] = useState(meeting.settings || {});
+  const [showHostControls, setShowHostControls] = useState(false);
+  const [breakouts, setBreakouts] = useState([]);
+  const [breakoutBusy, setBreakoutBusy] = useState(false);
+  useEffect(() => {
+    if (meeting.parentMeeting) return undefined;
+    let active = true;
+    api.get(`/meetings/${meeting._id}/breakouts`)
+      .then(({ data }) => { if (active) setBreakouts(data.rooms || []); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [meeting._id, meeting.parentMeeting]);
+  const startBreakouts = async (count) => {
+    setBreakoutBusy(true);
+    try {
+      const { data } = await api.post(`/meetings/${meeting._id}/breakouts`, { count });
+      setBreakouts(data.rooms || []);
+      toast.success('Breakout rooms created. Participants received invitations.');
+    } catch (err) { toast.error(err?.response?.data?.message || 'Could not create breakout rooms.'); }
+    finally { setBreakoutBusy(false); }
+  };
+  const endBreakouts = async () => {
+    try { await api.delete(`/meetings/${meeting._id}/breakouts`); setBreakouts([]); toast.success('Breakout rooms ended.'); }
+    catch (err) { toast.error(err?.response?.data?.message || 'Could not end breakout rooms.'); }
+  };
+  useEffect(() => {
+    const socket = window.__ccSocket;
+    if (!socket) return undefined;
+    const onPolicy = ({ settings }) => { if (settings) setPolicy(settings); };
+    socket.on('meeting:policy', onPolicy);
+    return () => socket.off('meeting:policy', onPolicy);
+  }, []);
+  const updatePolicy = async (key) => {
+    try {
+      const next = { ...policy, [key]: !policy[key] };
+      const { data } = await api.patch(`/meetings/${meeting._id}`, { settings: next });
+      setPolicy(data.meeting.settings);
+    } catch (err) { toast.error(err?.response?.data?.message || 'Could not change meeting controls.'); }
+  };
+  const [clock, setClock] = useState(Date.now());
+  const [waitingSince, setWaitingSince] = useState(null);
+  useEffect(() => {
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (status === 'waiting' || status === 'knocking') setWaitingSince((current) => current || Date.now());
+    else setWaitingSince(null);
+  }, [status]);
   /* Below `sm` the control bar keeps only the controls you reach for mid-sentence
      and folds the rest into one sheet — see <MoreControls>. Read from the live
      viewport rather than a CSS breakpoint because the SPLIT is structural (which
      buttons exist), not cosmetic. */
   const { width: viewportWidth } = useViewportSize();
   const compact = viewportWidth < 640;
-  // `muted` is passed so a muted mic never broadcasts captions of what you say.
-  const captions = useLiveCaptions(meeting._id, { myName: me?.name || 'You', muted });
-  // Captions can fail for reasons only the browser knows (mic busy, no network,
-  // permission blocked). The hook has always reported them; nothing rendered it,
-  // so a failure looked like "the button does nothing".
-  useEffect(() => {
-    if (captions.error) toast.error(captions.error, { id: 'caption-error' });
-  }, [captions.error]);
   const [chatInput, setChatInput] = useState('');
   const [showReactions, setShowReactions] = useState(false);
   const [seenChatCount, setSeenChatCount] = useState(0);
   const chatEndRef = useRef(null);
   const reactionsForRemote = (sid) => reactions.filter((r) => r.socketId === sid);
   const myReactions = reactions.filter((r) => r.socketId === 'me');
+  const handQueue = Object.entries(raisedHands).filter(([, at]) => at).sort((a, b) => a[1] - b[1]);
+  const handName = (id) => id === 'me' ? 'You' : remotes.find((remote) => remote.socketId === id)?.user?.name || 'Participant';
+  const elapsed = (at) => `${Math.floor(Math.max(0, clock - at) / 60000)}:${String(Math.floor(Math.max(0, clock - at) / 1000) % 60).padStart(2, '0')}`;
 
   /* True fullscreen (F11-style), on the room element rather than the document,
      so the chat drawer and knock prompts — which are positioned against the room
@@ -232,7 +325,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
   const submitChat = (e) => {
     e.preventDefault();
     const t = chatInput.trim();
-    if (!t) return;
+    if (!t || (!isHost && policy.allowChat === false)) return;
     sendChat(t);
     setChatInput('');
   };
@@ -253,8 +346,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
           <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10"><Hourglass size={24} className="animate-pulse" /></span>
           <h1 className="text-lg font-bold">Waiting for the host</h1>
           <p className="text-sm text-white/70">{mediaError || 'The meeting will start once the host joins.'}</p>
+          {waitingSince && <p className="text-sm text-white/60">Waiting {elapsed(waitingSince)}</p>}
           <p className="text-xs text-white/50">Meeting ID <span className="font-mono">{code}</span></p>
           <Button variant="glass" onClick={doLeave}>Leave</Button>
+          {onReturnToMain && <button onClick={onReturnToMain} className="text-sm text-white/70 underline">Return to main meeting</button>}
         </div>
       </div>
     );
@@ -268,8 +363,10 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
           <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/20 text-brand-300"><DoorOpen size={26} className="animate-pulse" /></span>
           <h1 className="text-lg font-bold">Asking to join…</h1>
           <p className="text-sm text-white/70">{mediaError || 'You’ll enter as soon as the host lets you in.'}</p>
+          {waitingSince && <p className="text-sm text-white/60">Waiting {elapsed(waitingSince)}</p>}
           <p className="text-xs text-white/50">Meeting ID <span className="font-mono">{code}</span></p>
           <Button variant="glass" onClick={doLeave}>Cancel</Button>
+          {onReturnToMain && <button onClick={onReturnToMain} className="text-sm text-white/70 underline">Return to main meeting</button>}
         </div>
       </div>
     );
@@ -284,6 +381,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
           <h1 className="text-lg font-bold">You can’t join this meeting</h1>
           <p className="text-sm text-white/70">{mediaError || 'The host didn’t let you in.'}</p>
           <Button variant="glass" onClick={doLeave}>Back to meetings</Button>
+          {onReturnToMain && <button onClick={onReturnToMain} className="text-sm text-white/70 underline">Return to main meeting</button>}
         </div>
       </div>
     );
@@ -346,7 +444,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
               <Avatar src={k.avatar} name={k.name} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{k.name || 'Someone'}</p>
-                <p className="text-xs text-white/60">wants to join this meeting</p>
+                <p className="text-xs text-white/60">Waiting {elapsed(k.knockedAt || clock)}</p>
               </div>
               <button
                 onClick={() => admitGuest?.(k, false)}
@@ -388,9 +486,14 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           {recording && <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-300"><span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC</span>}
+          <span className="rounded-full bg-white/10 px-2 py-1 text-xs" title="Your connection quality">Network: {networkQuality || 'Checking'}</span>
           {isHost && (
             <Button variant="glass" size="sm" onClick={muteEveryone} title="Mute everyone"><ShieldCheck size={14} /> <span className="hidden sm:inline">Mute all</span></Button>
           )}
+          {isHost && <button onClick={() => setShowHostControls((value) => !value)} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold">Host controls</button>}
+          {onReturnToMain && <button onClick={onReturnToMain} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold">Return to main</button>}
+          {!isHost && breakouts.map((breakout) => <a key={breakout.id} href={`/meet/${breakout.roomCode}`} className="rounded-xl bg-brand-500/20 px-3 py-2 text-xs font-semibold">Join {breakout.title}</a>)}
+          {handQueue.length > 0 && <span className="rounded-xl bg-amber-500/20 px-2 py-1 text-xs text-amber-200" title="Raised hands in order">{handQueue.length} raised</span>}
           <button
             onClick={toggleFullscreen}
             className="grid h-11 w-11 place-items-center rounded-xl bg-white/10 text-white transition-colors hover:bg-white/20 sm:h-9 sm:w-9"
@@ -415,30 +518,33 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
               </span>
             )}
           </button>
-          {/* Disabled rather than hidden where unsupported, with the reason in the
-              tooltip — a silently missing control reads as a bug. */}
-          <button
-            onClick={captions.toggle}
-            disabled={!captions.supported}
-            className={cn(
-              'grid h-11 w-11 place-items-center rounded-xl transition-colors sm:h-9 sm:w-9',
-              captions.enabled ? 'bg-white text-navy-950' : 'bg-white/10 text-white hover:bg-white/20',
-              !captions.supported && 'cursor-not-allowed opacity-40 hover:bg-white/10'
-            )}
-            title={
-              !captions.supported
-                ? 'Live captions need Chrome or Edge'
-                : captions.enabled
-                  // Say why nothing is appearing rather than looking broken.
-                  ? (muted ? 'Captions on — unmute to caption your speech' : 'Turn off captions')
-                  : 'Turn on live captions'
-            }
-          >
-            <Captions size={18} />
-          </button>
+          <button onClick={() => { setShowNotes((v) => !v); setShowChat(false); setShowPolls(false); }} className="rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/20" title="Shared meeting notes">Notes</button>
           <Button variant="glass" size="sm" onClick={copyLink}><Copy size={14} /> <span className="hidden sm:inline">Copy link</span></Button>
         </div>
       </header>
+      {isHost && showHostControls && (
+        <div className="mx-3 mb-2 flex flex-wrap gap-2 text-xs sm:mx-4">
+          <button onClick={() => updatePolicy('locked')} className="rounded-lg bg-white/10 px-3 py-2">{policy.locked ? 'Unlock meeting' : 'Lock meeting'}</button>
+          <button onClick={() => updatePolicy('allowChat')} className="rounded-lg bg-white/10 px-3 py-2">{policy.allowChat === false ? 'Enable chat' : 'Disable chat'}</button>
+          <button onClick={() => updatePolicy('allowScreenShare')} className="rounded-lg bg-white/10 px-3 py-2">{policy.allowScreenShare === false ? 'Enable screen sharing' : 'Disable screen sharing'}</button>
+          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(2)} className="rounded-lg bg-white/10 px-3 py-2">Create 2 breakouts</button>}
+          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(3)} className="rounded-lg bg-white/10 px-3 py-2">Create 3 breakouts</button>}
+          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(4)} className="rounded-lg bg-white/10 px-3 py-2">Create 4 breakouts</button>}
+          {breakouts.map((breakout) => <a key={breakout.id} href={`/meet/${breakout.roomCode}`} className="rounded-lg bg-white/10 px-3 py-2">{breakout.title}</a>)}
+          {breakouts.length > 0 && <button onClick={endBreakouts} className="rounded-lg bg-red-500/20 px-3 py-2">End breakouts</button>}
+        </div>
+      )}
+
+      {isHost && handQueue.length > 0 && (
+        <div className="mx-3 mb-2 flex flex-wrap items-center gap-2 text-xs text-amber-200 sm:mx-4">
+          <span>Hand queue:</span>
+          {handQueue.map(([id], index) => (
+            <button key={id} onClick={() => id === 'me' ? toggleHand() : window.__ccSocket?.emit('meeting:lower-hand', { meetingId: meeting._id, to: id })} className="rounded-full bg-amber-500/15 px-2.5 py-1" title="Lower hand">
+              {index + 1}. {handName(id)} ×
+            </button>
+          ))}
+        </div>
+      )}
 
       {mediaError && (
         <div className="mx-3 mb-2 rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-300 sm:mx-4">{mediaError}</div>
@@ -557,10 +663,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
             (absolute, full-bleed) instead of sharing the flex row with it —
             a fixed-width sidebar on a phone-size viewport used to squeeze the
             video pane down to a sliver. From sm: up it's a normal side panel. */}
-        {/* z-20, below the drawers (z-30), so an open panel covers the captions
-            rather than having text bleed through it. */}
-        <CaptionOverlay lines={captions.lines} />
-
         <MeetingPollsPanel
           open={showPolls}
           onClose={() => setShowPolls(false)}
@@ -575,6 +677,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
           onUpvote={upvoteQuestion}
           onAnswer={answerQuestion}
         />
+        <MeetingNotesPanel meetingId={meeting._id} open={showNotes} onClose={() => setShowNotes(false)} />
 
         {showChat && (
           /* bg-navy-950/[0.98] — a bare `/98` modifier isn't in Tailwind's opacity
@@ -597,7 +700,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
             </div>
             {/* text-base on phones — anything under 16px makes iOS zoom the page on focus. */}
             <form onSubmit={submitChat} className="flex shrink-0 items-center gap-2 border-t border-white/10 p-3">
-              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message" className="ring-brand min-w-0 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-base text-white placeholder:text-white/40 sm:text-sm" />
+              <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} disabled={!isHost && policy.allowChat === false} placeholder={!isHost && policy.allowChat === false ? 'Chat disabled by host' : 'Send a message'} className="ring-brand min-w-0 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-base text-white placeholder:text-white/40 sm:text-sm" />
               <button type="submit" disabled={!chatInput.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-500 text-white disabled:opacity-50 sm:h-9 sm:w-9"><Send size={16} /></button>
             </form>
           </aside>
@@ -614,7 +717,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
         {meeting.type !== 'audio' && (
           <CtrlButton active={!camOff} onClick={toggleCamera} on={<Video size={20} />} off={<VideoOff size={20} />} label={camOff ? 'Start video' : 'Stop video'} />
         )}
-        {meeting.type !== 'audio' && (
+        {meeting.type !== 'audio' && (isHost || policy.allowScreenShare !== false) && (
           <CtrlButton active={sharingScreen} onClick={toggleScreenShare} on={<MonitorX size={20} />} off={<MonitorUp size={20} />} label={sharingScreen ? 'Stop presenting' : 'Share screen'} highlightWhenActive />
         )}
         {/* highlightWhenActive: without it the default (landscape) rendered as the
@@ -649,11 +752,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
             )}
           </div>
         )}
-        {/* Background effects. Only offered when the browser can actually run
-            them, and hidden on the SFU path where the track isn't ours to swap. */}
-        {!compact && setVideoEffect && effectsSupported() && (
-          <BackgroundButton current={videoEffect} loading={effectLoading} onPick={setVideoEffect} />
-        )}
         {!compact && (
           <CtrlButton active={recording} onClick={toggleRecording} on={<Disc size={20} />} off={<Disc size={20} />} label={recording ? 'Stop recording' : 'Record'} highlightWhenActive />
         )}
@@ -665,9 +763,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
             recording={recording}
             onToggleRecording={toggleRecording}
             onReact={sendReaction}
-            effect={videoEffect}
-            effectLoading={effectLoading}
-            onPickEffect={setVideoEffect && effectsSupported() ? setVideoEffect : null}
           />
         )}
         {/* Deliberately a size up from the rest on a phone — it is the one control
@@ -678,14 +773,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, isSfu = false }) {
       </footer>
     </div>
   );
-}
-
-/** A preset from BACKGROUND_PRESETS → the (effect, payload) pair the room wants.
- *  Shared by the desktop menu and the phone sheet so the two can't drift. */
-function pickPreset(preset, onPick) {
-  if (!preset) return onPick(EFFECTS.NONE);
-  if (preset.effect === EFFECTS.BLUR) return onPick(EFFECTS.BLUR);
-  return onPick(EFFECTS.IMAGE, gradientDataUrl(preset.gradient));
 }
 
 /** One labelled row in the phone control sheet. */
@@ -711,14 +798,14 @@ function SheetRow({ icon: Icon, label, hint, active = false, onClick }) {
  * Phone-only overflow for the secondary meeting controls.
  *
  * The bar carries nine controls, which is fine on a laptop and two ragged rows on
- * a 360px phone. Reactions, backgrounds, recording and tile shape move in here:
+ * a 360px phone. Reactions, recording and tile shape move in here:
  * the ones you touch while talking stay on the bar, and these get labels.
  *
  * The sheet is pinned to the viewport's gutters rather than anchored to its
  * button — the bar is centred, so an anchored menu hangs off whichever edge the
  * button happens to sit near.
  */
-function MoreControls({ isVideo, portrait, onTogglePortrait, recording, onToggleRecording, onReact, effect, effectLoading, onPickEffect }) {
+function MoreControls({ isVideo, portrait, onTogglePortrait, recording, onToggleRecording, onReact }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
@@ -752,32 +839,6 @@ function MoreControls({ isVideo, portrait, onTogglePortrait, recording, onToggle
                 ))}
               </div>
             )}
-            {onPickEffect && (
-              <div className="border-t border-white/10 px-1 pb-1 pt-2">
-                <p className="pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/40">
-                  Background {effectLoading && <Loader2 size={11} className="ml-1 inline animate-spin" />}
-                </p>
-                <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
-                  <button
-                    onClick={() => { pickPreset(null, onPickEffect); close(); }}
-                    title="No background effect"
-                    className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl border text-[10px] font-semibold text-white/70', effect === EFFECTS.NONE ? 'border-white bg-white/15 text-white' : 'border-white/25')}
-                  >
-                    Off
-                  </button>
-                  {BACKGROUND_PRESETS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => { pickPreset(p, onPickEffect); close(); }}
-                      title={p.label}
-                      aria-label={p.label}
-                      className="h-11 w-11 shrink-0 rounded-xl border border-white/25"
-                      style={p.gradient ? { background: `linear-gradient(135deg, ${p.gradient[0]}, ${p.gradient[1]})` } : { backdropFilter: 'blur(4px)', background: 'rgba(255,255,255,.18)' }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
             <div className="border-t border-white/10 pt-1">
               {isVideo && (
                 <SheetRow
@@ -803,65 +864,6 @@ function MoreControls({ isVideo, portrait, onTogglePortrait, recording, onToggle
   );
 }
 
-/**
- * Background picker: none / blur / a few gradient scenes.
- *
- * The menu opens UPWARD from the control bar and is rendered in normal flow
- * (the bar isn't a scroll container), so no portal is needed here.
- */
-function BackgroundButton({ current, loading, onPick }) {
-  const [open, setOpen] = useState(false);
-  const active = current !== EFFECTS.NONE;
-
-  const choose = (preset) => {
-    setOpen(false);
-    pickPreset(preset, onPick);
-  };
-
-  return (
-    <div className="relative">
-      <CtrlButton
-        active={active}
-        onClick={() => setOpen((v) => !v)}
-        on={loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-        off={loading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-        label="Background"
-        highlightWhenActive
-      />
-      {open && (
-        <>
-          <button className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} aria-label="Close background picker" />
-          <div className="absolute bottom-full left-1/2 z-20 mb-3 w-52 -translate-x-1/2 overflow-hidden rounded-2xl border border-white/15 bg-navy-900/95 p-1.5 shadow-soft-lg backdrop-blur-md">
-            <button
-              onClick={() => choose(null)}
-              className={cn('flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-colors hover:bg-white/10', current === EFFECTS.NONE ? 'text-white' : 'text-white/70')}
-            >
-              <span className="h-7 w-7 shrink-0 rounded-lg border border-white/25" />
-              None
-              {current === EFFECTS.NONE && <Check size={15} className="ml-auto" />}
-            </button>
-            {BACKGROUND_PRESETS.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => choose(p)}
-                className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm text-white/70 transition-colors hover:bg-white/10"
-              >
-                <span
-                  className="h-7 w-7 shrink-0 rounded-lg border border-white/25"
-                  style={p.gradient ? { background: `linear-gradient(135deg, ${p.gradient[0]}, ${p.gradient[1]})` } : { backdropFilter: 'blur(4px)', background: 'rgba(255,255,255,.18)' }}
-                />
-                {p.label}
-              </button>
-            ))}
-            <p className="px-2.5 pb-1 pt-2 text-[11px] leading-snug text-white/40">
-              Runs on your device. First use downloads the effects engine.
-            </p>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 function CtrlButton({ active, onClick, on, off, label, highlightWhenActive = false }) {
   const highlighted = highlightWhenActive ? active : !active;

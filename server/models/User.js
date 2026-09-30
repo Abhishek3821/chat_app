@@ -50,7 +50,9 @@ const userSchema = new mongoose.Schema(
 
     // Multi-tenancy: the org this user belongs to, and their role within it.
     workspace: { type: mongoose.Schema.Types.ObjectId, ref: 'Workspace', index: true },
-    workspaceRole: { type: String, enum: ['owner', 'admin', 'member'], default: 'member' },
+    workspaceRole: { type: String, enum: ['owner', 'admin', 'member', 'guest'], default: 'member' },
+    guestExpiresAt: { type: Date, default: null },
+    guestAllowedChats: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Chat' }],
 
     /* ── Embedded-platform tenancy ──────────────────────────────────
        Set only for END USERS provisioned by a third-party product through the

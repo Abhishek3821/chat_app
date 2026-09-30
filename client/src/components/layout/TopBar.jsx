@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell, Sun, Moon, Plus, Check, Download } from 'lucide-react';
+import { Bell, Sun, Moon, Plus, Check, Download, QrCode, ScanLine } from 'lucide-react';
 import { LogoMark } from '../brand/Logo';
 import GlobalSearch from '../search/GlobalSearch';
 import Avatar from '../ui/Avatar';
@@ -13,6 +13,9 @@ import { useChat } from '../../store/useChat';
 import { useNotifications } from '../../store/useNotifications';
 import { formatRelative, cn } from '../../lib/utils';
 import { canInstall, promptInstall, onInstallChange } from '../../lib/pwa';
+import InviteQrModal from '../InviteQrModal';
+import ScanQrModal from '../ScanQrModal';
+import { inviteUrlForUser } from '../../lib/invite';
 
 const titles = {
   '/': 'Messages',
@@ -36,6 +39,8 @@ export default function TopBar() {
   const markAllRead = useNotifications((s) => s.markAllRead);
   const markRead = useNotifications((s) => s.markRead);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [installable, setInstallable] = useState(canInstall());
   const unread = notifs.filter((n) => !n.isRead).length;
 
@@ -77,6 +82,7 @@ export default function TopBar() {
   };
 
   return (
+    <>
     <header className="frost neu-rail-bottom relative z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       <div className="flex items-center gap-2 md:hidden">
         <LogoMark size={30} />
@@ -87,7 +93,7 @@ export default function TopBar() {
           below that it renders as an icon that opens a full-screen sheet. */}
       <GlobalSearch />
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {/* Both of these used to be `hidden sm:inline-flex`, i.e. absent on
             phones. That was backwards for Install (installing to the home
             screen is a phone action above all), and it left New Chat reachable
@@ -108,6 +114,12 @@ export default function TopBar() {
         </Button>
         <Button variant="primary" size="sm" className="hidden sm:inline-flex" onClick={() => openModal('newChat')}>
           <Plus size={16} /> New
+        </Button>
+        <Button variant="outline" size="sm" className="hidden xl:inline-flex" onClick={() => setQrOpen(true)} aria-label="Show my QR code">
+          <QrCode size={16} /> My QR
+        </Button>
+        <Button variant="outline" size="sm" className="hidden xl:inline-flex" onClick={() => setScanOpen(true)} aria-label="Scan a QR code">
+          <ScanLine size={16} /> Scan
         </Button>
 
         <button
@@ -201,5 +213,14 @@ export default function TopBar() {
         </button>
       </div>
     </header>
+    <InviteQrModal
+      open={qrOpen}
+      onClose={() => setQrOpen(false)}
+      title="My QR code"
+      description={user?.username ? `Anyone who scans this opens a chat with @${user.username}.` : 'Set a username to share your QR code.'}
+      url={inviteUrlForUser(user?.username)}
+    />
+    <ScanQrModal open={scanOpen} onClose={() => setScanOpen(false)} />
+    </>
   );
 }

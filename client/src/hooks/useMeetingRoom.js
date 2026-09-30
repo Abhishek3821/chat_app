@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { createEffectPipeline, EFFECTS } from '@/lib/videoEffects';
 
 /**
  * Full-mesh WebRTC for a Google-Meet-style meeting room. Every participant is a
@@ -17,7 +16,7 @@ import { applyMeshEncoding, retuneAll, meshCapacityWarning } from '../lib/meshQu
 const AUDIO_ENHANCE = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const getSocket = () => (typeof window !== 'undefined' ? window.__ccSocket : null);
 
-export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, autoRecord = false, isHost = false } = {}) {
+export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, autoRecord = false, isHost = false, passwordPass = null, devices = {} } = {}) {
   const [localStream, setLocalStream] = useState(null);
   const [screenStream, setScreenStream] = useState(null); // your own shared screen (self-preview)
   const [remotes, setRemotes] = useState([]); // [{ socketId, stream, user }]
@@ -31,8 +30,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const [questions, setQuestions] = useState([]);
   const [recording, setRecording] = useState(false);
   const [mediaError, setMediaError] = useState(null);
-  const [videoEffect, setVideoEffectState] = useState(EFFECTS.NONE);
-  const [effectLoading, setEffectLoading] = useState(false); // first enable fetches the wasm
+  const [networkQuality, setNetworkQuality] = useState('Checking');
   // In-meeting interaction state
   const [chatMessages, setChatMessages] = useState([]); // [{ id, socketId, name, avatar, text, at, mine }]
   const [reactions, setReactions] = useState([]); // transient floating [{ id, socketId, emoji }]
@@ -43,15 +41,8 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
 
   const peersRef = useRef(new Map()); // socketId -> RTCPeerConnection
   const localRef = useRef(null);
-  /* The track SENT when not screen-sharing. With a background effect on this is
-     the composited canvas track, not the camera — which is what makes stopShare
-     and every late-joining peer pick the effect up for free. */
+  // Camera track to restore after screen sharing ends.
   const cameraTrackRef = useRef(null);
-  /* The untouched camera. Kept separately because it is what actually holds the
-     device open: the effect pipeline reads from it, and only stopping THIS turns
-     the camera light off. */
-  const rawCameraTrackRef = useRef(null);
-  const effectRef = useRef(null); // active pipeline, or null
   const screenTrackRef = useRef(null);
   const candBufRef = useRef(new Map()); // socketId -> [candidate]
   const usersRef = useRef(new Map()); // socketId -> { userId, name, avatar }
@@ -62,6 +53,23 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   const passRef = useRef(null); // signed admission pass (set when the host admits us)
   const closedRef = useRef(false);
   useEffect(() => { remotesRef.current = remotes; }, [remotes]);
+  useEffect(() => {
+    const sample = async () => {
+      const peers = [...peersRef.current.values()];
+      if (!peers.length) { setNetworkQuality('Waiting for peers'); return; }
+      if (peers.some((peer) => ['failed', 'disconnected'].includes(peer.connectionState))) { setNetworkQuality('Poor'); return; }
+      if (peers.some((peer) => peer.connectionState !== 'connected')) { setNetworkQuality('Connecting'); return; }
+      const roundTrips = [];
+      for (const peer of peers) {
+        const stats = await peer.getStats().catch(() => null);
+        stats?.forEach((entry) => { if (entry.type === 'candidate-pair' && entry.state === 'succeeded' && Number.isFinite(entry.currentRoundTripTime)) roundTrips.push(entry.currentRoundTripTime); });
+      }
+      setNetworkQuality(roundTrips.some((seconds) => seconds > 0.3) ? 'Poor' : 'Good');
+    };
+    const timer = setInterval(sample, 5000);
+    sample();
+    return () => clearInterval(timer);
+  }, []);
 
   const emitSignal = useCallback((to, data) => {
     getSocket()?.emit('meeting:signal', { meetingId, to, data });
@@ -200,9 +208,10 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       setReactions((prev) => [...prev, { id, socketId, emoji }]);
       setTimeout(() => setReactions((prev) => prev.filter((r) => r.id !== id)), 4000);
     };
-    const onHand = ({ socketId, up }) => {
-      setRaisedHands((prev) => { const n = { ...prev }; if (up) n[socketId] = true; else delete n[socketId]; return n; });
+    const onHand = ({ socketId, up, at }) => {
+      setRaisedHands((prev) => { const n = { ...prev }; if (up) n[socketId] = at || Date.now(); else delete n[socketId]; return n; });
     };
+    const onLowerHand = () => setRaisedHands((prev) => { const n = { ...prev }; delete n.me; return n; });
     // Host asked me to mute (all or just me) — comply by disabling my mic.
     const onForceMute = ({ by }) => {
       const s = localRef.current;
@@ -232,12 +241,14 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       try {
         // Same as the call path: load the relay alongside the permission prompt.
         const relay = ensureIceServers();
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO_ENHANCE }, video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { ...AUDIO_ENHANCE, noiseSuppression: devices.noiseSuppression !== false, ...(devices.microphoneId ? { deviceId: { exact: devices.microphoneId } } : {}) },
+          video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, ...(devices.cameraId ? { deviceId: { exact: devices.cameraId } } : { facingMode: 'user' }) } : false,
+        });
         await relay;
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         localRef.current = stream;
         cameraTrackRef.current = stream.getVideoTracks()[0] || null;
-        rawCameraTrackRef.current = cameraTrackRef.current;
         // Host-controlled mute-on-entry: actually disable the mic to match `muted`.
         if (muteOnEntry && !isHost) stream.getAudioTracks().forEach((t) => { t.enabled = false; });
         setLocalStream(stream);
@@ -256,6 +267,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.on('meeting:questions', onQuestions);
       socket.on('meeting:reaction', onReaction);
       socket.on('meeting:hand', onHand);
+      socket.on('meeting:lower-hand', onLowerHand);
       socket.on('meeting:force-mute', onForceMute);
       socket.on('meeting:removed', onRemoved);
       socket.on('meeting:knock', onKnock);
@@ -264,7 +276,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       let waitTimer = null;
       let knockTimer = null;
       let joinedOnce = false;
-      const join = () => socket.emit('meeting:join', { meetingId, pass: passRef.current || undefined }, (res) => {
+      const join = () => socket.emit('meeting:join', { meetingId, pass: passRef.current || undefined, passwordPass }, (res) => {
         if (cancelled) return;
         if (!res?.ok) {
           // "Join anytime" is off and the host isn't here yet → wait & retry.
@@ -296,6 +308,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
         setStatus(res.peers.length ? 'connecting' : 'connected'); // alone = connected (waiting room)
         // I'm the newcomer → I offer to everyone already here.
         res.peers.forEach((p) => { usersRef.current.set(p.socketId, { userId: p.userId, name: p.name, avatar: p.avatar }); offerTo(p.socketId); });
+        setRaisedHands((current) => ({ ...current, ...Object.fromEntries(res.peers.filter((p) => p.handRaisedAt).map((p) => [p.socketId, p.handRaisedAt])) }));
         // Still presenting from before a reconnect? Re-announce to the new mesh.
         if (isRejoin && screenTrackRef.current) socket.emit('meeting:presenting', { meetingId, on: true });
         // Host-controlled auto-record: begin a local recording on join.
@@ -349,10 +362,6 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       // Finalize any recording so it downloads before we tear the streams down.
       const rec = recRef.current;
       if (rec) { recRef.current = null; cancelAnimationFrame(rec.raf); try { if (rec.recorder.state !== 'inactive') rec.recorder.stop(); } catch { /* noop */ } try { rec.audioCtx.close(); } catch { /* noop */ } }
-      // Stop the effect's render loop. It holds a requestAnimationFrame and a
-      // canvas capture, both of which outlive the page otherwise.
-      try { effectRef.current?.destroy(); } catch { /* noop */ }
-      effectRef.current = null;
       socket.off('meeting:signal', onSignal);
       socket.off('meeting:peer-joined', onPeerJoined);
       socket.off('meeting:peer-left', onPeerLeft);
@@ -362,6 +371,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       socket.off('meeting:questions', onQuestions);
       socket.off('meeting:reaction', onReaction);
       socket.off('meeting:hand', onHand);
+      socket.off('meeting:lower-hand', onLowerHand);
       socket.off('meeting:force-mute', onForceMute);
       socket.off('meeting:removed', onRemoved);
       socket.off('meeting:knock', onKnock);
@@ -453,80 +463,9 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
     setMuted((m) => !m);
   }, [muted]);
 
-  /**
-   * Background blur / virtual background.
-   *
-   * Swaps the outgoing video track with `replaceTrack`, which needs NO
-   * renegotiation — turning blur on mid-call doesn't interrupt anyone's video.
-   * Switching between effects doesn't even do that: the pipeline keeps producing
-   * the same track and only changes what it paints.
-   *
-   * The wasm runtime (~12MB) is fetched on the first enable and cached, so a
-   * call where nobody touches this pays nothing for it.
-   */
-  const setVideoEffect = useCallback(async (next, imageUrl) => {
-    if (!video) return;
-    const raw = rawCameraTrackRef.current;
-    if (!raw) return;
-
-    // Already running: just repaint. No track change, no signalling.
-    if (effectRef.current && next !== EFFECTS.NONE) {
-      await effectRef.current.setEffect(next, imageUrl);
-      setVideoEffectState(next);
-      return;
-    }
-
-    const sendTrack = (track) => {
-      cameraTrackRef.current = track;
-      // While screen-sharing the senders carry the screen; stopShare will pick
-      // this up from cameraTrackRef when it restores.
-      if (!screenTrackRef.current) {
-        peersRef.current.forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
-          if (sender) sender.replaceTrack(track).catch(() => {});
-        });
-      }
-      // Rebuild the local stream so the preview and any late peer see the same
-      // thing the room sees.
-      const next$ = new MediaStream([track, ...(localRef.current?.getAudioTracks() || [])]);
-      localRef.current = next$;
-      setLocalStream(next$);
-    };
-
-    if (next === EFFECTS.NONE) {
-      effectRef.current?.destroy();
-      effectRef.current = null;
-      sendTrack(raw);
-      setVideoEffectState(EFFECTS.NONE);
-      return;
-    }
-
-    try {
-      setEffectLoading(true);
-      const pipeline = await createEffectPipeline(new MediaStream([raw]), { effect: next, image: imageUrl });
-      effectRef.current = pipeline;
-      sendTrack(pipeline.stream.getVideoTracks()[0]);
-      setVideoEffectState(next);
-    } catch (err) {
-      /* Show the REAL reason and keep it on screen — these messages name a
-         specific fix (a CSP header, a missing asset, a dead GPU delegate) and a
-         2-second toast that says "could not start" helps nobody diagnose it. */
-      const why = err?.message || 'Background effects could not start on this device.';
-      toast.error(why, { duration: 8000 });
-      console.error('[video effects]', err);
-      setVideoEffectState(EFFECTS.NONE);
-    } finally {
-      setEffectLoading(false);
-    }
-  }, [video]);
-
   const toggleCamera = useCallback(() => {
     const s = localRef.current; if (!s) return;
     s.getVideoTracks().forEach((t) => { t.enabled = camOff; });
-    /* Also gate the RAW camera. With an effect running the stream above is the
-       canvas, and disabling only that leaves the device open — camera light on
-       while the UI says the camera is off. */
-    if (rawCameraTrackRef.current) rawCameraTrackRef.current.enabled = camOff;
     setCamOff((c) => !c);
   }, [camOff]);
 
@@ -615,7 +554,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
       const up = !prev.me;
       getSocket()?.emit('meeting:hand', { meetingId, up });
       const n = { ...prev };
-      if (up) n.me = true; else delete n.me;
+      if (up) n.me = Date.now(); else delete n.me;
       return n;
     });
   }, [meetingId]);
@@ -642,8 +581,7 @@ export function useMeetingRoom(meetingId, { video = true, muteOnEntry = false, a
   }, [meetingId]);
 
   return {
-    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError,
-    videoEffect, effectLoading, setVideoEffect,
+    localStream, screenStream, remotes, presenterSid, status, muted, camOff, sharingScreen, recording, mediaError, networkQuality,
     toggleMute, toggleCamera, toggleScreenShare, toggleRecording, leave,
     chatMessages, reactions, raisedHands, handRaised, knocks, admitGuest,
     sendChat, sendReaction, toggleHand, muteEveryone, muteParticipant, removeParticipant,

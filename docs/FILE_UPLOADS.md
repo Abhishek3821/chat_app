@@ -33,13 +33,13 @@ const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|
 
 | Category | Extensions | Size limit |
 |---|---|---|
-| Images | `.jpeg .jpg .png .gif .webp` | 52,428,800 bytes (50 MB) |
+| Images | `.jpeg .jpg .png .gif .webp` | 10,485,760 bytes (10 MB) |
 | Video | `.mp4 .webm .mov` | 52,428,800 bytes (50 MB) |
 | Audio | `.mp3 .wav .ogg .m4a` | 52,428,800 bytes (50 MB) |
 | Documents | `.pdf .doc .docx .xls .xlsx .ppt .pptx .txt` | 52,428,800 bytes (50 MB) |
 | Archives | `.zip` | 52,428,800 bytes (50 MB) |
 
-**There are no per-type limits.** One global multer limit applies: `limits: { fileSize: 50 * 1024 * 1024 }` = **52,428,800 bytes = 50 MB per file**, plus the `10`-file cap from `upload.array('files', 10)`. Multer's other defaults (fields, parts) are untouched. The `express.json`/`urlencoded` `2mb` caps do **not** apply to multipart bodies.
+Images have a **10 MB per-file** limit. Video, audio, documents and archives retain the **50 MB per-file** limit. Multer enforces the 50 MB global ceiling, and server validation applies the stricter image limit; the client mirrors both rules before uploading. The request cap remains `10` files from `upload.array('files', 10)`. The `express.json`/`urlencoded` `2mb` caps do **not** apply to multipart bodies.
 
 Downstream caps worth knowing: `MAX_ATTACHMENTS = 20` per message and `MAX_CONTENT = 10_000` chars (`server/controllers/messageController.js:13-14`); broadcast lists cap attachments at 20 (`broadcastController.js:83`), catalog images at 10 (`catalogController.js:68`).
 

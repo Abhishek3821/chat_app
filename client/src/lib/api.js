@@ -128,6 +128,7 @@ export function clearMediaToken() {
 /** Upload one or more files (multipart) → returns [{ url, name, size, mime }]. */
 /** Mirrors server/middleware/upload.js — keep the three in step. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 export const MAX_UPLOAD_FILES = 10;
 const ALLOWED_UPLOAD_EXT = /\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/i;
 
@@ -149,8 +150,12 @@ function assertUploadable(files) {
     throw new Error(`Too many files — ${MAX_UPLOAD_FILES} at a time.`);
   }
   for (const f of files) {
-    if (f.size > MAX_UPLOAD_BYTES) {
-      throw new Error(`"${f.name}" is ${prettyMB(f.size)} — the limit is ${prettyMB(MAX_UPLOAD_BYTES)}.`);
+    if (/\.(jpeg|jpg|png|gif|webp)$/i.test(f.name || '') && f.size > MAX_IMAGE_UPLOAD_BYTES) {
+      throw new Error(`"${f.name}" is too large. Images can be up to 10 MB.`);
+    }
+    const limit = /\.(jpeg|jpg|png|gif|webp)$/i.test(f.name || '') ? MAX_IMAGE_UPLOAD_BYTES : MAX_UPLOAD_BYTES;
+    if (f.size > limit) {
+      throw new Error(`"${f.name}" is ${prettyMB(f.size)} — the limit is ${prettyMB(limit)}.`);
     }
     if (f.size === 0) throw new Error(`"${f.name}" is empty.`);
     if (!ALLOWED_UPLOAD_EXT.test(f.name || '')) {
