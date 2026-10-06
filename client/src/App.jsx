@@ -1,4 +1,5 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import lazyWithRetry from './lib/lazyWithRetry';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster, toast, useToasterStore } from 'react-hot-toast';
 
@@ -17,28 +18,28 @@ import Login from './pages/auth/Login.jsx';
 import AppLayout from './components/layout/AppLayout.jsx';
 import ChatsPage from './pages/ChatsPage.jsx';
 
-const Signup = lazy(() => import('./pages/auth/Signup.jsx'));
-const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword.jsx'));
-const ResetPassword = lazy(() => import('./pages/auth/ResetPassword.jsx'));
-const VerifyOtp = lazy(() => import('./pages/auth/VerifyOtp.jsx'));
-const CallsPage = lazy(() => import('./pages/CallsPage.jsx'));
-const MeetingsPage = lazy(() => import('./pages/MeetingsPage.jsx'));
-const StatusPage = lazy(() => import('./pages/StatusPage.jsx'));
-const GroupsPage = lazy(() => import('./pages/GroupsPage.jsx'));
-const CommunitiesPage = lazy(() => import('./pages/CommunitiesPage.jsx'));
-const BusinessPage = lazy(() => import('./pages/BusinessPage.jsx'));
-const WorkspacePage = lazy(() => import('./pages/WorkspacePage.jsx'));
-const GuestPortal = lazy(() => import('./pages/GuestPortal.jsx'));
-const TeamContactPage = lazy(() => import('./pages/TeamContactPage.jsx'));
-const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage.jsx'));
-const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
-const StarredPage = lazy(() => import('./pages/StarredPage.jsx'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
-const DevelopersPage = lazy(() => import('./pages/DevelopersPage.jsx'));
-const PlatformPage = lazy(() => import('./pages/PlatformPage.jsx'));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'));
-const MeetingRoom = lazy(() => import('./pages/MeetingRoom.jsx'));
-const JoinInvite = lazy(() => import('./pages/JoinInvite.jsx'));
+const Signup = lazyWithRetry(() => import('./pages/auth/Signup.jsx'));
+const ForgotPassword = lazyWithRetry(() => import('./pages/auth/ForgotPassword.jsx'));
+const ResetPassword = lazyWithRetry(() => import('./pages/auth/ResetPassword.jsx'));
+const VerifyOtp = lazyWithRetry(() => import('./pages/auth/VerifyOtp.jsx'));
+const CallsPage = lazyWithRetry(() => import('./pages/CallsPage.jsx'));
+const MeetingsPage = lazyWithRetry(() => import('./pages/MeetingsPage.jsx'));
+const StatusPage = lazyWithRetry(() => import('./pages/StatusPage.jsx'));
+const GroupsPage = lazyWithRetry(() => import('./pages/GroupsPage.jsx'));
+const CommunitiesPage = lazyWithRetry(() => import('./pages/CommunitiesPage.jsx'));
+const BusinessPage = lazyWithRetry(() => import('./pages/BusinessPage.jsx'));
+const WorkspacePage = lazyWithRetry(() => import('./pages/WorkspacePage.jsx'));
+const GuestPortal = lazyWithRetry(() => import('./pages/GuestPortal.jsx'));
+const TeamContactPage = lazyWithRetry(() => import('./pages/TeamContactPage.jsx'));
+const BroadcastsPage = lazyWithRetry(() => import('./pages/BroadcastsPage.jsx'));
+const ContactsPage = lazyWithRetry(() => import('./pages/ContactsPage.jsx'));
+const StarredPage = lazyWithRetry(() => import('./pages/StarredPage.jsx'));
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage.jsx'));
+const DevelopersPage = lazyWithRetry(() => import('./pages/DevelopersPage.jsx'));
+const PlatformPage = lazyWithRetry(() => import('./pages/PlatformPage.jsx'));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard.jsx'));
+const MeetingRoom = lazyWithRetry(() => import('./pages/MeetingRoom.jsx'));
+const JoinInvite = lazyWithRetry(() => import('./pages/JoinInvite.jsx'));
 
 /**
  * Caps how many toasts can be on screen at once.

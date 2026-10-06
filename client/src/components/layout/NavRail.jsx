@@ -67,10 +67,10 @@ export default function NavRail() {
         <span className="hidden text-lg font-extrabold tracking-tight text-content 2xl:block">ChatKonect</span>
       </button>
 
-      {/* min-h-0 + overflow lets the list scroll instead of squashing/overflowing
-          on short viewports — a landscape tablet plus the admin/developer items
-          adds up to more than the rail is tall. */}
-      <div className="no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto 2xl:items-stretch">
+      {/* Every destination (incl. admin tools + Settings) lives in one scroll
+          area; min-h-0 + overflow lets it scroll instead of squashing on short
+          viewports. Only the footer below (Log out + profile) stays pinned. */}
+      <div className="no-scrollbar mb-2 flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto overscroll-contain 2xl:items-stretch">
         {items.map(({ to, icon: Icon, label }) => (
           <Tooltip key={to} label={label} className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
             <NavLink to={to} end={to === '/'} className="block 2xl:w-full">
@@ -95,11 +95,8 @@ export default function NavRail() {
             </NavLink>
           </Tooltip>
         ))}
-      </div>
-
-      <div className="flex shrink-0 flex-col items-center gap-1.5 2xl:items-stretch">
         {user?.role === 'admin' && (
-          <Tooltip label="Admin" className="2xl:w-full" labelClassName="2xl:hidden">
+          <Tooltip label="Admin" className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
             <NavLink to="/admin" className="block 2xl:w-full">
               {({ isActive }) => (
                 <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
@@ -111,7 +108,7 @@ export default function NavRail() {
           </Tooltip>
         )}
         {user?.role === 'admin' && (
-          <Tooltip label="Embed platform" className="2xl:w-full" labelClassName="2xl:hidden">
+          <Tooltip label="Embed platform" className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
             <NavLink to="/platform" className="block 2xl:w-full">
               {({ isActive }) => (
                 <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
@@ -123,7 +120,7 @@ export default function NavRail() {
           </Tooltip>
         )}
         {user?.role === 'admin' && (
-          <Tooltip label="Developers" className="2xl:w-full" labelClassName="2xl:hidden">
+          <Tooltip label="Developers" className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
             <NavLink to="/developers" className="block 2xl:w-full">
               {({ isActive }) => (
                 <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
@@ -134,7 +131,7 @@ export default function NavRail() {
             </NavLink>
           </Tooltip>
         )}
-        <Tooltip label="Settings" className="2xl:w-full" labelClassName="2xl:hidden">
+        <Tooltip label="Settings" className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
           <NavLink to="/settings" className="block 2xl:w-full">
             {({ isActive }) => (
               <span className={cn(railItem, isActive ? 'bg-brand-gradient text-white shadow-glow-lg' : 'neu-hover text-content-muted hover:text-content')}>
@@ -144,6 +141,10 @@ export default function NavRail() {
             )}
           </NavLink>
         </Tooltip>
+      </div>
+
+      {/* Pinned footer: only Log out + profile stay fixed; everything above scrolls. */}
+      <div className="flex shrink-0 flex-col items-center gap-1.5 border-t border-border/60 pt-2 2xl:items-stretch">
         <Tooltip label="Log out" className="2xl:w-full" labelClassName="2xl:hidden">
           <button onClick={logout} className={cn(railItem, 'neu-press text-content-muted hover:bg-red-500/10 hover:text-red-500')}>
             <LogOut size={20} className="shrink-0" />

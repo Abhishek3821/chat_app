@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, Suspense } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useOutlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import NavRail from './NavRail';
@@ -64,7 +65,15 @@ export default function AppLayout() {
                 // across an ultrawide monitor.
                 className={isChat ? 'h-full' : 'mx-auto h-full w-full max-w-screen-2xl'}
               >
-                {outlet}
+                <Suspense
+                  fallback={
+                    <div className="grid h-full min-h-[40vh] place-items-center">
+                      <Loader2 size={26} className="animate-spin text-brand-500" />
+                    </div>
+                  }
+                >
+                  {outlet}
+                </Suspense>
               </motion.div>
             </ErrorBoundary>
           </main>

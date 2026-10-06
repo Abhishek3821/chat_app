@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
+import lazyWithRetry from './lib/lazyWithRetry';
 import { setToken } from './lib/token';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import AppLayout from './components/layout/AppLayout.jsx';
@@ -6,15 +7,15 @@ import ChatsPage from './pages/ChatsPage.jsx';
 import { useAuth } from './store/useAuth';
 import api from './lib/api';
 
-const CallsPage = lazy(() => import('./pages/CallsPage.jsx'));
-const MeetingsPage = lazy(() => import('./pages/MeetingsPage.jsx'));
-const StatusPage = lazy(() => import('./pages/StatusPage.jsx'));
-const GroupsPage = lazy(() => import('./pages/GroupsPage.jsx'));
-const CommunitiesPage = lazy(() => import('./pages/CommunitiesPage.jsx'));
-const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage.jsx'));
-const ContactsPage = lazy(() => import('./pages/ContactsPage.jsx'));
-const StarredPage = lazy(() => import('./pages/StarredPage.jsx'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const CallsPage = lazyWithRetry(() => import('./pages/CallsPage.jsx'));
+const MeetingsPage = lazyWithRetry(() => import('./pages/MeetingsPage.jsx'));
+const StatusPage = lazyWithRetry(() => import('./pages/StatusPage.jsx'));
+const GroupsPage = lazyWithRetry(() => import('./pages/GroupsPage.jsx'));
+const CommunitiesPage = lazyWithRetry(() => import('./pages/CommunitiesPage.jsx'));
+const BroadcastsPage = lazyWithRetry(() => import('./pages/BroadcastsPage.jsx'));
+const ContactsPage = lazyWithRetry(() => import('./pages/ContactsPage.jsx'));
+const StarredPage = lazyWithRetry(() => import('./pages/StarredPage.jsx'));
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage.jsx'));
 
 /**
  * The drop-in embed: the whole ChatKonect UI, inside a host product's page,

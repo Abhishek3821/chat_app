@@ -10,6 +10,13 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Crawl every source file at dev-server start so deps used only by lazy
+  // routes (recharts, livekit, qrcode, emoji picker…) are pre-bundled up front.
+  // Otherwise Vite discovers them on the first visit to a tab, re-optimizes,
+  // and the in-flight chunk import fails → ErrorBoundary "Something went sideways".
+  optimizeDeps: {
+    entries: ['index.html', 'src/**/*.{js,jsx}'],
+  },
   build: {
     // Split heavy libraries into their own vendor chunks. This silences Vite's
     // "chunk larger than 500 kB" advisory and improves caching — the charts
