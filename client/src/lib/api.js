@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getToken, setToken, clearToken } from './token';
+import { IS_EMBED, requestEmbedRefresh } from './embedSession';
 
 /**
  * Resolve the API base URL, tolerant of how VITE_API_URL is set:
@@ -20,7 +21,7 @@ const baseURL = resolveApiBase();
 
 export const api = axios.create({
   baseURL,
-  withCredentials: true,
+  withCredentials: !IS_EMBED,
 });
 
 // Warm-up ping, fired the moment the app loads: free-tier hosts (Render) put
@@ -34,7 +35,7 @@ if (typeof window !== 'undefined') {
 // Attach bearer token (kept in localStorage as a fallback to the httpOnly cookie).
 api.interceptors.request.use((config) => {
   const token = getToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -47,6 +48,7 @@ const AUTH_FLOW_PATHS = /\/auth\/(login|signup|email\/(send|verify)-code|verify-
 // refresh cookie) rather than stampeding it.
 let refreshing = null;
 export async function refreshAccessToken() {
+  if (IS_EMBED) return requestEmbedRefresh();
   if (!refreshing) {
     refreshing = api
       .post('/auth/refresh')
@@ -70,7 +72,7 @@ api.interceptors.response.use(
     const status = err.response?.status;
     const url = original.url || '';
 
-    if (status === 401 && !AUTH_FLOW_PATHS.test(url) && !original._retried) {
+    if (status === 401 && !original.skipAuthRefresh && !AUTH_FLOW_PATHS.test(url) && !original._retried) {
       original._retried = true;
       const token = await refreshAccessToken();
       if (token) {
@@ -84,7 +86,9 @@ api.interceptors.response.use(
     }
 
     const message = err.response?.data?.message || err.message || 'Something went wrong';
-    return Promise.reject(new Error(message));
+    // Preserve status and response for the embed's actionable error reporting.
+    err.message = message;
+    return Promise.reject(err);
   }
 );
 

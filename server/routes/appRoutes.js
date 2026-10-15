@@ -6,6 +6,7 @@ import {
   updateApp,
   rotateAppSecret,
   disableApp,
+  deleteApp,
   appStats,
 } from '../controllers/platformController.js';
 
@@ -22,6 +23,7 @@ router.use(protect);
 
 router.route('/').get(listApps).post(createApp);
 router.route('/:id').patch(updateApp).delete(disableApp);
+router.delete('/:id/permanent', deleteApp);
 router.get('/:id/stats', appStats);
 router.post('/:id/rotate', rotateAppSecret);
 

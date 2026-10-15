@@ -26,6 +26,8 @@
  * session still survives a refresh exactly as before.
  */
 
+import { IS_EMBED } from './embedSession';
+
 const KEY = 'cc_token';
 
 let memory = null;
@@ -60,21 +62,21 @@ function safeRemove() {
 
 /** The current token, or null. Memory first, storage as a fallback. */
 export function getToken() {
-  return memory || safeGet();
+  return memory || (IS_EMBED ? null : safeGet());
 }
 
 /** Store a token. Persists when it can; always works in memory. */
 export function setToken(value) {
   if (!value) return clearToken();
   memory = String(value);
-  safeSet(memory);
+  if (!IS_EMBED) safeSet(memory);
   return memory;
 }
 
 /** Forget it everywhere. */
 export function clearToken() {
   memory = null;
-  safeRemove();
+  if (!IS_EMBED) safeRemove();
   return null;
 }
 

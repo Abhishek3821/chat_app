@@ -63,7 +63,7 @@ export const appSecretAuth = asyncHandler(async (req, _res, next) => {
 
   const tenant = await App.findOne({ appId: String(appId) }).select('+secretHash');
   if (!tenant) throw new ApiError(401, 'Unknown app.');
-  if (!tenant.active) throw new ApiError(403, 'This app is disabled.');
+  if (!tenant.active || tenant.deletionStartedAt) throw new ApiError(403, 'This app is disabled.');
   if (!safeEqualHex(hashAppSecret(raw), tenant.secretHash)) throw new ApiError(401, 'Invalid app secret.');
 
   req.app_ = tenant;

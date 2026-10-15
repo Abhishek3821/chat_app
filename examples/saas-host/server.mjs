@@ -26,7 +26,7 @@ const PORT = Number(process.env.PORT) || 4321;
 /** Where the ChatKonect FRONTEND is served (serves /embed.js and /embed). */
 const CK_HOST = (process.env.CHATKONECT_HOST || 'http://localhost:5290').replace(/\/+$/, '');
 /** Where the ChatKonect API is served (mints tokens). */
-const CK_API = (process.env.CHATKONECT_API || 'http://localhost:5000').replace(/\/+$/, '');
+const CK_API = (process.env.CHATKONECT_API || 'http://localhost:5000').replace(/\/+$/, '').replace(/\/api$/, '');
 
 const APP_ID = process.env.APP_ID || '';
 const APP_SECRET = process.env.APP_SECRET || '';
@@ -63,7 +63,7 @@ async function mintToken(user) {
     headers: ck,
     body: JSON.stringify({ externalId: user.id, name: user.name, avatar: user.avatar }),
   });
-  if (!up.ok && up.status !== 409) {
+  if (!up.ok) {
     throw new Error(`provision failed (${up.status}): ${(await up.text()).slice(0, 200)}`);
   }
 
@@ -109,7 +109,8 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
-server.listen(PORT, () => {
+// This example deliberately impersonates demo users; keep it on loopback.
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  Host app     http://localhost:${PORT}`);
   console.log(`  Second user  http://localhost:${PORT}/?as=bob   (open in another window to chat)`);
   console.log(`  Embed from   ${CK_HOST}`);

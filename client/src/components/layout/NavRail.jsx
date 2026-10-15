@@ -24,6 +24,7 @@ import { useAuth } from '../../store/useAuth';
 import { useUI } from '../../store/useUI';
 import { useWorkspace } from '../../store/useWorkspace';
 import { cn } from '../../lib/utils';
+import { useEmbedCapabilities } from '../../lib/embedCapabilities';
 
 const baseItems = [
   { to: '/', icon: MessageSquare, label: 'Chats' },
@@ -43,6 +44,7 @@ const railItem =
 const railLabel = 'hidden truncate text-sm font-semibold 2xl:block';
 
 export default function NavRail() {
+  const { routeAllowed } = useEmbedCapabilities();
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const openModal = useUI((s) => s.openModal);
@@ -71,7 +73,7 @@ export default function NavRail() {
           area; min-h-0 + overflow lets it scroll instead of squashing on short
           viewports. Only the footer below (Log out + profile) stays pinned. */}
       <div className="no-scrollbar mb-2 flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto overscroll-contain 2xl:items-stretch">
-        {items.map(({ to, icon: Icon, label }) => (
+        {items.filter(({ to }) => routeAllowed(to)).map(({ to, icon: Icon, label }) => (
           <Tooltip key={to} label={label} className="shrink-0 2xl:w-full" labelClassName="2xl:hidden">
             <NavLink to={to} end={to === '/'} className="block 2xl:w-full">
               {({ isActive }) => (

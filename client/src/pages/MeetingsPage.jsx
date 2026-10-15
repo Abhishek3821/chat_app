@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { integrationLink } from '../lib/integrationLink';
 import { motion } from 'framer-motion';
 import { format, isToday, isTomorrow, isYesterday, isSameDay, addDays } from 'date-fns';
 import {
@@ -189,7 +190,7 @@ function useMeetingActions(meeting) {
   }, [roomCode, navigate]);
 
   const copyLink = useCallback(() => {
-    const url = `${window.location.origin}/meet/${roomCode}`;
+    const url = integrationLink(`/meet/${roomCode}`);
     navigator.clipboard
       ?.writeText(url)
       .then(() => toast.success('Meeting link copied — share it with anyone.'))

@@ -109,3 +109,18 @@ export const getIceServers = asyncHandler(async (req, res) => {
     ...iceStatus(),
   });
 });
+
+// Validate the identity bridge before mounting any tenant UI. A first-party
+// session or a token for another app must never be adopted by this frame.
+export const getEmbedSession = asyncHandler(async (req, res) => {
+  const appId = String(req.query.appId || '');
+  if (!appId) throw new ApiError(400, 'appId is required.');
+  const tenant = req.user.app ? await App.findById(req.user.app) : null;
+  if (!tenant || tenant.appId !== appId) throw new ApiError(403, 'This user token belongs to a different app.');
+  if (!tenant.active) throw new ApiError(403, 'This app is disabled.');
+  res.set('Cache-Control', 'no-store').json({
+    success: true,
+    user: req.user.toSafeJSON(),
+    app: { appId: tenant.appId, name: tenant.name, features: tenant.features },
+  });
+});

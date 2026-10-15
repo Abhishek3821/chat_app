@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Drop the whole ChatKonect UI into a React app, authenticated by your own login.",
   "type": "module",
-  "main": "src/index.jsx",
+  "main": "src/index.js",
+  "exports": { ".": { "types": "./src/index.d.ts", "import": "./src/index.js", "default": "./src/index.js" } },
+  "types": "src/index.d.ts",
   "files": ["src"],
   "peerDependencies": { "react": ">=18" },
   "license": "UNLICENSED"

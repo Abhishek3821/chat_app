@@ -3,6 +3,8 @@ import { getToken, setToken, clearToken } from '../lib/token';
 import api, { DEMO_MODE, ensureMediaToken, clearMediaToken } from '../lib/api';
 import { resetIceServers } from '../lib/iceServers';
 import { resetFreshness } from '../lib/freshness';
+import { IS_EMBED } from '../lib/embedSession';
+import { safeLocalStorage, safeSessionStorage } from '../lib/storage';
 import { ME } from '../lib/demoData';
 import { useUI } from './useUI';
 
@@ -13,7 +15,7 @@ export const useAuth = create((set, get) => ({
   /** Bootstrap the session on app load. */
   init: async () => {
     if (DEMO_MODE) {
-      const cached = localStorage.getItem('cc_demo_authed');
+      const cached = safeLocalStorage.getItem('cc_demo_authed');
       set({ user: cached ? ME : null, loading: false });
       return;
     }
@@ -35,14 +37,14 @@ export const useAuth = create((set, get) => ({
    */
   login: async ({ identifier, email, password }) => {
     if (DEMO_MODE) {
-      localStorage.setItem('cc_demo_authed', '1');
+      safeLocalStorage.setItem('cc_demo_authed', '1');
       set({ user: ME });
       return { user: ME };
     }
     const id = identifier ?? email;
     const { data } = await api.post('/auth/login', { identifier: id, email: id, password });
     if (data.token) setToken(data.token);
-    sessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
+    safeSessionStorage.setItem('cc_unlocked', '1'); // just authenticated — don't re-prompt for the PIN
     set({ user: data.user });
     if (data.user?.workspaceRole !== 'guest') ensureMediaToken(true);
     return data;
@@ -65,14 +67,14 @@ export const useAuth = create((set, get) => ({
   /** Final signup — requires the emailToken proof; returns a full session. */
   signup: async (payload) => {
     if (DEMO_MODE) {
-      localStorage.setItem('cc_demo_authed', '1');
+      safeLocalStorage.setItem('cc_demo_authed', '1');
       set({ user: { ...ME, ...payload } });
       return { user: ME };
     }
     const { data } = await api.post('/auth/signup', payload);
     if (data.token) {
       setToken(data.token);
-      sessionStorage.setItem('cc_unlocked', '1');
+      safeSessionStorage.setItem('cc_unlocked', '1');
       set({ user: data.user });
       if (data.user?.workspaceRole !== 'guest') ensureMediaToken(true);
     }
@@ -81,13 +83,13 @@ export const useAuth = create((set, get) => ({
 
   verifyOtp: async ({ email, otp }) => {
     if (DEMO_MODE) {
-      localStorage.setItem('cc_demo_authed', '1');
+      safeLocalStorage.setItem('cc_demo_authed', '1');
       set({ user: ME });
       return ME;
     }
     const { data } = await api.post('/auth/verify-otp', { email, otp });
     if (data.token) setToken(data.token);
-    sessionStorage.setItem('cc_unlocked', '1');
+    safeSessionStorage.setItem('cc_unlocked', '1');
     set({ user: data.user });
     ensureMediaToken(true);
     return data.user;
@@ -128,7 +130,7 @@ export const useAuth = create((set, get) => ({
   deleteAccount: async () => {
     if (!DEMO_MODE) await api.delete('/users/me');
     clearToken();
-    localStorage.removeItem('cc_demo_authed');
+    safeLocalStorage.removeItem('cc_demo_authed');
     clearMediaToken();
     /* TURN credentials are minted per user and signed with an expiry. Dropping
        them means the next person to sign in on this browser fetches their own
@@ -212,7 +214,7 @@ export const useAuth = create((set, get) => ({
   enableTwoStep: async (pin) => {
     await api.post('/auth/two-step/enable', { pin });
     set((s) => ({ user: { ...s.user, twoStepEnabled: true } }));
-    sessionStorage.setItem('cc_unlocked', '1'); // enabling counts as unlocked now
+    safeSessionStorage.setItem('cc_unlocked', '1'); // enabling counts as unlocked now
   },
   disableTwoStep: async (pin) => {
     await api.post('/auth/two-step/disable', { pin });
@@ -224,7 +226,7 @@ export const useAuth = create((set, get) => ({
   },
   verifyTwoStep: async (pin) => {
     await api.post('/auth/two-step/verify', { pin });
-    sessionStorage.setItem('cc_unlocked', '1');
+    safeSessionStorage.setItem('cc_unlocked', '1');
   },
   /** Forgot PIN → email an OTP to the account address. */
   requestTwoStepReset: async () => {
@@ -234,7 +236,7 @@ export const useAuth = create((set, get) => ({
   /** Verify the emailed OTP and set a new PIN. Unlocks this session. */
   resetTwoStepPin: async ({ otp, pin }) => {
     const { data } = await api.post('/auth/two-step/reset', { otp, pin });
-    sessionStorage.setItem('cc_unlocked', '1'); // email ownership proven — unlock
+    safeSessionStorage.setItem('cc_unlocked', '1'); // email ownership proven — unlock
     return data;
   },
 
@@ -260,9 +262,9 @@ export const useAuth = create((set, get) => ({
    *  to dark/teal, and the user had no way to connect the two. A real logout
    *  (below) still clears it, which is what the shared-browser case needs. */
   forceLogout: () => {
-    sessionStorage.removeItem('cc_unlocked');
+    try { safeSessionStorage.removeItem('cc_unlocked'); } catch { /* storage denied */ }
     clearToken();
-    localStorage.removeItem('cc_demo_authed');
+    try { safeLocalStorage.removeItem('cc_demo_authed'); } catch { /* storage denied */ }
     clearMediaToken();
     set({ user: null, loading: false });
   },
@@ -276,14 +278,15 @@ export const useAuth = create((set, get) => ({
       }
     }
     clearToken();
-    localStorage.removeItem('cc_demo_authed');
-    sessionStorage.removeItem('cc_unlocked');
+    try { safeLocalStorage.removeItem('cc_demo_authed'); } catch { /* storage denied */ }
+    try { safeSessionStorage.removeItem('cc_unlocked'); } catch { /* storage denied */ }
     clearMediaToken();
     // Otherwise the next user to sign in on this browser could have their first
     // page load skipped as "recently fetched" and see the previous account's list.
     resetFreshness();
     useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null });
+    if (IS_EMBED) window.dispatchEvent(new Event('cc:embed-logout'));
   },
 }));
 

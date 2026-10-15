@@ -28,6 +28,7 @@ import { useUI } from '../../store/useUI';
 import { useAuth } from '../../store/useAuth';
 import { useWorkspace } from '../../store/useWorkspace';
 import { cn } from '../../lib/utils';
+import { useEmbedCapabilities } from '../../lib/embedCapabilities';
 
 // Four primary destinations plus More. The bar can hold five 68px targets on a
 // 320px screen and no more, and NavRail (which carries all twelve) is desktop
@@ -41,6 +42,7 @@ const tabs = [
 ];
 
 export default function MobileNav() {
+  const { routeAllowed } = useEmbedCapabilities();
   const totalUnread = useChat((s) => s.chats.reduce((n, c) => n + (c.unreadCount || 0), 0));
   const activeChatId = useChat((s) => s.activeChatId);
   const chatListOpen = useUI((s) => s.chatListOpen);
@@ -95,7 +97,7 @@ export default function MobileNav() {
           border-box, `h-[68px]` + a 34px iOS inset left the items only 34px to sit
           in. This also matches AppLayout's content padding exactly. */}
       <nav className="frost neu-rail-top fixed inset-x-0 bottom-0 z-30 flex h-[calc(68px+env(safe-area-inset-bottom))] items-center justify-around border-t border-border px-1 pb-[env(safe-area-inset-bottom)] xs:px-2 md:hidden">
-        {tabs.map(({ to, icon: Icon, label }) => (
+        {tabs.filter(({ to }) => routeAllowed(to)).map(({ to, icon: Icon, label }) => (
           <NavLink key={to} to={to} end={to === '/'} className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2">
             {({ isActive }) => (
               <>
@@ -135,7 +137,7 @@ export default function MobileNav() {
           Escape handling, scroll lock and home-indicator padding with it. */}
       <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title="More" subtitle="Everything else in ChatKonect" size="sm">
         <div className="space-y-1.5 pb-2">
-          {more.map(({ to, icon: Icon, label, hint }) => {
+          {more.filter(({ to }) => routeAllowed(to)).map(({ to, icon: Icon, label, hint }) => {
             const active = pathname === to || pathname.startsWith(`${to}/`);
             return (
               <button

@@ -116,7 +116,7 @@
         getToken: () =>
           fetch('/chat-token' + window.location.search)
             .then((r) => (r.ok ? r.json() : r.json().then((e) => Promise.reject(new Error(e.error)))))
-            .then((d) => d.token),
+            .then((d) => d),
 
         onReady: (user) => {
           status.textContent = 'signed in as ' + user.name;

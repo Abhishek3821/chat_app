@@ -114,6 +114,9 @@ Open **http://localhost:5290** (ChatKonect uses this fixed, unique port so it ne
 
 ## 📚 Documentation
 
+- **[Developer integration guide](docs/DEVELOPER_INTEGRATION.md)** — embed the hosted chat, audio/video calls and meetings UI inside another platform using its existing login.
+- **[Word integration guide](docs/ChatKonect_Developer_Integration_Guide.docx)** — share this file with the integrating developer.
+
 - **[`docs/GUIDE.md`](docs/GUIDE.md)** — product overview, architecture & data flow, the full **"what you must do manually"** checklist, and independent verification results. **Start here.**
 - **[`docs/API.md`](docs/API.md)** — every REST endpoint + Socket.IO event.
 

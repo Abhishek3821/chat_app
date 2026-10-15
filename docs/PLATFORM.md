@@ -2,6 +2,11 @@
 
 How to put ChatKonect's chat, calls and meetings **inside another product**.
 
+For the current copy-and-run integration, use [DEVELOPER_INTEGRATION.md](DEVELOPER_INTEGRATION.md).
+The loader now schedules renewal from the JWT expiry, validates the token against
+`GET /api/v1/embed/session?appId=...`, supports host-page share links and exposes
+meeting-room/invite routes. App origins are editable in `/platform`.
+
 Every fact below was extracted from the source (`server/routes/platformRoutes.js`,
 `server/controllers/platformController.js`, `server/utils/appAuth.js`, `server/models/App.js`,
 `server/utils/tenancy.js`) and cross-checked against the route definitions. Where a doc and the code
@@ -118,7 +123,7 @@ Turning an enforced flag off makes its endpoints return:
 | **Seat limit** | 10 000 | 1 – 1 000 000 | Values outside the range are clamped, not rejected. |
 | **User-token lifetime (minutes)** | 60 | 5 – 1440 | Clamped. Shorter is safer; the host re-mints on demand. |
 
-### Rotate secret / Disable app
+### Rotate secret / Disable app / Delete app
 
 - **Rotate secret** — issues a new secret and invalidates the old one **immediately**. Every backend
   using the old secret starts getting `401 Invalid app secret` on its next call. Coordinate this with
@@ -126,6 +131,12 @@ Turning an enforced flag off makes its endpoints return:
 - **Disable app** — sets `active: false`. All platform calls return `403 This app is disabled.`
   Existing user tokens keep working until they expire (they are ordinary access tokens), so disabling
   is not an instant kill switch for sessions already in flight.
+- **Delete app** — permanently removes the app and all accounts whose `app` field points to it,
+  including suspended accounts. Their sessions, chats, messages, calls, hosted meetings,
+  subscriptions and API credentials are cleaned up. Active Socket.IO connections are disconnected.
+  Other apps and shared workspaces remain. Click the trash icon on the app row or **Delete app**
+  inside its panel, then type the displayed app ID to confirm. This cannot be undone.
+  If cleanup fails, the app stays disabled with **deletion pending**; use **Retry deletion**.
 
 ### The Integrate snippet
 
@@ -146,10 +157,18 @@ calls; you only need it if you are scripting tenant management.
 | `POST` | `/api/apps` | Create an app. `{ name, features? }` → **returns the secret once**. |
 | `PATCH` | `/api/apps/:id` | Update `name`, `active`, `features`, `allowedOrigins`, `limits`. |
 | `POST` | `/api/apps/:id/rotate` | New secret; old one dies immediately. |
-| `POST` | `/api/apps/:id/disable` | Set `active: false`. |
+| `DELETE` | `/api/apps/:id` | Disable only: set `active: false`, preserving accounts and data. |
+| `DELETE` | `/api/apps/:id/permanent` | Permanently delete app and its users. Body: `{ "confirmAppId": "app_..." }`. |
 | `GET` | `/api/apps/:id/stats` | Usage counters. |
 
 A caller only ever sees apps they own; users with `role: 'admin'` see every app.
+
+Permanent deletion returns `{ "success": true, "deleted": true, "deletedUsers": 127 }`.
+`:id` is the database `_id`; `confirmAppId` is the public `appId`. A missing or incorrect
+confirmation returns `400`; a different owner's app or an already removed app returns `404`.
+An overlapping deletion returns `409`. Failed cleanup can be retried; an interrupted server's
+job lock expires after 15 minutes. An app marked for deletion cannot be edited or re-enabled.
+This cleans database records; previously uploaded objects and backups follow your storage retention policy.
 
 ---
 

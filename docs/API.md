@@ -182,6 +182,7 @@ embeddable-platform TENANT management (admin console)
 | `POST` | `/apps` | `name`, `features` | create a tenant. |
 | `PATCH` | `/apps/:id` | `name`, `active`, `features`, `allowedOrigins`, `limits` | rename, toggle features/limits/origins, enable/disable. |
 | `DELETE` | `/apps/:id` | — | disable a tenant. |
+| `DELETE` | `/apps/:id/permanent` | `confirmAppId` | Permanently remove an owned app and all its users; revoke sessions and clean related records. Requires the exact public app ID. |
 
 ### `/auth`
 

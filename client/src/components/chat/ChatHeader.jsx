@@ -8,8 +8,10 @@ import { useAuth } from '../../store/useAuth';
 import { useChat } from '../../store/useChat';
 import { getChatDisplay } from '../../lib/chat';
 import { formatLastSeen, cn } from '../../lib/utils';
+import { useEmbedCapabilities } from '../../lib/embedCapabilities';
 
 export default function ChatHeader({ chat, currentUser, search, onSearch }) {
+  const { enabled } = useEmbedCapabilities();
   const { startCall, toggleRightPanel, setChatListOpen } = useUI();
   const clearChat = useChat((s) => s.clearChat);
   const deleteChat = useChat((s) => s.deleteChat);
@@ -111,8 +113,8 @@ export default function ChatHeader({ chat, currentUser, search, onSearch }) {
       </button>
 
       <div className="relative flex shrink-0 items-center gap-0.5 sm:gap-1">
-        <HeaderBtn icon={Phone} onClick={() => startCall({ type: 'audio', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
-        <HeaderBtn icon={Video} onClick={() => startCall({ type: 'video', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />
+        {enabled('calls') && <HeaderBtn icon={Phone} onClick={() => startCall({ type: 'audio', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />}
+        {enabled('calls') && enabled('video') && <HeaderBtn icon={Video} onClick={() => startCall({ type: 'video', peer: d.isGroup ? { name: d.name, avatar: d.avatar } : d.peer, group: d.isGroup ? chat : null, direction: 'outgoing' })} />}
         <HeaderBtn icon={Search} onClick={openSearch} className="hidden sm:grid" />
         {/* Inline right panel only exists from xl up (see RightPanel) — below that
             the panel is a drawer, reachable via the header/menu instead. */}

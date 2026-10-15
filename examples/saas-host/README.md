@@ -2,6 +2,12 @@
 
 A runnable stand-in for your product. Two files, Node built-ins only, no install.
 
+For the full setup and authenticated backend pattern, read
+[the developer guide](../../docs/DEVELOPER_INTEGRATION.md). The example server
+simulates Alice/Bob and listens only on `127.0.0.1`; use `express-route.mjs` with
+your own session middleware for a real product. Enable `calls`, `video` and
+`meetings` in `/platform` if you want those features in this example.
+
 ## Run it
 
 1. In the ChatKonect admin console → **/platform** → **New app**. Copy the App ID
@@ -51,7 +57,7 @@ Open the console. `onError` reports a code:
 | `config_failed` with a 403 | The host origin is not in the app's allowed origins |
 | `config_failed` with a 404 | Wrong `appId` |
 | `token_rejected` | The token minted but was refused — check it is not expired and the app is active |
-| `not_embedded` | `/embed` was opened directly instead of through the loader |
+| `config_failed` before any API request | `/embed` was opened directly, a parent origin was missing, or demo mode is enabled |
 | nothing at all, blank frame | The frontend host is sending `X-Frame-Options: DENY` for `/embed` — see PLATFORM.md §10 |
 
 ## Not covered here

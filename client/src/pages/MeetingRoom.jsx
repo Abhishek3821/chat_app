@@ -9,6 +9,7 @@ import MeetingPollsPanel from '@/components/meeting/MeetingPollsPanel';
 import MeetingNotesPanel from '@/components/meeting/MeetingNotesPanel';
 import DeviceCheck from '@/components/meeting/DeviceCheck';
 import { useSocket } from '@/hooks/useSocket';
+import { integrationLink } from '../lib/integrationLink';
 import { useViewportSize } from '@/hooks/useViewportSize';
 import { useMeetingRoom } from '@/hooks/useMeetingRoom';
 import { useLiveKitRoom } from '@/hooks/useLiveKitRoom';
@@ -237,7 +238,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, onReturnToMain, is
   const [policy, setPolicy] = useState(meeting.settings || {});
   const [showHostControls, setShowHostControls] = useState(false);
   const [breakouts, setBreakouts] = useState([]);
-  const [breakoutBusy, setBreakoutBusy] = useState(false);
   useEffect(() => {
     if (meeting.parentMeeting) return undefined;
     let active = true;
@@ -246,15 +246,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, onReturnToMain, is
       .catch(() => {});
     return () => { active = false; };
   }, [meeting._id, meeting.parentMeeting]);
-  const startBreakouts = async (count) => {
-    setBreakoutBusy(true);
-    try {
-      const { data } = await api.post(`/meetings/${meeting._id}/breakouts`, { count });
-      setBreakouts(data.rooms || []);
-      toast.success('Breakout rooms created. Participants received invitations.');
-    } catch (err) { toast.error(err?.response?.data?.message || 'Could not create breakout rooms.'); }
-    finally { setBreakoutBusy(false); }
-  };
   const endBreakouts = async () => {
     try { await api.delete(`/meetings/${meeting._id}/breakouts`); setBreakouts([]); toast.success('Breakout rooms ended.'); }
     catch (err) { toast.error(err?.response?.data?.message || 'Could not end breakout rooms.'); }
@@ -334,7 +325,7 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, onReturnToMain, is
     navigator.clipboard?.writeText(code).then(() => toast.success('Meeting ID copied.')).catch(() => toast(code));
   };
   const copyLink = () => {
-    const url = `${window.location.origin}/meet/${code}`;
+    const url = integrationLink(`/meet/${code}`);
     navigator.clipboard?.writeText(url).then(() => toast.success('Meeting link copied — share it with anyone.')).catch(() => toast(url));
   };
 
@@ -527,9 +518,6 @@ function RoomView({ room, meeting, code, me, isHost, onLeave, onReturnToMain, is
           <button onClick={() => updatePolicy('locked')} className="rounded-lg bg-white/10 px-3 py-2">{policy.locked ? 'Unlock meeting' : 'Lock meeting'}</button>
           <button onClick={() => updatePolicy('allowChat')} className="rounded-lg bg-white/10 px-3 py-2">{policy.allowChat === false ? 'Enable chat' : 'Disable chat'}</button>
           <button onClick={() => updatePolicy('allowScreenShare')} className="rounded-lg bg-white/10 px-3 py-2">{policy.allowScreenShare === false ? 'Enable screen sharing' : 'Disable screen sharing'}</button>
-          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(2)} className="rounded-lg bg-white/10 px-3 py-2">Create 2 breakouts</button>}
-          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(3)} className="rounded-lg bg-white/10 px-3 py-2">Create 3 breakouts</button>}
-          {!meeting.parentMeeting && !breakouts.length && <button disabled={breakoutBusy} onClick={() => startBreakouts(4)} className="rounded-lg bg-white/10 px-3 py-2">Create 4 breakouts</button>}
           {breakouts.map((breakout) => <a key={breakout.id} href={`/meet/${breakout.roomCode}`} className="rounded-lg bg-white/10 px-3 py-2">{breakout.title}</a>)}
           {breakouts.length > 0 && <button onClick={endBreakouts} className="rounded-lg bg-red-500/20 px-3 py-2">End breakouts</button>}
         </div>

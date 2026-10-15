@@ -12,13 +12,36 @@ import {
   ShieldAlert,
   ChevronDown,
   Check,
+  Trash2,
 } from 'lucide-react';
 import Button from '../components/ui/Button';
 import { Input, Field } from '../components/ui/Input';
 import Switch from '../components/ui/Switch';
 import EmptyState from '../components/ui/EmptyState';
+import Modal from '../components/ui/Modal';
 import { useApps } from '../store/useApps';
 import { cn } from '../lib/utils';
+import api from '../lib/api';
+
+function AllowedOrigins({ app, update }) {
+  const [value, setValue] = useState((app.allowedOrigins || []).join('\n'));
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      await update(app._id, { allowedOrigins: value.split(/[\n,]+/).map((o) => o.trim()).filter(Boolean) });
+      toast.success('Allowed origins saved.');
+    } catch (err) { toast.error(err.message); }
+    finally { setSaving(false); }
+  };
+  return <div className="mt-4 space-y-2">
+    <Field label="Allowed platform origins">
+      <textarea className="w-full rounded-xl border border-border bg-surface-2 p-3 text-sm" rows={3} value={value} disabled={Boolean(app.deletionStartedAt)} onChange={(e) => setValue(e.target.value)} placeholder={'https://your-platform.com\nhttp://localhost:4321'} />
+    </Field>
+    <p className="text-xs text-content-muted">One HTTP(S) origin per line. Include development and production domains. An empty list leaves the embed origin unrestricted.</p>
+    <Button size="sm" variant="outline" disabled={saving || Boolean(app.deletionStartedAt)} onClick={save}>{saving ? 'Saving...' : 'Save origins'}</Button>
+  </div>;
+}
 
 /**
  * The embeddable-platform console: one screen showing every capability a tenant
@@ -50,11 +73,35 @@ const copy = (text, what) =>
     .then(() => toast.success(`${what} copied`), () => toast.error('Copy failed'));
 
 export default function PlatformPage() {
-  const { apps, loading, stats, revealedSecrets, load, create, update, toggleFeature, rotate, disable, loadStats, dismissSecret } =
+  const { apps, loading, stats, revealedSecrets, load, create, update, toggleFeature, rotate, disable, deleteApp, loadStats, dismissSecret } =
     useApps();
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(null); // expanded app id
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const requestDelete = (app) => {
+    setDeleteTarget(app);
+    setDeleteConfirmation('');
+    loadStats(app._id).catch(() => {});
+  };
+  const closeDelete = () => { if (!deleting) setDeleteTarget(null); };
+  const confirmDelete = async (e) => {
+    e.preventDefault();
+    if (deleting || !deleteTarget || deleteConfirmation !== deleteTarget.appId) return;
+    setDeleting(true);
+    try {
+      const result = await deleteApp(deleteTarget._id, deleteConfirmation);
+      setOpen((id) => id === deleteTarget._id ? null : id);
+      setDeleteTarget(null);
+      toast.success(`App deleted along with ${result.deletedUsers} user${result.deletedUsers === 1 ? '' : 's'}.`);
+    } catch (err) {
+      toast.error(err?.message || 'Could not delete the app. Retry to finish cleanup.');
+      load().catch(() => {});
+    } finally { setDeleting(false); }
+  };
 
   useEffect(() => { load().catch(() => toast.error('Could not load your apps.')); }, [load]);
 
@@ -128,7 +175,8 @@ export default function PlatformPage() {
             return (
               <div key={app._id} className="card overflow-hidden">
                 {/* Summary row */}
-                <button onClick={() => expand(app._id)} className="flex w-full items-center gap-3 p-4 text-left">
+                <div className="flex items-center pr-3">
+                <button onClick={() => expand(app._id)} className="flex min-w-0 flex-1 items-center gap-3 p-4 text-left">
                   <span className={cn('neu-inset grid h-10 w-10 shrink-0 place-items-center rounded-xl', app.active ? 'text-brand-600 dark:text-brand-300' : 'text-content-muted')}>
                     <Blocks size={18} />
                   </span>
@@ -137,7 +185,7 @@ export default function PlatformPage() {
                       <span className="truncate font-semibold text-content">{app.name}</span>
                       {!app.active && (
                         <span className="neu-inset-sm shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-bold uppercase text-content-muted">
-                          disabled
+                          {app.deletionStartedAt ? 'deletion pending' : 'disabled'}
                         </span>
                       )}
                     </span>
@@ -148,6 +196,10 @@ export default function PlatformPage() {
                   </span>
                   <ChevronDown size={18} className={cn('shrink-0 text-content-muted transition-transform', isOpen && 'rotate-180')} />
                 </button>
+                <Button variant="ghost" size="icon-sm" className="shrink-0 text-red-600 dark:text-red-400" onClick={() => requestDelete(app)} aria-label={`Delete ${app.name}`} title="Delete app and all its users">
+                  <Trash2 size={17} />
+                </Button>
+                </div>
 
                 {isOpen && (
                   <div className="border-t border-border p-4">
@@ -218,6 +270,7 @@ export default function PlatformPage() {
                             </span>
                             <Switch
                               checked={on}
+                              disabled={Boolean(app.deletionStartedAt)}
                               onChange={() =>
                                 toggleFeature(app._id, f.id).catch((e) => toast.error(e?.message || 'Could not save that.'))
                               }
@@ -227,11 +280,14 @@ export default function PlatformPage() {
                       })}
                     </div>
 
+                    <AllowedOrigins key={app._id} app={app} update={update} />
+
                     {/* Limits */}
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <Field label="Seat limit">
                         <Input
                           type="number"
+                          disabled={Boolean(app.deletionStartedAt)}
                           defaultValue={app.limits?.maxUsers ?? 10000}
                           onBlur={(e) => update(app._id, { limits: { maxUsers: Number(e.target.value) } }).catch(() => toast.error('Could not save the seat limit.'))}
                         />
@@ -239,6 +295,7 @@ export default function PlatformPage() {
                       <Field label="User-token lifetime (minutes)">
                         <Input
                           type="number"
+                          disabled={Boolean(app.deletionStartedAt)}
                           defaultValue={app.limits?.userTokenMinutes ?? 60}
                           onBlur={(e) => update(app._id, { limits: { userTokenMinutes: Number(e.target.value) } }).catch(() => toast.error('Could not save the token lifetime.'))}
                         />
@@ -249,14 +306,14 @@ export default function PlatformPage() {
                     <p className="mt-5 text-xs font-bold uppercase tracking-wide text-content-muted">Integrate</p>
                     <pre className="scrollbar-thin mt-2 overflow-x-auto rounded-2xl bg-navy-950 p-4 text-[11px] leading-relaxed text-cyan-100">
 {`# 1) YOUR BACKEND — provision the user (idempotent)
-curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform/users \\
+curl -X POST ${new URL(api.defaults.baseURL, window.location.origin).href}/v1/platform/users \\
   -H "X-CC-App-Id: ${app.appId}" \\
   -H "Authorization: Bearer <APP_SECRET>" \\
   -H "Content-Type: application/json" \\
   -d '{"externalId":"your-user-42","name":"Ada Lovelace"}'
 
 # 2) YOUR BACKEND — mint a short-lived token for them
-curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform/tokens \\
+curl -X POST ${new URL(api.defaults.baseURL, window.location.origin).href}/v1/platform/tokens \\
   -H "X-CC-App-Id: ${app.appId}" \\
   -H "Authorization: Bearer <APP_SECRET>" \\
   -H "Content-Type: application/json" \\
@@ -270,6 +327,7 @@ curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform
                       <Button
                         variant="outline"
                         size="sm"
+                        disabled={Boolean(app.deletionStartedAt)}
                         onClick={() =>
                           rotate(app._id)
                             .then(() => toast.success('Secret rotated — the old one no longer works.'))
@@ -295,6 +353,7 @@ curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform
                         <Button
                           variant="glass"
                           size="sm"
+                          disabled={Boolean(app.deletionStartedAt)}
                           onClick={() =>
                             update(app._id, { active: true })
                               .then(() => toast.success('App re-enabled.'))
@@ -304,6 +363,9 @@ curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform
                           <Check size={15} /> Re-enable
                         </Button>
                       )}
+                      <Button variant="danger" size="sm" onClick={() => requestDelete(app)}>
+                        <Trash2 size={15} /> {app.deletionStartedAt ? 'Retry deletion' : 'Delete app'}
+                      </Button>
                       <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-content-muted">
                         <KeyRound size={12} />
                         {app.secretRotatedAt ? `rotated ${new Date(app.secretRotatedAt).toLocaleDateString()}` : 'never rotated'}
@@ -316,6 +378,24 @@ curl -X POST ${window.location.origin.replace(/:\d+$/, ':5000')}/api/v1/platform
           })}
         </div>
       </div>
+      <Modal open={Boolean(deleteTarget)} onClose={closeDelete} title="Permanently delete app?" subtitle={deleteTarget?.name}>
+        {deleteTarget && <form onSubmit={confirmDelete} className="space-y-4 pb-4">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm" role="alert">
+            <p>This permanently deletes <strong>{deleteTarget.name}</strong> and all {stats[deleteTarget._id]?.users ?? deleteTarget.usage?.users ?? 0} users belonging to this app, including their chats, messages, calls and meetings.</p>
+            <p className="mt-2">Its integration will stop working immediately. This cannot be undone.</p>
+          </div>
+          <Field label="Type the app ID to confirm">
+            <p className="mb-2 break-all font-mono text-xs text-content-muted">{deleteTarget.appId}</p>
+            <Input aria-label="App ID confirmation" autoFocus autoComplete="off" spellCheck={false} value={deleteConfirmation} disabled={deleting} onChange={(e) => setDeleteConfirmation(e.target.value)} placeholder={deleteTarget.appId} />
+          </Field>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="outline" onClick={closeDelete} disabled={deleting}>Cancel</Button>
+            <Button type="submit" variant="danger" disabled={deleting || deleteConfirmation !== deleteTarget.appId}>
+              <Trash2 size={15} /> {deleting ? 'Deleting app and users…' : 'Delete app and all users'}
+            </Button>
+          </div>
+        </form>}
+      </Modal>
     </div>
   );
 }

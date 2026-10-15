@@ -83,7 +83,7 @@ export async function deleteUserAccount(userId) {
       {
         $or: [
           { viewedBy: uid }, { mentions: uid }, { deliveredTo: uid }, { starredBy: uid }, { deletedFor: uid },
-          { 'reactions.user': uid }, { 'readBy.user': uid }, { 'poll.options.votes': uid },
+          { 'reactions.user': uid }, { 'readBy.user': uid },
         ],
       },
       {
@@ -95,22 +95,26 @@ export async function deleteUserAccount(userId) {
           deletedFor: uid,
           reactions: { user: uid },
           readBy: { user: uid },
-          'poll.options.$[].votes': uid,
         },
       }
     ),
+    // Ordinary messages have no poll. Only traverse options on polls containing
+    // this user's votes, otherwise MongoDB rejects the missing array path.
+    Message.updateMany({ 'poll.options.votes': uid }, { $pull: { 'poll.options.$[].votes': uid } }),
     Message.updateMany({ forwardedFrom: uid }, { $unset: { forwardedFrom: '' } }),
     Meeting.updateMany(
-      {},
+      { $or: [{ 'participants.user': uid }, { 'attendees.user': uid }] },
       {
         $pull: {
           participants: { user: uid },
           attendees: { user: uid },
-          'polls.$[].votes': { user: uid },
-          'questions.$[].upvotes': uid,
         },
       }
     ),
+    // Older meetings may not have polls/questions arrays. Filter each nested
+    // cleanup separately so those records can still be deleted successfully.
+    Meeting.updateMany({ 'polls.votes.user': uid }, { $pull: { 'polls.$[].votes': { user: uid } } }),
+    Meeting.updateMany({ 'questions.upvotes': uid }, { $pull: { 'questions.$[].upvotes': uid } }),
     Status.updateMany({}, { $pull: { viewers: { user: uid }, replies: { user: uid }, 'privacy.allow': uid, 'privacy.except': uid } }),
     BroadcastList.updateMany({}, { $pull: { recipients: uid } }),
     Community.updateMany({ 'members.user': uid }, { $pull: { members: { user: uid } } }),

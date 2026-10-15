@@ -398,9 +398,10 @@ export const login = asyncHandler(async (req, res) => {
 // POST /api/auth/logout — revoke THIS session (not just clear the cookie).
 export const logout = asyncHandler(async (req, res) => {
   const raw = req.cookies?.refreshToken;
-  if (raw) await Session.updateOne({ refreshHash: hashToken(raw) }, { $set: { revokedAt: new Date() } });
-  else if (req.sessionId) await Session.updateOne({ _id: req.sessionId }, { $set: { revokedAt: new Date() } });
-  clearAuthCookies(res);
+  // A Bearer embed revokes its own session, never an unrelated refresh cookie.
+  if (req.sessionId) await Session.updateOne({ _id: req.sessionId }, { $set: { revokedAt: new Date() } });
+  else if (raw) await Session.updateOne({ refreshHash: hashToken(raw) }, { $set: { revokedAt: new Date() } });
+  if (!req.user?.app) clearAuthCookies(res);
   if (req.user) {
     req.user.isOnline = false;
     req.user.lastSeen = new Date();

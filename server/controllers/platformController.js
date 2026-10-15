@@ -7,6 +7,8 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { signAccessToken } from '../utils/token.js';
 import { createSession } from '../utils/session.js';
 import { generateAppId, generateAppSecret } from '../utils/appAuth.js';
+import { deleteAppUsers } from '../utils/deleteAppUsers.js';
+import { deleteUserAccount } from '../utils/deleteUserAccount.js';
 
 /**
  * The platform API a host product's BACKEND talks to (app-secret authenticated).
@@ -114,7 +116,16 @@ export const upsertAppUser = asyncHandler(async (req, res) => {
     isVerified: true, // provisioned by a trusted backend; no email to confirm
   });
 
-  await App.updateOne({ _id: tenant._id }, { $inc: { 'usage.users': 1 }, $set: { 'usage.lastActivityAt': new Date() } });
+  // Authentication may have started before an administrator began deletion.
+  // Never leave a late-provisioned account behind after its app disappears.
+  const provisioned = await App.updateOne(
+    { _id: tenant._id, active: true, deletionStartedAt: null },
+    { $inc: { 'usage.users': 1 }, $set: { 'usage.lastActivityAt': new Date() } }
+  );
+  if (!provisioned.matchedCount) {
+    await deleteUserAccount(user._id);
+    throw new ApiError(403, 'This app is disabled or being deleted.');
+  }
   return res.status(201).json({ success: true, created: true, user: publicUser(user) });
 });
 
@@ -149,10 +160,14 @@ export const issueUserToken = asyncHandler(async (req, res) => {
   );
   const token = signAccessToken(user, session._id, { expiresIn: `${minutes}m` });
 
-  await App.updateOne(
-    { _id: tenant._id },
+  const issued = await App.updateOne(
+    { _id: tenant._id, active: true, deletionStartedAt: null },
     { $inc: { 'usage.tokensIssued': 1 }, $set: { 'usage.lastActivityAt': new Date() } }
   );
+  if (!issued.matchedCount) {
+    await Session.deleteOne({ _id: session._id });
+    throw new ApiError(403, 'This app is disabled or being deleted.');
+  }
 
   res.json({
     success: true,
@@ -208,6 +223,7 @@ export const createApp = asyncHandler(async (req, res) => {
 export const updateApp = asyncHandler(async (req, res) => {
   const app = await App.findOne({ _id: req.params.id, ...adminScope(req.user) });
   if (!app) throw new ApiError(404, 'App not found.');
+  if (app.deletionStartedAt) throw new ApiError(409, 'This app is being deleted. Retry permanent deletion to finish cleanup.');
 
   if (req.body.name !== undefined) app.name = String(req.body.name).trim().slice(0, 80);
   if (req.body.active !== undefined) app.active = Boolean(req.body.active);
@@ -257,6 +273,7 @@ export const updateApp = asyncHandler(async (req, res) => {
 export const rotateAppSecret = asyncHandler(async (req, res) => {
   const app = await App.findOne({ _id: req.params.id, ...adminScope(req.user) });
   if (!app) throw new ApiError(404, 'App not found.');
+  if (app.deletionStartedAt) throw new ApiError(409, 'This app is being deleted.');
   const secret = generateAppSecret();
   app.secretHash = secret.hash;
   app.secretPrefix = secret.prefix;
@@ -276,6 +293,36 @@ export const disableApp = asyncHandler(async (req, res) => {
   await app.save();
   await refreshTenantOrigins(); // origins/active feed the CORS allowlist — awaited so the next request sees it
   res.json({ success: true, disabled: true });
+});
+
+/** DELETE /api/apps/:id/permanent — irreversible tenant and user deletion.
+ * The app stays disabled if cleanup fails. A lease prevents overlapping jobs
+ * across server instances, and expires if the process crashes mid-cleanup. */
+export const deleteApp = asyncHandler(async (req, res) => {
+  const scope = { _id: req.params.id, ...adminScope(req.user) };
+  const app = await App.findOne(scope);
+  if (!app) throw new ApiError(404, 'App not found.');
+  if (req.body.confirmAppId !== app.appId) {
+    throw new ApiError(400, 'Confirm permanent deletion by sending the exact app ID in confirmAppId.');
+  }
+  const now = new Date();
+  const lockUntil = new Date(now.getTime() + 15 * 60 * 1000);
+  const locked = await App.findOneAndUpdate(
+    { ...scope, $or: [{ deletionLockUntil: null }, { deletionLockUntil: { $lte: now } }] },
+    { $set: { active: false, deletionStartedAt: app.deletionStartedAt || now, deletionLockUntil: lockUntil }, $inc: { __v: 1 } },
+    { new: true }
+  );
+  if (!locked) throw new ApiError(409, 'Deletion is already in progress. Please wait before retrying.');
+  try {
+    await refreshTenantOrigins();
+    const deletedUsers = await deleteAppUsers(app._id);
+    await App.deleteOne({ _id: app._id, deletionLockUntil: lockUntil });
+    res.json({ success: true, deleted: true, deletedUsers });
+  } catch (error) {
+    // Preserve deletionStartedAt to prevent re-enabling a partly erased app.
+    await App.updateOne({ _id: app._id, deletionLockUntil: lockUntil }, { $set: { deletionLockUntil: null } }).catch(() => {});
+    throw error;
+  }
 });
 
 /** GET /api/apps/:id/stats — live counts for the console (users are counted

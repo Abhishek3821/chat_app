@@ -9,7 +9,9 @@
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
     "build": "npm --prefix client run build",
-    "start": "npm --prefix server start"
+    "start": "npm --prefix server start",
+    "test:integration": "node server/tests/integration.mjs",
+    "test:sdk": "node --test server/tests/embed-sdk.test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

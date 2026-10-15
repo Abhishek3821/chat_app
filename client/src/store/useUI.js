@@ -13,9 +13,9 @@ const ACCENT_KEY = 'cc_accent_v2';
 // this browser left behind" — and that distinction is the whole fix below.
 const OWNER_KEY = 'cc_appearance_owner';
 
-const read = (k) => (typeof localStorage !== 'undefined' ? localStorage.getItem(k) : null);
-const write = (k, v) => { if (typeof localStorage !== 'undefined') localStorage.setItem(k, v); };
-const drop = (k) => { if (typeof localStorage !== 'undefined') localStorage.removeItem(k); };
+const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* memory state still works */ } };
+const drop = (k) => { try { localStorage.removeItem(k); } catch { /* storage denied */ } };
 
 const storedTheme = read(THEME_KEY);
 const storedAccent = read(ACCENT_KEY);

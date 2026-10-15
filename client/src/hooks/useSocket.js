@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { getToken } from '../lib/token';
+import { IS_EMBED } from '../lib/embedSession';
 import { io } from 'socket.io-client';
 import toast from 'react-hot-toast';
 import { DEMO_MODE, refreshAccessToken } from '../lib/api';
@@ -88,7 +89,7 @@ export function useSocket() {
       // Dynamic auth: read the LATEST access token on every (re)connect, so after
       // a token refresh the socket re-authenticates without being recreated.
       auth: (cb) => cb({ token: getToken() }),
-      withCredentials: true,
+      withCredentials: !IS_EMBED,
       transports: ['websocket', 'polling'], // prefer native WebSocket, poll only as fallback
     });
     socketRef.current = socket;

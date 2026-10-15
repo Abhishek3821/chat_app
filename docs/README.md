@@ -7,6 +7,10 @@ the code wins; please open an issue (or fix the doc) if you find a drift.
 
 ## Start here
 
+For another developer using the hosted backend and UI, start with
+[DEVELOPER_INTEGRATION.md](DEVELOPER_INTEGRATION.md) or the downloadable
+[Word integration guide](ChatKonect_Developer_Integration_Guide.docx).
+
 | Doc | What it covers |
 |---|---|
 | [**API.md**](API.md) | Full REST reference — **184 endpoints** across 27 routers, generated from source. Method, auth, params, body, exact success/error JSON, side effects. |

@@ -6,13 +6,13 @@
  *   /invite/u/:code   person, keyed by username
  */
 
-const base = () => (typeof window !== 'undefined' ? window.location.origin : '');
+import { integrationLink } from './integrationLink';
 
 export const inviteUrlForGroup = (inviteCode) =>
-  inviteCode ? `${base()}/invite/g/${encodeURIComponent(inviteCode)}` : '';
+  inviteCode ? integrationLink(`/invite/g/${encodeURIComponent(inviteCode)}`) : '';
 
 export const inviteUrlForUser = (username) =>
-  username ? `${base()}/invite/u/${encodeURIComponent(String(username).replace(/^@/, ''))}` : '';
+  username ? integrationLink(`/invite/u/${encodeURIComponent(String(username).replace(/^@/, ''))}`) : '';
 
 /**
  * Turn scanned/pasted text into an in-app path, or null if it isn't ours.
@@ -40,7 +40,8 @@ export function parseInvite(text) {
   // Full URL — any host; only the path shape has to be ours.
   if (/^https?:\/\//i.test(raw)) {
     try {
-      return matchPath(new URL(raw).pathname);
+      const url = new URL(raw);
+      return matchPath(url.searchParams.get('chatkonectPath') || url.pathname);
     } catch {
       return null;
     }

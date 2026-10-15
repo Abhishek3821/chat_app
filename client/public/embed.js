@@ -67,7 +67,12 @@
     var onReady = opts.onReady || function () {};
     var onError = opts.onError || function () {};
     var onConfig = opts.onConfig || function () {};
+    var onLogout = opts.onLogout || function () {};
+    var onNavigate = opts.onNavigate || function () {};
     var destroyed = false;
+    var tokenRequest = null;
+    var pendingPath = opts.initialPath || new URLSearchParams(window.location.search || '').get('chatkonectPath') || null;
+    var ready = false;
 
     var src =
       CK_ORIGIN +
@@ -77,6 +82,7 @@
          tell OUR host page from any other frame that happens to load it. */
       '&parentOrigin=' +
       encodeURIComponent(window.location.origin) +
+      '&hostPath=' + encodeURIComponent(window.location.pathname || '/') +
       (opts.tokenSeconds ? '&tokenSeconds=' + encodeURIComponent(opts.tokenSeconds) : '') +
       (opts.theme ? '&theme=' + encodeURIComponent(opts.theme) : '');
 
@@ -94,6 +100,7 @@
       'autoplay',
       'clipboard-write',
       'fullscreen',
+      'geolocation',
     ].join('; ');
     iframe.setAttribute('allowfullscreen', 'true');
 
@@ -105,24 +112,35 @@
     }
 
     function supplyToken() {
+      if (destroyed) return Promise.resolve();
+      if (tokenRequest) return tokenRequest;
       var got;
       try {
         got = opts.getToken ? opts.getToken() : opts.token;
       } catch (err) {
+        send({ type: 'auth-error' });
         onError({ code: 'get_token_threw', message: err && err.message });
-        return;
+        return Promise.resolve();
       }
-      Promise.resolve(got)
+      tokenRequest = Promise.resolve(got)
         .then(function (token) {
-          if (!token) {
+          if (destroyed) return;
+          // Accept either a JWT string or the token endpoint's full JSON.
+          if (token && typeof token === 'object') token = token.token;
+          if (typeof token !== 'string' || !token) {
+            send({ type: 'auth-error' });
             onError({ code: 'no_token', message: 'getToken resolved without a token.' });
             return;
           }
           send({ type: 'auth', token: token });
         })
         .catch(function (err) {
+          if (destroyed) return;
+          send({ type: 'auth-error' });
           onError({ code: 'get_token_failed', message: (err && err.message) || 'getToken rejected.' });
-        });
+        })
+        .finally(function () { tokenRequest = null; });
+      return tokenRequest;
     }
 
     function onMessage(event) {
@@ -143,7 +161,16 @@
           onConfig(event.data);
           break;
         case 'ready':
+          ready = true;
+          if (pendingPath) { send({ type: 'navigate', to: pendingPath }); pendingPath = null; }
           onReady(event.data.user);
+          break;
+        case 'logout':
+          ready = false;
+          onLogout();
+          break;
+        case 'navigate':
+          onNavigate(event.data.to);
           break;
         case 'error':
           onError({ code: event.data.code, message: event.data.message });
@@ -159,11 +186,12 @@
     return {
       /** Drive the embedded UI, e.g. '/calls', '/meetings', '/settings'. */
       navigate: function (to) {
-        send({ type: 'navigate', to: to });
+        if (!ready) pendingPath = to;
+        else send({ type: 'navigate', to: to });
       },
       /** Push a fresh token immediately (e.g. after your own re-login). */
       refreshToken: function () {
-        supplyToken();
+        return supplyToken();
       },
       destroy: function () {
         destroyed = true;
@@ -174,5 +202,8 @@
     };
   }
 
-  window.ChatKonect = { mount: mount, origin: CK_ORIGIN, version: '1' };
+  var loader = { mount: mount, origin: CK_ORIGIN, version: '2' };
+  window.ChatKonectLoaders = window.ChatKonectLoaders || {};
+  window.ChatKonectLoaders[CK_ORIGIN] = loader;
+  window.ChatKonect = loader;
 })();

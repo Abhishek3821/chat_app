@@ -88,8 +88,11 @@ const appSchema = new mongoose.Schema(
     },
 
     active: { type: Boolean, default: true },
+    // A failed permanent deletion stays disabled and can be retried safely.
+    deletionStartedAt: { type: Date, default: null },
+    deletionLockUntil: { type: Date, default: null, select: false },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 appSchema.methods.hasFeature = function hasFeature(feature) {

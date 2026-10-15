@@ -63,9 +63,21 @@ export const useApps = create((set, get) => ({
     set((s) => ({ apps: s.apps.map((a) => (a._id === id ? { ...a, active: false } : a)) }));
   },
 
+  deleteApp: async (id, confirmAppId) => {
+    const { data } = await api.delete(`/apps/${id}/permanent`, { data: { confirmAppId } });
+    set((s) => {
+      const stats = { ...s.stats };
+      const revealedSecrets = { ...s.revealedSecrets };
+      delete stats[id];
+      delete revealedSecrets[id];
+      return { apps: s.apps.filter((a) => a._id !== id), stats, revealedSecrets };
+    });
+    return data;
+  },
+
   loadStats: async (id) => {
     const { data } = await api.get(`/apps/${id}/stats`);
-    set((s) => ({ stats: { ...s.stats, [id]: data.stats } }));
+    set((s) => s.apps.some((app) => app._id === id) ? { stats: { ...s.stats, [id]: data.stats } } : {});
     return data.stats;
   },
 

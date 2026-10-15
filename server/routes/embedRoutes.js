@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getEmbedConfig, getIceServers } from '../controllers/embedController.js';
+import { getEmbedConfig, getIceServers, getEmbedSession } from '../controllers/embedController.js';
 import { protect } from '../middleware/auth.js';
 
 /**
@@ -12,5 +12,6 @@ const router = Router();
 
 router.get('/config', getEmbedConfig);
 router.get('/ice', protect, getIceServers);
+router.get('/session', protect, getEmbedSession);
 
 export default router;

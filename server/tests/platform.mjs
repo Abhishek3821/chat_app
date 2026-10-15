@@ -14,6 +14,7 @@ import dns from 'node:dns';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { io } from 'socket.io-client';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.resolve(__dirname, '..');
@@ -237,6 +238,130 @@ async function main() {
   check('an app can be disabled', disabled.status === 200, `${disabled.status}`);
   const afterDisable = await http('GET', '/v1/platform/whoami', { appId: appA.appId, secret: rotated.data.secret });
   check('a disabled app cannot use the platform API', afterDisable.status === 403, `${afterDisable.status}`);
+
+  head('Permanent app deletion');
+  const permanentPath = `/apps/${appA._id}/permanent`;
+  const outsiderDelete = await http('DELETE', permanentPath, { token: otherOwner.token, body: { confirmAppId: appA.appId } });
+  check('another account cannot permanently delete the app', outsiderDelete.status === 404, `${outsiderDelete.status}`);
+  const missingConfirm = await http('DELETE', permanentPath, { token: owner.token });
+  const wrongConfirm = await http('DELETE', permanentPath, { token: owner.token, body: { confirmAppId: appB.appId } });
+  check('permanent deletion requires the exact app ID confirmation', missingConfirm.status === 400 && wrongConfirm.status === 400);
+
+  // Real database fixtures use only TEST_URI; 127 users mirrors a populated app.
+  await mongoose.connect(TEST_URI);
+  const db = mongoose.connection.db;
+  const id = (value) => new mongoose.Types.ObjectId(value);
+  const uidA = id(u1.data.user.id);
+  const uidB = id(bUserId);
+  const extraUsers = Array.from({ length: 126 }, (_, i) => ({
+    _id: new mongoose.Types.ObjectId(), app: id(appA._id), externalId: `bulk-${i}`,
+    name: `Bulk user ${i}`, email: `bulk-${i}@fixture.invalid`, username: `bulkuser${i}`,
+    password: 'unused', accountStatus: i === 0 ? 'suspended' : 'active', tokenVersion: 0,
+  }));
+  await db.collection('users').insertMany(extraUsers);
+  const extraIds = extraUsers.map((u) => u._id);
+  const ownChat = new mongoose.Types.ObjectId();
+  const otherChat = new mongoose.Types.ObjectId();
+  const mixedChat = new mongoose.Types.ObjectId();
+  const ownMessage = new mongoose.Types.ObjectId();
+  const otherMessage = new mongoose.Types.ObjectId();
+  const ownCommunity = new mongoose.Types.ObjectId();
+  const ownCall = new mongoose.Types.ObjectId();
+  const otherCall = new mongoose.Types.ObjectId();
+  const otherMeeting = new mongoose.Types.ObjectId();
+  const untouchedAt = new Date('2025-01-01T00:00:00Z');
+  const ownerBeforeDelete = await db.collection('users').findOne({ _id: id(owner.id) });
+  await db.collection('chats').insertMany([
+    { _id: ownChat, isGroup: true, createdBy: uidA, participants: [{ user: uidA, role: 'owner' }, { user: extraIds[0], role: 'member' }] },
+    { _id: otherChat, isGroup: true, createdBy: uidB, participants: [{ user: uidB, role: 'owner' }], updatedAt: untouchedAt },
+    { _id: mixedChat, isGroup: true, createdBy: uidA, participants: [{ user: uidA, role: 'owner' }, { user: uidB, role: 'member' }] },
+  ]);
+  await db.collection('messages').insertMany([
+    { _id: ownMessage, chat: ownChat, sender: uidA, text: 'Delete me' },
+    { _id: otherMessage, chat: otherChat, sender: uidB, text: 'Keep me', mentions: [uidA], reactions: [{ user: uidA, emoji: '👍' }], poll: { options: [{ text: 'Yes', votes: [uidA, uidB] }] } },
+  ]);
+  await db.collection('communities').insertOne({ _id: ownCommunity, name: 'App community', createdBy: uidA, members: [{ user: uidA }], groups: [ownChat] });
+  await db.collection('calls').insertMany([
+    { _id: ownCall, initiator: uidA, caller: uidA, receiver: extraIds[0], participants: [{ user: uidA }] },
+    { _id: otherCall, initiator: uidB, caller: uidB, participants: [{ user: uidB }] },
+  ]);
+  await db.collection('meetings').insertOne({ _id: otherMeeting, host: uidB, title: 'Keep meeting', startAt: new Date(), participants: [], attendees: [], polls: [{ createdBy: uidB, votes: [{ user: uidA, choices: [0] }, { user: uidB, choices: [0] }] }], questions: [{ askedBy: uidB, upvotes: [uidA, uidB] }] });
+  await db.collection('sessions').insertMany(extraIds.map((user) => ({ user, expiresAt: new Date(Date.now() + 60000) })));
+  const auxiliary = [
+    ['status', { user: uidA }], ['notifications', { user: uidA }],
+    ['contactrequests', { from: uidA, to: extraIds[0] }], ['pushsubscriptions', { user: uidA }],
+    ['scheduledmessages', { sender: uidA, chat: ownChat }], ['broadcastlists', { owner: uidA }],
+    ['apikeys', { owner: uidA }], ['incomingwebhooks', { createdBy: uidA, chat: ownChat }],
+  ];
+  const fixtureIds = [];
+  for (const [collection, doc] of auxiliary) {
+    const inserted = await db.collection(collection).insertOne(doc);
+    fixtureIds.push([collection, inserted.insertedId]);
+  }
+  await db.collection('users').updateOne({ _id: uidB }, { $set: { contacts: [uidA], pinnedChats: [ownChat] } });
+  await http('PATCH', `/apps/${appA._id}`, { token: owner.token, body: { active: true } });
+
+  const socket = io(`http://127.0.0.1:${PORT}`, { auth: { token: userToken }, transports: ['websocket'], reconnection: false });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('App socket did not connect')), 7000);
+      socket.once('connect', () => { clearTimeout(timer); resolve(); });
+      socket.once('connect_error', (err) => { clearTimeout(timer); reject(err); });
+    });
+    const disconnected = new Promise((resolve) => socket.once('disconnect', resolve));
+    const removed = await http('DELETE', permanentPath, { token: owner.token, body: { confirmAppId: appA.appId } });
+    check('permanent deletion removes all 127 users, including suspended users', removed.status === 200 && removed.data.deletedUsers === 127, `${removed.status} ${JSON.stringify(removed.data)}`);
+    check('active app sockets are disconnected', await Promise.race([disconnected.then(() => true), sleep(3000).then(() => false)]));
+  } finally { socket.disconnect(); }
+  check('the deleted app and its users no longer exist', await db.collection('apps').countDocuments({ _id: id(appA._id) }) === 0 && await db.collection('users').countDocuments({ app: id(appA._id) }) === 0);
+  check('every deleted user session is removed', await db.collection('sessions').countDocuments({ user: { $in: [uidA, ...extraIds] } }) === 0);
+  check('app chats, messages, communities, calls and hosted meetings are removed',
+    await db.collection('chats').countDocuments({ _id: ownChat }) === 0 &&
+    await db.collection('messages').countDocuments({ _id: ownMessage }) === 0 &&
+    await db.collection('communities').countDocuments({ _id: ownCommunity }) === 0 &&
+    await db.collection('calls').countDocuments({ _id: ownCall }) === 0 &&
+    await db.collection('meetings').countDocuments({ host: uidA }) === 0);
+  const leftovers = await Promise.all(fixtureIds.map(([collection, _id]) => db.collection(collection).countDocuments({ _id })));
+  check('notifications, subscriptions, scheduled messages and API credentials are removed', leftovers.every((n) => n === 0), JSON.stringify(fixtureIds.filter((_, i) => leftovers[i] > 0).map(([collection]) => collection)));
+  check('other app data remains present',
+    await db.collection('apps').countDocuments({ _id: id(appB._id) }) === 1 &&
+    await db.collection('users').countDocuments({ _id: uidB }) === 1 &&
+    await db.collection('chats').countDocuments({ _id: otherChat }) === 1 &&
+    await db.collection('messages').countDocuments({ _id: otherMessage }) === 1 &&
+    await db.collection('calls').countDocuments({ _id: otherCall }) === 1 &&
+    await db.collection('meetings').countDocuments({ _id: otherMeeting }) === 1);
+  const untouchedChat = await db.collection('chats').findOne({ _id: otherChat });
+  const ownerAfterDelete = await db.collection('users').findOne({ _id: id(owner.id) });
+  check('unrelated chats and owner records keep their original timestamps',
+    untouchedChat.updatedAt.getTime() === untouchedAt.getTime() &&
+    ownerAfterDelete.updatedAt.getTime() === ownerBeforeDelete.updatedAt.getTime());
+  const survivingGroup = await db.collection('chats').findOne({ _id: mixedChat });
+  check('shared groups retain other users and receive a new owner', survivingGroup?.participants.length === 1 && survivingGroup.participants[0].user.equals(uidB) && survivingGroup.participants[0].role === 'owner');
+  const survivingUser = await db.collection('users').findOne({ _id: uidB });
+  const survivingMessage = await db.collection('messages').findOne({ _id: otherMessage });
+  const survivingMeeting = await db.collection('meetings').findOne({ _id: otherMeeting });
+  check('deleted-user references are removed from surviving data',
+    !survivingUser.contacts.length && !survivingUser.pinnedChats.length &&
+    !survivingMessage.mentions.length && !survivingMessage.reactions.length &&
+    survivingMessage.poll.options[0].votes.length === 1 &&
+    survivingMeeting.polls[0].votes.length === 1 && survivingMeeting.questions[0].upvotes.length === 1);
+  const deletedToken = await http('GET', '/auth/me', { token: userToken });
+  const survivingToken = await http('GET', '/auth/me', { token: userTokenB });
+  const deletedSecret = await http('GET', '/v1/platform/whoami', { appId: appA.appId, secret: rotated.data.secret });
+  check('deleted app tokens and secret stop working', deletedToken.status === 401 && deletedSecret.status === 401);
+  check('other app users and the app owner remain signed in', survivingToken.status === 200 && (await http('GET', '/auth/me', { token: owner.token })).status === 200);
+  check('repeating deletion returns 404 without affecting other apps', (await http('DELETE', permanentPath, { token: owner.token, body: { confirmAppId: appA.appId } })).status === 404);
+
+  const empty = (await http('POST', '/apps', { token: owner.token, body: { name: 'Empty cleanup' } })).data.app;
+  await db.collection('apps').updateOne({ _id: id(empty._id) }, { $set: { active: false, deletionStartedAt: new Date(), deletionLockUntil: new Date(Date.now() + 60000) } });
+  check('a partially deleted app cannot be re-enabled or rotated',
+    (await http('PATCH', `/apps/${empty._id}`, { token: owner.token, body: { active: true } })).status === 409 &&
+    (await http('POST', `/apps/${empty._id}/rotate`, { token: owner.token })).status === 409);
+  check('overlapping deletion attempts are refused', (await http('DELETE', `/apps/${empty._id}/permanent`, { token: owner.token, body: { confirmAppId: empty.appId } })).status === 409);
+  await db.collection('apps').updateOne({ _id: id(empty._id) }, { $set: { deletionLockUntil: new Date(Date.now() - 1000) } });
+  const retry = await http('DELETE', `/apps/${empty._id}/permanent`, { token: owner.token, body: { confirmAppId: empty.appId } });
+  check('an expired job can be retried and an empty app can be deleted', retry.status === 200 && retry.data.deletedUsers === 0);
+  await mongoose.disconnect();
 
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${'─'.repeat(56)}`);

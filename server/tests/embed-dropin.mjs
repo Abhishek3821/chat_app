@@ -236,6 +236,17 @@ async function tenantUser(app, externalId, name) {
   check('relay credentials require authentication', anon.status === 401, `${anon.status}`);
 
   const U = await tenantUser(app, 'emb-u1', 'Embed User');
+  section('Embedded session is bound to the requested app');
+  const session = await http('GET', `/v1/embed/session?appId=${app.appId}`, { token: U.token });
+  check('matching tenant token validates', session.status === 200 && session.data?.user?._id === U.id);
+  check('validated session reports app capabilities', session.data?.app?.features.includes('meetings'));
+  check('session response cannot be cached', session.headers.get('cache-control') === 'no-store');
+  const missingSession = await http('GET', `/v1/embed/session?appId=${app.appId}`);
+  check('session requires a user token', missingSession.status === 401);
+  const otherApp = await http('GET', '/v1/embed/session?appId=app_other', { token: U.token });
+  check('token for another app is rejected', otherApp.status === 403);
+  const firstParty = await http('GET', `/v1/embed/session?appId=${app.appId}`, { token: owner.token });
+  check('ordinary ChatKonect login cannot be adopted by an embed', firstParty.status === 403);
   const ice = await http('GET', '/v1/embed/ice', { token: U.token });
   check('an authenticated end user receives ICE servers', ice.status === 200, `${ice.status} ${ice.data?.message}`);
 
@@ -304,6 +315,8 @@ async function tenantUser(app, externalId, name) {
   await http('PATCH', `/apps/${app.id}`, { token: owner.token, body: { active: false } });
   const dead = await http('GET', `/v1/embed/config?appId=${app.appId}&parentOrigin=${encodeURIComponent(PARTNER)}`);
   check('a disabled app cannot bootstrap an embed', dead.status === 403, `${dead.status} ${dead.data?.message}`);
+  const deadSession = await http('GET', `/v1/embed/session?appId=${app.appId}`, { token: U.token });
+  check('disabled app rejects an existing embed token', deadSession.status === 403);
 
   const passed = results.filter(Boolean).length;
   console.log(`\n${'─'.repeat(62)}\n${passed}/${results.length} checks passed`);
