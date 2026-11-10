@@ -63,7 +63,11 @@ export const useChat = create((set, get) => ({
       if (activeChatId) {
         const { data } = await api.get(`/messages/${activeChatId}`);
         const messages = data.messages;
-        set((s) => ({ messagesByChat: { ...s.messagesByChat, [activeChatId]: messages } }));
+        set((s) => ({
+          messagesByChat: { ...s.messagesByChat, [activeChatId]: messages },
+          noMoreOlder: { ...s.noMoreOlder, [activeChatId]: false },
+          windowedChats: { ...s.windowedChats, [activeChatId]: false },
+        }));
       }
     } catch {
       /* transient — the next reconnect retries */
@@ -127,7 +131,7 @@ export const useChat = create((set, get) => ({
     set((s) => ({ loadingOlder: { ...s.loadingOlder, [chatId]: true } }));
     try {
       const { data } = await api.get(`/messages/${chatId}`, {
-        params: { before: new Date(oldest.createdAt).toISOString(), limit: 40 },
+        params: { before: new Date(oldest.createdAt).toISOString(), beforeId: oldest._id, limit: 40 },
       });
       const older = data.messages || [];
       if (!older.length) {
@@ -209,6 +213,7 @@ export const useChat = create((set, get) => ({
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
         windowedChats: { ...s.windowedChats, [chatId]: false },
+        noMoreOlder: { ...s.noMoreOlder, [chatId]: false },
       }));
     } finally {
       set({ loadingMessages: false });
@@ -703,6 +708,10 @@ export const useChat = create((set, get) => ({
    * (WhatsApp-style). Optimistic local update + API.
    */
   deleteMessage: async (chatId, messageId, scope = 'me') => {
+    const previous = get().messagesByChat[chatId] || [];
+    const originalIndex = previous.findIndex((m) => m._id === messageId);
+    const original = previous[originalIndex];
+    const nextId = previous[originalIndex + 1]?._id;
     set((s) => ({
       messagesByChat: {
         ...s.messagesByChat,
@@ -715,8 +724,20 @@ export const useChat = create((set, get) => ({
     if (!DEMO_MODE) {
       try {
         await api.delete(`/messages/${messageId}?scope=${scope}`);
-      } catch {
-        /* already applied locally */
+      } catch (err) {
+        if (original) {
+          set((s) => {
+            const current = [...(s.messagesByChat[chatId] || [])];
+            const index = current.findIndex((m) => m._id === messageId);
+            if (index >= 0) current[index] = original;
+            else {
+              const next = current.findIndex((m) => m._id === nextId);
+              current.splice(next >= 0 ? next : Math.min(originalIndex, current.length), 0, original);
+            }
+            return { messagesByChat: { ...s.messagesByChat, [chatId]: current } };
+          });
+        }
+        toast.error(err?.response?.data?.message || 'Could not delete message.');
       }
     }
   },

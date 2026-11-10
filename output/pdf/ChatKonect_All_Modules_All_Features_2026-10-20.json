@@ -1,0 +1,3552 @@
+{
+  "title": "ChatKonect - all modules and features",
+  "date": "2026-10-20",
+  "moduleCount": 49,
+  "featureCount": 900,
+  "routeCount": 205,
+  "incomingSocketEventCount": 48,
+  "modules": [
+    {
+      "title": "Account signup and onboarding",
+      "access": "Public signup; email delivery depends on configured provider",
+      "sources": [
+        "server/controllers/authController.js",
+        "client/src/pages/auth/Signup.jsx"
+      ],
+      "features": [
+        "Create an individual Personal account.",
+        "Create a new team workspace during signup.",
+        "Join an existing team using its invite code or invite link.",
+        "Join selected team groups through a limited guest signup link.",
+        "Enter name, email, phone number, password and password confirmation.",
+        "Check duplicate email and phone registrations.",
+        "Normalize phone numbers for account matching.",
+        "Automatically generate a unique username from the email address.",
+        "Accept a valid explicit username from compatible API clients.",
+        "Upload or supply an optional signup avatar; use a fallback avatar otherwise.",
+        "Send a signup email verification code when verification is enabled.",
+        "Verify the email code before submitting signup.",
+        "Resend an email verification code.",
+        "Expire verification codes and limit incorrect verification attempts.",
+        "Issue a time-limited proof after successful email verification.",
+        "Reject invalid workspace invitations before creating the account.",
+        "Create a signed-in session after successful signup.",
+        "Retain compatibility with the account OTP verification and resend endpoints."
+      ]
+    },
+    {
+      "title": "Login and password recovery",
+      "access": "Account holders; email recovery requires delivery configuration",
+      "sources": [
+        "server/controllers/authController.js",
+        "client/src/pages/auth/Login.jsx",
+        "client/src/pages/auth/ForgotPassword.jsx",
+        "client/src/pages/auth/ResetPassword.jsx"
+      ],
+      "features": [
+        "Sign in using email and password.",
+        "Sign in using username and password.",
+        "Sign in using phone number and password, including normalized number matching.",
+        "Show or hide password text in authentication forms.",
+        "Reject incorrect credentials with a readable response.",
+        "Reject suspended or banned accounts.",
+        "Require verified accounts when email verification is enabled.",
+        "Request a forgotten-password recovery link.",
+        "Return a generic recovery acknowledgement to protect account existence.",
+        "Reset the password using an expiring recovery token.",
+        "Change the current password from account settings.",
+        "Invalidate old tokens and sessions after password changes or resets.",
+        "Refresh an expired access session using the refresh cookie.",
+        "Rotate refresh credentials rather than reusing the old refresh token.",
+        "Log out of the current session.",
+        "Restore the signed-in account on application reload.",
+        "Apply authentication rate limits and security event logging."
+      ]
+    },
+    {
+      "title": "App lock and two-step PIN",
+      "access": "Signed-in account; account lock is distinct from a chat lock",
+      "sources": [
+        "client/src/components/LockScreen.jsx",
+        "client/src/components/PinResetForm.jsx",
+        "server/controllers/authController.js"
+      ],
+      "features": [
+        "Enable a two-step application-lock PIN.",
+        "Store the PIN as a password hash rather than readable text.",
+        "Show an application lock screen when PIN verification is required.",
+        "Verify the PIN to unlock the application.",
+        "Change an existing PIN.",
+        "Disable the PIN after the required verification.",
+        "Request an email code for forgotten-PIN recovery.",
+        "Reset the PIN using a valid recovery code.",
+        "Expire recovery codes and restrict incorrect recovery attempts.",
+        "Keep PIN and PIN-recovery secrets out of user API responses.",
+        "Use the same account PIN for access to the locked-chat list."
+      ]
+    },
+    {
+      "title": "Sessions and signed-in devices",
+      "access": "Signed-in account; own sessions only",
+      "sources": [
+        "server/utils/session.js",
+        "server/controllers/authController.js",
+        "client/src/pages/SettingsPage.jsx"
+      ],
+      "features": [
+        "List tracked signed-in sessions and devices.",
+        "Show the device/browser label derived from its user agent.",
+        "Track session creation and recent activity.",
+        "Identify the current session in device management.",
+        "Revoke an individual session.",
+        "Revoke all other sessions while preserving the current one.",
+        "Reject tokens belonging to a revoked session.",
+        "Expire sessions after their absolute lifetime.",
+        "Expire sessions after the configured idle period.",
+        "Keep refresh token hashes instead of raw refresh tokens in storage.",
+        "Periodically update activity without writing on every request.",
+        "Recheck account status and token version on authenticated requests."
+      ]
+    },
+    {
+      "title": "Profile and account data",
+      "access": "Signed-in account; another user receives privacy-filtered data",
+      "sources": [
+        "server/controllers/userController.js",
+        "client/src/components/modals/ModalHost.jsx",
+        "client/src/pages/SettingsPage.jsx"
+      ],
+      "features": [
+        "View your name, username, email, phone, avatar and about text.",
+        "Edit the display name.",
+        "Edit the username with uniqueness and format checks.",
+        "Edit the phone number with uniqueness validation.",
+        "Edit the about/bio text.",
+        "Change the profile photo.",
+        "Show fallback initials/avatar when a photo is absent or hidden.",
+        "Open another person's contact/profile information.",
+        "Export account data through the authenticated export endpoint.",
+        "Delete your own account using the account danger-zone flow.",
+        "Clean associated relationships and account-owned data during deletion.",
+        "Keep password hashes, OTPs, reset tokens and PIN secrets out of safe profiles."
+      ]
+    },
+    {
+      "title": "Contacts and contact requests",
+      "access": "Signed-in users; consent-based mutual contacts",
+      "sources": [
+        "server/controllers/contactController.js",
+        "server/controllers/userController.js",
+        "client/src/pages/ContactsPage.jsx"
+      ],
+      "features": [
+        "Search for a person by exact email.",
+        "Search for a person by exact username.",
+        "Search for a person by normalized phone number.",
+        "Search partial names/usernames within the permitted team directory.",
+        "View the existing contacts list and contact count.",
+        "Search/filter your displayed contacts.",
+        "Send a contact request.",
+        "View incoming contact requests.",
+        "View outgoing contact requests.",
+        "Accept an incoming request.",
+        "Reject an incoming request.",
+        "Automatically accept crossed pending requests from both people.",
+        "Prevent duplicate pending requests.",
+        "Allow a fresh request after a previous request was rejected.",
+        "Update both contact lists when a request is accepted.",
+        "Remove a contact.",
+        "Add or remove a contact from favorites.",
+        "Start a direct chat with a permitted mutual contact.",
+        "Start audio or video calls from contact actions.",
+        "Update requests and accepted contacts through realtime events.",
+        "Restrict exposure of another person's email and phone to permitted contacts."
+      ]
+    },
+    {
+      "title": "QR codes and invite links",
+      "access": "Signed-in users; browser camera permissions for scanning",
+      "sources": [
+        "client/src/components/InviteQrModal.jsx",
+        "client/src/components/ScanQrModal.jsx",
+        "client/src/components/QrScanner.jsx",
+        "client/src/lib/invite.js",
+        "client/src/pages/JoinInvite.jsx"
+      ],
+      "features": [
+        "Display your contact QR code.",
+        "Share or copy the associated contact link.",
+        "Display a group invite link and QR code.",
+        "Display a workspace invite link and QR code where permitted.",
+        "Scan supported invitation QR codes with a camera.",
+        "Paste an invitation link manually when camera scanning is unavailable.",
+        "Switch available scan cameras where the scanner exposes the option.",
+        "Stop scanning and release the camera when the scanner closes.",
+        "Handle denied camera permission and unreadable QR data.",
+        "Parse supported contact, group and workspace invite formats.",
+        "Open a scanned or pasted invitation through the matching join flow.",
+        "Preserve invitation context through sign-in or signup.",
+        "Reject unsupported or malformed invite links."
+      ]
+    },
+    {
+      "title": "Chat list and conversation organization",
+      "access": "Signed-in users; list is personal to the account",
+      "sources": [
+        "client/src/components/chat/ChatSidebar.jsx",
+        "server/controllers/chatController.js",
+        "server/controllers/userController.js"
+      ],
+      "features": [
+        "List direct conversations and group conversations.",
+        "Show each conversation's name and avatar.",
+        "Show last-message preview and last activity time.",
+        "Show unread-message counts and unread badges.",
+        "Show sent/delivered/read state in conversation previews.",
+        "Show typing and presence hints where available.",
+        "Filter All conversations.",
+        "Filter only Unread conversations.",
+        "Filter only Groups.",
+        "Filter Archived conversations.",
+        "Search the chat list.",
+        "Open the new-chat contact picker.",
+        "Create or reuse a direct chat with the same contact.",
+        "Pin or unpin a chat in your own list.",
+        "Archive or unarchive a chat.",
+        "Mute or unmute a chat.",
+        "View the archived/filtered conversation views exposed by the sidebar.",
+        "Open broadcast lists from the chat navigation.",
+        "Select a conversation and show its header, history and composer.",
+        "Refresh chat ordering and previews after incoming messages.",
+        "Keep per-user pin/archive/mute settings separate from other participants."
+      ]
+    },
+    {
+      "title": "Locked chats, clearing and disappearing messages",
+      "access": "Chat members; PIN needed for locked-chat access",
+      "sources": [
+        "server/controllers/chatController.js",
+        "client/src/components/chat/ChatHeader.jsx",
+        "client/src/components/chat/RightPanel.jsx"
+      ],
+      "features": [
+        "Lock a selected chat using the account PIN flow.",
+        "Hide locked chats from the ordinary conversation list.",
+        "Reveal the locked-chat list after PIN verification.",
+        "Unlock a previously locked chat.",
+        "Exclude locked conversations from global search.",
+        "Clear message history for yourself.",
+        "Remove a direct conversation from your personal view.",
+        "Leave a group through the group chat removal flow.",
+        "Reject chat removal by a nonparticipant before any write.",
+        "Enable disappearing messages for a chat.",
+        "Choose disappearing-message periods of 24 hours, 7 days or 90 days.",
+        "Turn disappearing messages off.",
+        "Apply expiry timestamps to messages sent while disappearance is enabled.",
+        "Keep personal deletions from reappearing through search/context lookup."
+      ]
+    },
+    {
+      "title": "Message composer and everyday sending",
+      "access": "Chat members with posting permission",
+      "sources": [
+        "client/src/components/chat/MessageComposer.jsx",
+        "client/src/store/useChat.js",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Write and send a text message.",
+        "Use multi-line message input.",
+        "Send with Enter when Enter-to-send is enabled.",
+        "Use a separate newline gesture instead of sending.",
+        "Open and close the emoji picker.",
+        "Insert an emoji into the current message.",
+        "Open the attachment/action picker.",
+        "Retain separate unsent drafts for different conversations.",
+        "Restore a saved draft after returning to a conversation.",
+        "Continue safely if browser storage is unavailable.",
+        "Show an optimistic outgoing message while the request is pending.",
+        "Replace the temporary message with the saved server message.",
+        "Show failed-send status when sending fails.",
+        "Show the reply target above the composer.",
+        "Cancel the current reply before sending.",
+        "Prevent empty text-only messages.",
+        "Validate message text length; server limit is 10,000 characters.",
+        "Use team quick replies from the composer when available.",
+        "Send attachment descriptors together with the message.",
+        "Apply direct-chat blocking/contact gates before delivery."
+      ]
+    },
+    {
+      "title": "Message history and reading experience",
+      "access": "Conversation participants",
+      "sources": [
+        "client/src/components/chat/MessageList.jsx",
+        "client/src/components/chat/MessageBubble.jsx",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Load the newest page of message history.",
+        "Scroll back to load older history pages.",
+        "Use timestamp plus message ID for stable pagination.",
+        "Avoid duplicate messages when pages and realtime updates overlap.",
+        "Show date separators and message timestamps.",
+        "Distinguish your outgoing messages from received messages.",
+        "Render text, image, video, document and recorded-message bubbles.",
+        "Render location, live-location and poll messages.",
+        "Show sender identity in a group conversation.",
+        "Show system messages for group actions.",
+        "Show quoted reply context.",
+        "Jump to a quoted or searched message with a context window.",
+        "Return to the latest messages after viewing older context.",
+        "Keep newer incoming messages when a local delete request fails.",
+        "Show loading, empty-history and unavailable-message states.",
+        "Prevent outsiders from reading private conversation history."
+      ]
+    },
+    {
+      "title": "Message actions, reactions and forwarding",
+      "access": "Conversation participants; edits/retraction restricted to sender",
+      "sources": [
+        "client/src/components/chat/MessageBubble.jsx",
+        "client/src/components/modals/ModalHost.jsx",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Reply to a selected message.",
+        "Reject replies to deleted or inaccessible targets.",
+        "Copy supported message text to the clipboard.",
+        "Edit your own eligible message.",
+        "Limit editing to the existing five-minute edit window.",
+        "Display edited-message state.",
+        "Delete a message for yourself.",
+        "Delete your own eligible message for everyone.",
+        "Limit delete-for-everyone to the existing five-minute window.",
+        "Show a removed-message placeholder after retraction.",
+        "Add an emoji reaction to a message.",
+        "Change or remove your reaction through the reaction action.",
+        "Display reaction counts and updates.",
+        "Forward a message to selected chats.",
+        "Search destination chats in the forward picker.",
+        "Preserve forwarded attribution metadata.",
+        "Forward supported attachments, including verified video notes.",
+        "Reject edits or retractions attempted by another sender.",
+        "Create a team task from an accessible team message."
+      ]
+    },
+    {
+      "title": "Starred messages",
+      "access": "Signed-in users; stars belong to the individual user",
+      "sources": [
+        "client/src/pages/StarredPage.jsx",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Star a message from its action menu.",
+        "Unstar a previously starred message.",
+        "Open the dedicated Starred page.",
+        "List starred messages across accessible conversations.",
+        "Show source conversation and sender context.",
+        "Open a starred message in its conversation.",
+        "Remove a star directly from the starred list.",
+        "Keep stars separate from chat-wide temporary pins.",
+        "Respect membership and personal-deletion visibility.",
+        "Show an empty state when no starred messages are available."
+      ]
+    },
+    {
+      "title": "Temporary pinned messages",
+      "access": "Direct-chat participants; group owners/admins can pin",
+      "sources": [
+        "server/utils/pins.js",
+        "client/src/components/chat/PinnedBanner.jsx",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Pin an eligible message for all conversation participants.",
+        "Choose a pin lifetime of 1 hour.",
+        "Choose a pin lifetime of 6 hours.",
+        "Choose a pin lifetime of 12 hours.",
+        "Choose a pin lifetime of 24 hours.",
+        "Display active pins in the conversation banner.",
+        "Open or jump to a pinned message.",
+        "Change/extend an existing pin through the pin operation.",
+        "Unpin a message when permitted.",
+        "Keep a maximum of three active pins per conversation.",
+        "Evict the oldest pin when a new pin exceeds the cap.",
+        "Expire pins after their chosen duration.",
+        "Restrict group pin actions to the permitted group roles.",
+        "Update pins through realtime events.",
+        "Load active pins with the first message-history page."
+      ]
+    },
+    {
+      "title": "Typing, presence and delivery receipts",
+      "access": "Privacy and tenant capabilities apply",
+      "sources": [
+        "server/socket/index.js",
+        "client/src/hooks/useSocket.js",
+        "client/src/lib/chatReadReceipts.js",
+        "server/utils/presence.js"
+      ],
+      "features": [
+        "Show another participant typing in an open chat.",
+        "Stop the typing indicator when typing ends.",
+        "Show online/offline presence where permitted.",
+        "Show last-seen information where permitted.",
+        "Track presence across multiple sockets/devices.",
+        "Send periodic presence pings.",
+        "Show a single tick for sent messages.",
+        "Show delivered acknowledgement state.",
+        "Show read acknowledgement state.",
+        "Mark a conversation read when the recipient opens/reads it.",
+        "Update unread counts after read acknowledgements.",
+        "Honor read-receipt privacy on sending and displaying read states.",
+        "Deduplicate repeated client read receipts for the same message.",
+        "Reset receipt deduplication appropriately after reconnect.",
+        "Require membership before joining private chat socket rooms.",
+        "Refresh conversation state after realtime changes and reconnects."
+      ]
+    },
+    {
+      "title": "Photos, videos, documents and upload limits",
+      "access": "Members with attachment access; local or configured Cloudinary storage",
+      "sources": [
+        "server/middleware/upload.js",
+        "server/controllers/uploadController.js",
+        "server/utils/uploadMetadata.js",
+        "client/src/lib/api.js"
+      ],
+      "features": [
+        "Select and send images from the photo picker.",
+        "Send ordinary video files through the supported upload flow.",
+        "Send supported documents and file attachments.",
+        "Upload multiple files in one request, up to 10 files.",
+        "Limit each image to 10 MB.",
+        "Limit each ordinary video or file to 50 MB.",
+        "Limit video notes to 10 MB.",
+        "Validate file extension/type against the upload allow-list.",
+        "Support JPEG, JPG, PNG, GIF and WebP image extensions.",
+        "Support MP4, WebM and MOV video extensions.",
+        "Support MP3, WAV, OGG and M4A audio extensions.",
+        "Support PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, ZIP and TXT files.",
+        "Show readable errors for unsupported types, too many files and oversized uploads.",
+        "Check stricter image limits after multipart processing.",
+        "Clean up rejected local image uploads.",
+        "Return attachment URL, name, size and MIME metadata.",
+        "Store uploaded bytes on local disk or the configured cloud driver.",
+        "Issue a short-lived access token for protected local media URLs.",
+        "Verify actual local video-note bytes at message send and schedule time.",
+        "Verify signed cloud upload size metadata without additional database reads.",
+        "Verify legacy owned cloud clips through the configured provider when needed.",
+        "Preserve upload proofs through message forwarding and scheduling.",
+        "Keep unverified external video-note URLs from bypassing the upload limit."
+      ]
+    },
+    {
+      "title": "Camera, voice notes and round video notes",
+      "access": "Browser device permission and recording support required",
+      "sources": [
+        "client/src/components/chat/MessageComposer.jsx",
+        "client/src/components/chat/MessageBubble.jsx"
+      ],
+      "features": [
+        "Open the in-chat camera capture interface.",
+        "Preview the live camera image before capture.",
+        "Switch front/back cameras when supported by the device.",
+        "Capture a photo and send it to the conversation.",
+        "Close camera capture and release the media stream.",
+        "Record an audio voice note using the microphone.",
+        "Show elapsed voice recording time.",
+        "Send the recorded voice note.",
+        "Cancel and discard a voice recording.",
+        "Record a round video note from the composer.",
+        "Show video-note recording time and preview.",
+        "Stop video-note recording at 60 seconds.",
+        "Send or discard the video-note recording.",
+        "Reject a video note larger than 10 MB before upload.",
+        "Use the dedicated stricter video-note upload endpoint option.",
+        "Render video notes with a distinct circular presentation.",
+        "Play received voice/audio and video messages with supported browser controls.",
+        "Show permission/device-unavailable errors when capture cannot start.",
+        "Release camera/microphone tracks when the capture UI closes."
+      ]
+    },
+    {
+      "title": "View-once media",
+      "access": "Image/video message participants",
+      "sources": [
+        "server/controllers/messageController.js",
+        "client/src/components/chat/MessageComposer.jsx",
+        "client/src/components/chat/MessageBubble.jsx"
+      ],
+      "features": [
+        "Mark an eligible image/video message as view-once.",
+        "Show the view-once state instead of an ordinary media preview.",
+        "Open view-once media through the viewed operation.",
+        "Record which recipient opened the item.",
+        "Remove consumed media attachment data from the message after viewing.",
+        "Prevent normal repeat opening once the item is consumed.",
+        "Keep view-once behavior separate from disappearing-message timers.",
+        "Restrict the view-once flag to supported image/video message types."
+      ]
+    },
+    {
+      "title": "Chat polls",
+      "access": "Members who may post in the conversation",
+      "sources": [
+        "client/src/components/chat/PollCard.jsx",
+        "client/src/components/chat/MessageComposer.jsx",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Open the Create poll composer.",
+        "Enter a poll question.",
+        "Add and edit answer options.",
+        "Remove an answer option before sending.",
+        "Choose single-answer or multiple-answer voting.",
+        "Send the poll as a conversation message.",
+        "Vote for a permitted choice or choices.",
+        "Update an existing vote through the poll vote flow.",
+        "Show vote totals and option result bars.",
+        "Update poll votes through realtime events.",
+        "Validate option indexes and poll contents on the server.",
+        "Apply membership, group posting and direct-chat blocking rules."
+      ]
+    },
+    {
+      "title": "Scheduled messages",
+      "access": "Conversation members; dispatcher runs on the server",
+      "sources": [
+        "client/src/components/chat/MessageComposer.jsx",
+        "server/controllers/messageController.js",
+        "server/utils/scheduledDispatcher.js"
+      ],
+      "features": [
+        "Open the Schedule message dialog.",
+        "Write the text to send later.",
+        "Select a custom date and time.",
+        "Choose the one-hour scheduling shortcut.",
+        "Choose the three-hour scheduling shortcut.",
+        "Choose tonight at 8 PM when that time is still available.",
+        "Choose tomorrow at 9 AM.",
+        "Create a scheduled text/media message through the API.",
+        "Require at least 10 seconds of scheduling lead time.",
+        "Limit one sender to 50 pending scheduled messages per chat.",
+        "List your own pending/failed scheduled items in a conversation.",
+        "Cancel your own scheduled message.",
+        "Send automatically even when the sender's browser is offline.",
+        "Dispatch through the normal delivery and authorization flow.",
+        "Recheck reply visibility and video-note upload size.",
+        "Track pending, sent, cancelled or failed delivery state.",
+        "Link a successful scheduled row to the delivered message.",
+        "Notify the author's other devices when schedule state changes."
+      ]
+    },
+    {
+      "title": "Location and live location",
+      "access": "Browser location permission; conversation membership",
+      "sources": [
+        "client/src/components/chat/MessageComposer.jsx",
+        "server/controllers/liveLocationController.js"
+      ],
+      "features": [
+        "Share your current static geographic location.",
+        "Attach latitude, longitude and a location label to a message.",
+        "Render the location as a dedicated message card.",
+        "Start a live-location sharing session.",
+        "Choose the available live-location sharing duration.",
+        "Update the active location while browser tracking is running.",
+        "View active live-location shares for the conversation.",
+        "Receive live location updates in realtime.",
+        "Stop an active share manually.",
+        "Expire a live share after its selected lifetime.",
+        "Restrict location updates/stopping to the share owner.",
+        "Handle denied or unavailable browser geolocation."
+      ]
+    },
+    {
+      "title": "Groups, group members and group roles",
+      "access": "Workspace/contact restrictions and group roles apply",
+      "sources": [
+        "server/controllers/groupController.js",
+        "client/src/pages/GroupsPage.jsx",
+        "client/src/components/chat/RightPanel.jsx",
+        "server/utils/rbac.js"
+      ],
+      "features": [
+        "Create a group with a name and selected members.",
+        "Add an optional group description.",
+        "View your group list and member counts.",
+        "Open a group conversation from the group list.",
+        "Edit the group name, description or avatar when permitted.",
+        "View group participants and their role labels.",
+        "Add eligible contacts/team members to the group.",
+        "Search contacts in the Add members picker.",
+        "Remove a group member when permitted.",
+        "Promote an eligible member to group admin.",
+        "Dismiss a group admin back to member when permitted.",
+        "Represent group owner, admin and member roles separately.",
+        "Restrict role changes/removal according to group permissions.",
+        "Set the group posting policy to all members or admins only.",
+        "Enforce the posting policy for normal and scheduled messages.",
+        "Share a group invitation link/QR code.",
+        "Join a group using its invitation code.",
+        "Honor the user's group-add permission setting.",
+        "Leave a group.",
+        "Handle owner departure with the group ownership rules.",
+        "Show group membership changes as system messages.",
+        "Start a group audio/video call from the conversation."
+      ]
+    },
+    {
+      "title": "Communities and announcement groups",
+      "access": "Signed-in users; community membership/role rules apply",
+      "sources": [
+        "server/controllers/communityController.js",
+        "client/src/pages/CommunitiesPage.jsx"
+      ],
+      "features": [
+        "Create a named community.",
+        "Add a community description.",
+        "Create the associated announcements group.",
+        "List communities available to the signed-in user.",
+        "Open community details and linked groups.",
+        "Join a community with its invite code.",
+        "Add an eligible existing group to a community.",
+        "Restrict group linking to permitted community administrators.",
+        "Use announcement-group posting restrictions.",
+        "Navigate from a community to its group chats.",
+        "Leave a community.",
+        "Apply community membership and access checks to detail operations."
+      ]
+    },
+    {
+      "title": "Broadcast lists",
+      "access": "Mutual contacts only; owner manages the list",
+      "sources": [
+        "server/controllers/broadcastController.js",
+        "client/src/pages/BroadcastsPage.jsx"
+      ],
+      "features": [
+        "Create a named broadcast list.",
+        "Select recipients from eligible mutual contacts.",
+        "Deduplicate recipient IDs and exclude the sender.",
+        "Support up to 256 recipients per list.",
+        "View your own broadcast lists and recipient counts.",
+        "Rename a broadcast list.",
+        "Edit its recipient list.",
+        "Delete your own broadcast list.",
+        "Send text through a broadcast list.",
+        "Send supported image/video/document broadcast attachments.",
+        "Deliver individually into each recipient's direct conversation.",
+        "Create a direct conversation for an eligible recipient when needed.",
+        "Recheck mutual contacts at send time.",
+        "Skip recipients blocked by the sender.",
+        "Skip recipients who have blocked the sender.",
+        "Return separate sent and skipped counts.",
+        "Emit incoming message/conversation updates to recipients.",
+        "Refresh affected chat-list caches after broadcast delivery."
+      ]
+    },
+    {
+      "title": "Search and jump to message",
+      "access": "Only permitted content; locked chats excluded globally",
+      "sources": [
+        "client/src/components/search/GlobalSearch.jsx",
+        "client/src/components/chat/ChatSearchResults.jsx",
+        "server/controllers/searchController.js",
+        "server/controllers/messageController.js"
+      ],
+      "features": [
+        "Open the global search interface from application navigation.",
+        "Search people, chats, messages and meetings together.",
+        "Group global search results by content type.",
+        "Debounce search input rather than request on every keystroke.",
+        "Require a useful minimum query length for global search.",
+        "Search permitted people by exact identifiers.",
+        "Search existing group chat names.",
+        "Search direct conversations associated with matching people.",
+        "Search message text only inside accessible chats.",
+        "Search meeting titles only among hosted/invited meetings.",
+        "Search within the currently open conversation.",
+        "Select a result and load its surrounding message context.",
+        "Highlight or focus the selected message in history.",
+        "Exclude locked chats from global search results.",
+        "Exclude personally deleted/unavailable messages from context lookup.",
+        "Cap result counts so responses remain bounded.",
+        "Escape user regex input and use indexed text search where available."
+      ]
+    },
+    {
+      "title": "Status and 24-hour stories",
+      "access": "Contacts and per-story audience rules apply",
+      "sources": [
+        "client/src/pages/StatusPage.jsx",
+        "server/controllers/statusController.js",
+        "server/models/Status.js"
+      ],
+      "features": [
+        "Create a text status update.",
+        "Choose the text-status background.",
+        "Create supported image/video status updates.",
+        "Attach a caption/content field where supported.",
+        "Show your own active status items.",
+        "Show contacts' status items grouped by person.",
+        "Open a full-screen status viewer.",
+        "Move between story items and people.",
+        "Automatically advance stories with the progress timer.",
+        "Hold/pause a story while viewing or typing a reply.",
+        "Use left/right keyboard arrows to navigate stories.",
+        "Close the story viewer with Escape.",
+        "Show story progress and seen/unseen state.",
+        "Expire status items after 24 hours.",
+        "Mark an allowed status as viewed.",
+        "Avoid counting the owner as their own viewer.",
+        "Avoid counting repeated views by the same viewer.",
+        "Show status viewers and view times to the owner.",
+        "Update owner view counts in realtime.",
+        "Reply to an allowed status.",
+        "Delete your own status update.",
+        "Limit story audience to contacts even for the broad audience option.",
+        "Support selected-contact and excluded-contact audiences through the API.",
+        "Keep viewer lists/reply-author data private from other viewers.",
+        "Refresh allowed contacts' feeds when a status is posted or deleted."
+      ]
+    },
+    {
+      "title": "Direct and group audio/video calls",
+      "access": "Browser media permission; contact/group and tenant feature gates",
+      "sources": [
+        "server/controllers/callController.js",
+        "server/utils/callService.js",
+        "client/src/hooks/useWebRTC.js",
+        "client/src/components/overlays/CallOverlay.jsx"
+      ],
+      "features": [
+        "Start a direct audio call.",
+        "Start a direct video call.",
+        "Start a group audio call.",
+        "Start a group video call.",
+        "Show outgoing dialing/ringing state.",
+        "Show an incoming-call overlay with caller identity.",
+        "Accept an incoming call.",
+        "Reject an incoming call.",
+        "Cancel an outgoing call before connection.",
+        "End an active call.",
+        "Handle busy or already-in-call state.",
+        "Handle unanswered/missed calls.",
+        "Show call duration and connection state.",
+        "Mute or unmute your microphone.",
+        "Turn the camera off or on.",
+        "Share your screen when browser support allows it.",
+        "Restore the camera after screen sharing stops.",
+        "Toggle browser microphone noise cancellation.",
+        "Switch audio output/speaker where browser setSinkId support exists.",
+        "Show local self-preview and remote participant video tiles.",
+        "Minimize a call while continuing to use the application.",
+        "Restore/expand the minimized call.",
+        "Use mute/end controls from the minimized call bar.",
+        "Enter or exit full-screen call view.",
+        "Use responsive group-call tile layouts.",
+        "Switch between the available grid/stage call views.",
+        "Choose portrait or landscape video tile shape.",
+        "Open Add people and invite eligible contacts into the active call.",
+        "Introduce invited conference members to the existing call peers.",
+        "Close ringing overlays on your other devices after you handle a call.",
+        "Exchange offer/answer/ICE through authorized Socket.IO signaling.",
+        "Clean up media tracks and connections on hangup/disconnect."
+      ]
+    },
+    {
+      "title": "Call history and network relay support",
+      "access": "Signed-in users; real relay operation requires provider configuration",
+      "sources": [
+        "client/src/pages/CallsPage.jsx",
+        "server/controllers/rtpccred.js",
+        "server/utils/iceServers.js",
+        "client/src/lib/iceServers.js"
+      ],
+      "features": [
+        "List recent call records.",
+        "Show audio/video type, peer, time and duration.",
+        "Distinguish incoming, outgoing and missed call history.",
+        "Filter the call-history screen using its available call categories.",
+        "Call a person back from history.",
+        "Load authenticated ICE configuration before establishing media.",
+        "Use STUN to discover direct network connectivity.",
+        "Use configured self-hosted coturn relays first.",
+        "Use configured Metered relays as an additional provider.",
+        "Use configured Cloudflare relays as an additional provider.",
+        "Preserve server-side provider preference order.",
+        "Mint time-limited TURN credentials on the server.",
+        "Refresh credentials before the server-reported TTL expires.",
+        "Share one in-flight credential request across concurrent callers.",
+        "Return controlled STUN-only state when no relay is configured.",
+        "Show a useful relay/network explanation when connection fails.",
+        "Keep provider keys and relay shared secrets out of the frontend."
+      ]
+    },
+    {
+      "title": "Meeting scheduling and invitations",
+      "access": "Signed-in users; host controls edits and invitations",
+      "sources": [
+        "client/src/components/modals/ModalHost.jsx",
+        "client/src/pages/MeetingsPage.jsx",
+        "server/controllers/meetingController.js",
+        "server/utils/meetingReminders.js"
+      ],
+      "features": [
+        "Schedule a meeting with a title.",
+        "Store an optional meeting description.",
+        "Choose meeting date and start time.",
+        "Store meeting timezone and planned duration.",
+        "Choose audio or video meeting type.",
+        "Invite selected eligible users/contacts.",
+        "Invite additional people by email.",
+        "Associate a meeting with a chat through the API.",
+        "Generate a unique readable room code and shareable join link.",
+        "Copy the meeting ID or join link.",
+        "Invite additional people to an existing meeting as host.",
+        "RSVP Going, Maybe or Can't go.",
+        "Track pending RSVP responses.",
+        "View upcoming, past or all meetings.",
+        "Show meeting host, time, type and invitation state.",
+        "Edit permitted meeting details as host.",
+        "Cancel a meeting as host.",
+        "Send invitation/update notifications and configured email invitations.",
+        "Schedule a pre-meeting reminder using reminderMinutes.",
+        "Save the recurrence choice: none, daily, weekly or monthly.",
+        "Recurrence is stored only; automatic future occurrence generation is not implemented.",
+        "Retain scheduled, ongoing, completed and cancelled meeting states."
+      ]
+    },
+    {
+      "title": "Meeting join, password and device check",
+      "access": "Signed-in attendee; host/admission policies apply",
+      "sources": [
+        "client/src/components/meeting/DeviceCheck.jsx",
+        "client/src/pages/MeetingRoom.jsx",
+        "server/controllers/meetingController.js",
+        "server/socket/index.js"
+      ],
+      "features": [
+        "Join a meeting by code.",
+        "Join by a shareable meeting URL.",
+        "Open the meeting details before joining.",
+        "Preview the camera before entering the room.",
+        "Choose an available microphone.",
+        "Choose an available camera.",
+        "Test microphone input with the pre-join level indicator.",
+        "Play a speaker test tone.",
+        "Enable or disable pre-join noise suppression.",
+        "Report denied permissions or missing media devices.",
+        "Allow joining without a working device when the browser/client permits it.",
+        "Protect a meeting with an optional password.",
+        "Validate the password before issuing meeting access.",
+        "Wait for the host when join-anytime is disabled.",
+        "Knock/request admission for uninvited link joins when Ask to join is enabled.",
+        "Show pending admission and denied-entry states.",
+        "Let the host admit or deny a waiting participant.",
+        "Use a scoped, short-lived admission pass for the admitted attendee.",
+        "Apply mute-on-entry to non-host participants.",
+        "Reject cancelled, invalid, locked or unauthorized breakout rooms."
+      ]
+    },
+    {
+      "title": "Live meeting room and media controls",
+      "access": "Admitted participants; browser and transport support apply",
+      "sources": [
+        "client/src/pages/MeetingRoom.jsx",
+        "client/src/hooks/useMeetingRoom.js",
+        "client/src/hooks/useLiveKitRoom.js"
+      ],
+      "features": [
+        "Show the meeting title, room ID and participant count.",
+        "Show your self-preview and remote participant tiles.",
+        "Mute or unmute your microphone.",
+        "Turn your camera on or off in video meetings.",
+        "Share a screen/window/tab where browser capture is supported.",
+        "Stop presenting and restore the camera stream.",
+        "Show a presenting banner and dedicated presenter stage.",
+        "Keep other participants in a strip while someone presents.",
+        "Switch video tile shape between portrait and landscape.",
+        "Enter or exit full-screen meeting mode.",
+        "Show connection/network quality.",
+        "Show media-permission and stream errors.",
+        "Warn when a peer-to-peer room exceeds comfortable capacity.",
+        "Use peer-to-peer mesh by default.",
+        "Use LiveKit SFU transport when configured on the server.",
+        "Adapt mesh encoding to the number of peer connections.",
+        "Record the meeting locally on the participant's device where supported.",
+        "Stop local recording and save/download the resulting local recording.",
+        "Auto-start local recording when the meeting's Auto-record option is enabled.",
+        "Show an active recording indicator.",
+        "Keep secondary controls in a mobile More options sheet.",
+        "Leave the room and clean up media/network resources."
+      ]
+    },
+    {
+      "title": "Meeting chat, reactions, hands, polls and Q&A",
+      "access": "Admitted participants; selected actions are host-only",
+      "sources": [
+        "client/src/components/meeting/MeetingPollsPanel.jsx",
+        "client/src/pages/MeetingRoom.jsx",
+        "server/socket/index.js"
+      ],
+      "features": [
+        "Open or close the in-meeting chat drawer.",
+        "Send a text message to the live meeting room.",
+        "Show sender identity on meeting chat messages.",
+        "Show an unread meeting-chat badge while the drawer is closed.",
+        "Send a meeting emoji reaction.",
+        "Show live floating reactions.",
+        "Retain a bounded reaction history on the meeting.",
+        "Raise your hand.",
+        "Lower your own hand.",
+        "Show the queue of raised hands in order.",
+        "Allow the host to lower another participant's hand.",
+        "Create an in-meeting poll with question and answer options as permitted.",
+        "Support single-choice or multiple-choice meeting polls.",
+        "Vote and replace an existing vote.",
+        "Show live poll results.",
+        "Close a poll as host/permitted creator according to server rules.",
+        "Ask a Q&A question.",
+        "Ask anonymously through the supported Q&A option.",
+        "Upvote a question with per-user vote tracking.",
+        "Mark a question answered and attach an answer as host.",
+        "Persist meeting polls/questions separately from ordinary chat polls.",
+        "Restrict collaboration events to participants in the live room."
+      ]
+    },
+    {
+      "title": "Host controls, breakouts, notes and attendance",
+      "access": "Host-only moderation/reporting; participants can use permitted notes",
+      "sources": [
+        "server/controllers/meetingController.js",
+        "server/socket/index.js",
+        "client/src/components/meeting/MeetingNotesPanel.jsx",
+        "client/src/pages/MeetingRoom.jsx"
+      ],
+      "features": [
+        "Lock or unlock a live meeting to additional entry.",
+        "Enable or disable participant meeting chat.",
+        "Enable or disable participant screen sharing.",
+        "Mute all participants as host.",
+        "Force-mute a selected participant.",
+        "Remove a participant from the live meeting.",
+        "Create 2 to 4 breakout rooms as host.",
+        "Assign meeting participants into breakout rooms.",
+        "Send breakout invitation events to assigned participants.",
+        "List current breakout rooms.",
+        "Open an assigned breakout room.",
+        "Return from a breakout room to the main meeting.",
+        "End current breakout rooms as host.",
+        "Reject unassigned users and nested breakout creation.",
+        "Open shared meeting notes.",
+        "Edit and save shared notes up to 20,000 characters.",
+        "Reload notes changed by another participant.",
+        "Use version/timestamp conflict detection rather than overwrite another edit.",
+        "Create a team task from accessible meeting notes.",
+        "Record the first actual room start and final end time.",
+        "Track attendee first-join, last-leave and accumulated attendance duration.",
+        "Retain attendance across a participant's rejoins.",
+        "View the attendance report as host.",
+        "Show meeting time, duration, attendee count and attendee records in the report."
+      ]
+    },
+    {
+      "title": "Notifications, sounds and Web Push",
+      "access": "Signed-in account; OS push needs browser permission and VAPID setup",
+      "sources": [
+        "client/src/components/layout/TopBar.jsx",
+        "server/controllers/notificationController.js",
+        "server/controllers/pushController.js",
+        "server/utils/push.js",
+        "client/public/sw.js"
+      ],
+      "features": [
+        "Open the in-app notification bell/list.",
+        "Show unread notification counts.",
+        "Mark one notification read.",
+        "Mark all notifications read.",
+        "Open the related chat, contact request, call or meeting from a notification.",
+        "Receive contact request and acceptance notifications.",
+        "Receive direct/group message notifications.",
+        "Receive call and meeting notifications.",
+        "Save in-app notifications independently of OS-push preferences.",
+        "Enable or disable message notifications.",
+        "Enable or disable group notifications.",
+        "Enable or disable call notifications.",
+        "Enable or disable meeting notifications.",
+        "Enable or disable notification sound.",
+        "Request browser desktop/push notification permission.",
+        "Subscribe the current browser to Web Push.",
+        "Unsubscribe a browser push endpoint.",
+        "Expose the public VAPID key through authenticated API access.",
+        "Handle a service-worker push and its notification click.",
+        "Focus/open the relevant application page from a push.",
+        "Respect muted chats, notification preferences and Do not disturb for push.",
+        "Remove expired push subscriptions after provider expiry responses."
+      ]
+    },
+    {
+      "title": "Privacy, blocking and reporting",
+      "access": "Own privacy settings; API enforcement varies by field",
+      "sources": [
+        "client/src/pages/SettingsPage.jsx",
+        "server/utils/privacy.js",
+        "server/controllers/userController.js",
+        "server/controllers/reportController.js"
+      ],
+      "features": [
+        "Choose last-seen visibility: Everyone, My contacts or Nobody.",
+        "Choose online-status visibility: Everyone, My contacts or Nobody.",
+        "Choose profile-photo visibility: Everyone, My contacts or Nobody.",
+        "Choose About visibility: Everyone, My contacts or Nobody.",
+        "Enable or disable reciprocal read receipts.",
+        "Choose who may add you to groups: Everyone or Contacts.",
+        "Store the account's status audience preference.",
+        "Store settings in the account rather than only local component state.",
+        "Block or unblock a person.",
+        "Exclude blocked people from applicable discovery results.",
+        "Reject contact requests blocked in either direction.",
+        "Reject direct message delivery blocked in either direction.",
+        "Skip blocked broadcast recipients.",
+        "Restrict direct call/contact signaling through the applicable server gates.",
+        "Report a user.",
+        "Report a group.",
+        "Submit message/status target reports through the report API.",
+        "Provide report reason and optional description.",
+        "Keep report submission confidential from the reported party.",
+        "Enforce conversation, workspace and tenant membership checks on private data."
+      ]
+    },
+    {
+      "title": "Presence preferences and appearance",
+      "access": "Signed-in users; personal appearance does not restyle another user",
+      "sources": [
+        "client/src/pages/SettingsPage.jsx",
+        "client/src/lib/wallpapers.js",
+        "server/controllers/userController.js",
+        "client/src/components/chat/RightPanel.jsx"
+      ],
+      "features": [
+        "Set manual presence to Available.",
+        "Set manual presence to Away.",
+        "Set manual presence to Busy.",
+        "Set manual presence to Do not disturb.",
+        "Suppress push/desktop interruptions in Do not disturb while retaining the bell.",
+        "Choose Light theme.",
+        "Choose Dark theme.",
+        "Follow the System theme.",
+        "Choose Teal, Indigo, Violet, Cyan, Emerald, Rose or Amber accents.",
+        "Set a default chat wallpaper for the account.",
+        "Override the wallpaper for one conversation.",
+        "Reset a conversation to the default wallpaper.",
+        "Use Default, Mint, Paper, Ink, Aurora, Dusk or Ocean presets.",
+        "Use Dots, Grid, Waves or Doodle wallpaper patterns.",
+        "Apply each wallpaper's light/dark variant.",
+        "Store a per-chat bubble-accent override through the theme API.",
+        "Enable or disable Enter-to-send.",
+        "Keep personal chat themes synchronized through saved account settings."
+      ]
+    },
+    {
+      "title": "Workspace setup, members and roles",
+      "access": "Team owner/admin/member; platform admin has separate authority",
+      "sources": [
+        "server/controllers/workspaceController.js",
+        "client/src/pages/SettingsPage.jsx",
+        "server/utils/rbac.js",
+        "server/utils/workspaceService.js"
+      ],
+      "features": [
+        "Create a team workspace through the explicit team signup path.",
+        "Place individual accounts in the shared Personal space.",
+        "View workspace identity, type and your current workspace role.",
+        "View the team member roster.",
+        "Rename/edit allowed workspace settings as owner/admin.",
+        "Copy/share a workspace invite code or link.",
+        "Rotate the workspace invite code as owner/admin.",
+        "Join invited users as team members.",
+        "Promote eligible team members to workspace admin.",
+        "Demote an eligible admin to member.",
+        "Suspend an eligible workspace member.",
+        "Reactivate an eligible suspended member.",
+        "Remove an eligible member from the workspace.",
+        "Transfer workspace ownership to an eligible member as owner.",
+        "Change the previous owner's role according to the transfer flow.",
+        "Protect owner/self operations from invalid role/status changes.",
+        "Separate workspace permissions from group permissions.",
+        "Keep cross-workspace direct chats separate from team-owned group data.",
+        "Restrict team tools from Personal accounts and limited guests."
+      ]
+    },
+    {
+      "title": "Shared customer inbox",
+      "access": "Customer initiates a thread; team members handle team replies",
+      "sources": [
+        "server/controllers/workspaceToolsController.js",
+        "client/src/pages/WorkspacePage.jsx",
+        "client/src/pages/TeamContactPage.jsx"
+      ],
+      "features": [
+        "Open a team's customer-contact screen.",
+        "Start a customer thread explicitly, without copying private direct messages.",
+        "Post further customer messages into the existing team thread.",
+        "List the customer's own team inbox conversations.",
+        "List incoming customer threads for the team.",
+        "Filter team inbox threads by open, pending or closed status.",
+        "Open a thread with its customer and message history.",
+        "Reply to a customer as a team member.",
+        "Assign a thread to an active teammate.",
+        "Clear the assignee to leave a thread unassigned.",
+        "Change thread status to Open, Pending or Closed.",
+        "Reopen a thread when the customer follows up.",
+        "Add a team-only internal note.",
+        "Show note author information to permitted team staff.",
+        "Remove internal notes from customer GET and follow-up responses.",
+        "Keep duplicate-create retry responses customer-safe.",
+        "Broadcast inbox-update hints to the team and customer in realtime.",
+        "Prevent another workspace from opening the team's threads.",
+        "Cap thread/message/note content to bound stored history."
+      ]
+    },
+    {
+      "title": "Team tasks and workspace activity",
+      "access": "Active non-guest team members; activity is owner/admin-only",
+      "sources": [
+        "server/controllers/workspaceToolsController.js",
+        "server/utils/workspaceTaskReminders.js",
+        "client/src/pages/WorkspacePage.jsx"
+      ],
+      "features": [
+        "Create a manual team task.",
+        "Enter task title and optional description.",
+        "Assign a task to an active teammate.",
+        "Leave a task unassigned.",
+        "Set a future due date/time.",
+        "Create a task from an accessible team-chat message.",
+        "Create a task from accessible meeting notes.",
+        "Retain the task's source type and source ID.",
+        "List team tasks with assignee and creator context.",
+        "Mark a task Done.",
+        "Reopen a completed task.",
+        "Edit task title or description through the API.",
+        "Change or clear the assignee.",
+        "Change or clear the due date.",
+        "Reset reminder state when the due date changes.",
+        "Send due-task reminders through the task reminder worker.",
+        "Receive task-update hints in realtime.",
+        "Validate source message/meeting access before linking the task.",
+        "View workspace activity events as owner/admin.",
+        "Show activity actor, action, target and time.",
+        "Log supported member, inbox, task and guest actions.",
+        "Reject activity reads by ordinary members and foreign workspaces."
+      ]
+    },
+    {
+      "title": "Limited guests and guest portal",
+      "access": "Workspace owner/admin invites; guest sees only selected groups",
+      "sources": [
+        "server/controllers/workspaceToolsController.js",
+        "server/utils/workspaceGuestExpiry.js",
+        "server/middleware/auth.js",
+        "client/src/pages/GuestPortal.jsx"
+      ],
+      "features": [
+        "Select 1 to 20 team groups for a guest invitation.",
+        "Generate a single-use guest signup link.",
+        "Keep the signup invitation valid for seven days.",
+        "Choose guest access for 1, 7, 30 or 90 days in the UI.",
+        "Choose access until revoked.",
+        "Accept 1 to 90 days or no expiry through the invite API.",
+        "Store the invitation token as a hash.",
+        "Register the guest into the invited team and permitted groups.",
+        "Open a dedicated restricted Guest groups portal.",
+        "Switch between the groups shared with that guest.",
+        "Read permitted group text history in the guest portal.",
+        "Send text-only replies to permitted groups.",
+        "Prevent guest file uploads and non-text posting.",
+        "Hide restricted attachments from the guest portal presentation.",
+        "Show guest access-expiry information.",
+        "List team guests and their active/suspended state as manager.",
+        "Revoke guest access immediately as owner/admin.",
+        "Remove the revoked guest from shared group memberships.",
+        "Invalidate revoked guest tokens.",
+        "Expire guest access through the guest-expiry worker.",
+        "Allow the guest to log out."
+      ]
+    },
+    {
+      "title": "Business storefront and automatic replies",
+      "access": "Team business tools; owner/admin manages configuration",
+      "sources": [
+        "client/src/pages/BusinessPage.jsx",
+        "server/controllers/workspaceController.js",
+        "server/utils/autoReply.js"
+      ],
+      "features": [
+        "Open the team Business tools screen.",
+        "Set the business category.",
+        "Set the business description.",
+        "Set displayed business hours.",
+        "Set the business address.",
+        "Set the website link.",
+        "Set the business contact email.",
+        "Display the stored verified-business badge when granted.",
+        "Restrict business profile edits to permitted team roles.",
+        "Enable or disable the automatic greeting.",
+        "Edit the greeting message text.",
+        "Send the greeting once for the customer's first eligible conversation message.",
+        "Enable or disable the away reply.",
+        "Edit the away message text.",
+        "Set away business start and end hours.",
+        "Send an away response outside the configured business-hours window.",
+        "Throttle repeated away replies with the existing cooldown.",
+        "Run auto-reply checks off the normal message request path.",
+        "Avoid repeated configuration reads using the auto-reply cache."
+      ]
+    },
+    {
+      "title": "Product catalog and product sharing",
+      "access": "Team business owners/admins manage products; permitted users browse/share",
+      "sources": [
+        "server/controllers/catalogController.js",
+        "client/src/pages/BusinessPage.jsx",
+        "client/src/components/chat/MessageComposer.jsx"
+      ],
+      "features": [
+        "View your team's product catalog.",
+        "Browse a business workspace's catalog through the API.",
+        "Create a product.",
+        "Set product name and description.",
+        "Set product price and currency.",
+        "Set product image information supported by the product form/API.",
+        "Set product URL information supported by the API.",
+        "Set product availability/inStock through the catalog API.",
+        "Edit an existing product.",
+        "Delete an existing product.",
+        "Prevent ordinary unauthorized members from editing the catalog.",
+        "Open the product picker from a team chat composer.",
+        "Select a product to share into a conversation.",
+        "Send the product's details through the product-share endpoint.",
+        "Apply normal conversation membership and send authorization to product sharing.",
+        "Show an empty catalog state when no products exist."
+      ]
+    },
+    {
+      "title": "Conversation labels and quick replies",
+      "access": "Team workspace business tools",
+      "sources": [
+        "server/controllers/agentController.js",
+        "client/src/pages/BusinessPage.jsx",
+        "client/src/components/chat/RightPanel.jsx",
+        "client/src/components/chat/MessageComposer.jsx"
+      ],
+      "features": [
+        "List the team's conversation labels.",
+        "Create a label with a name and supported color.",
+        "Delete a label.",
+        "Apply a label to a permitted conversation.",
+        "Remove a label from a permitted conversation through its apply/toggle flow.",
+        "Fetch labels assigned to one conversation.",
+        "Show assigned labels in the conversation information panel.",
+        "Keep team labels scoped to the workspace.",
+        "List saved quick replies.",
+        "Create a quick reply with its shortcut and text.",
+        "Edit a quick reply.",
+        "Delete a quick reply.",
+        "Find/select quick replies from the composer integration.",
+        "Insert a saved response into the current message draft.",
+        "Keep quick-reply content reusable without sending it until the user sends."
+      ]
+    },
+    {
+      "title": "Platform apps and tenant administration",
+      "access": "App owner or platform administrator",
+      "sources": [
+        "client/src/pages/PlatformPage.jsx",
+        "server/controllers/platformController.js",
+        "server/models/App.js"
+      ],
+      "features": [
+        "Create a named embedded platform app/tenant.",
+        "List apps owned by the caller; platform admins can see the broader app set.",
+        "Display and copy the app ID.",
+        "Display/copy a newly issued app secret in its permitted reveal flow.",
+        "Rotate the app secret.",
+        "Enable or disable an app.",
+        "Set permitted host-platform origins.",
+        "Validate allowed origins for embedding and token/bootstrap requests.",
+        "Configure the app seat limit.",
+        "Configure end-user token lifetime.",
+        "View app-specific statistics and usage counts.",
+        "Enable/disable Direct messaging, Groups, Voice calls or Video calls.",
+        "Enable/disable Meetings, Status or Presence.",
+        "Enable/disable Typing, Read receipts or Reactions.",
+        "Enable/disable Attachments, Voice notes or Web Push.",
+        "Enforce capability gates on the server for embedded tenants.",
+        "Isolate app users and tenant-owned messaging data.",
+        "Permanently delete an app through the explicit confirmation flow.",
+        "Require typing the app ID to confirm permanent deletion in the UI.",
+        "Remove the app's provisioned users/data through the deletion cleanup flow.",
+        "Show and respect deletion-in-progress state."
+      ]
+    },
+    {
+      "title": "Developer integration, hosted embed and SDKs",
+      "access": "Host backend keeps app secret; browser receives user-scoped token",
+      "sources": [
+        "server/controllers/platformController.js",
+        "server/controllers/embedController.js",
+        "client/public/embed.js",
+        "packages/react/src/index.d.ts",
+        "packages/node/src/index.js",
+        "client/src/pages/DevelopersPage.jsx"
+      ],
+      "features": [
+        "Verify backend app credentials using the platform identity endpoint.",
+        "Provision a host-platform user using a stable external ID.",
+        "Upsert the same external user idempotently.",
+        "Update supported provisioned profile fields.",
+        "List provisioned users for the authenticated app.",
+        "Deactivate an external user through the app backend API.",
+        "Issue a short-lived token for one provisioned end user.",
+        "Use the Node SDK createUserSession helper to provision and mint a session.",
+        "Embed hosted ChatKonect without building a second chat UI.",
+        "Bootstrap public app configuration before user authentication.",
+        "Fetch authenticated embed session information.",
+        "Fetch authenticated embed ICE configuration.",
+        "Initialize the browser drop-in loader with app/host/user-token configuration.",
+        "Mount the React ChatKonect component in a host application.",
+        "Select initial navigation path.",
+        "Select Light, Dark or System embed theme.",
+        "Provide a token directly or through a getToken callback.",
+        "Renew the token based on its validated JWT expiry.",
+        "Change identityKey when the signed-in host user changes.",
+        "Navigate the embedded interface through its exposed handle.",
+        "Trigger a token refresh through the exposed handle.",
+        "Destroy/unmount the embedded interface cleanly.",
+        "Receive ready, error, configuration, logout and navigation callbacks.",
+        "Use React type definitions for component props and ref methods.",
+        "Validate postMessage sender/origin in the hosted integration bridge.",
+        "Use the supplied host-platform integration example as an implementation reference."
+      ]
+    },
+    {
+      "title": "API keys, public REST API and incoming webhooks",
+      "access": "Platform admins manage API keys; webhook management checks group access",
+      "sources": [
+        "server/routes/v1Routes.js",
+        "server/controllers/apiKeyController.js",
+        "server/controllers/webhookController.js",
+        "client/src/pages/DevelopersPage.jsx"
+      ],
+      "features": [
+        "Create an API key with a name and supported scopes.",
+        "Reveal the newly created key through its creation response.",
+        "List owned API keys with safe metadata.",
+        "Revoke an API key.",
+        "Authenticate public API requests with X-API-Key.",
+        "Check key identity and granted scopes.",
+        "Read contacts and search users with contacts:read scope.",
+        "Read chats/history with chat:read scope.",
+        "Create direct chats and send messages with chat:write scope.",
+        "Initiate calls with calls:write scope.",
+        "Read meetings with meetings:read scope.",
+        "Create meetings with meetings:write scope.",
+        "Run public API operations as the key owner with normal data-access checks.",
+        "Apply public API rate limiting.",
+        "List owned/permitted incoming webhooks.",
+        "Create an incoming webhook for a permitted group.",
+        "Generate an unguessable webhook ingress URL.",
+        "Post a supported message into the target group using the ingress token.",
+        "Delete/revoke a webhook.",
+        "Rate-limit webhook ingress.",
+        "Keep app secrets, user tokens, API keys and webhook tokens as separate credentials."
+      ]
+    },
+    {
+      "title": "Admin dashboard, moderation and account control",
+      "access": "Platform super-admin; separate from workspace admin",
+      "sources": [
+        "client/src/pages/AdminDashboard.jsx",
+        "server/controllers/adminController.js",
+        "server/utils/createAdmin.js",
+        "server/utils/deleteUserAccount.js"
+      ],
+      "features": [
+        "Open the platform administrator dashboard.",
+        "Show total users.",
+        "Show current active-user count.",
+        "Show total groups.",
+        "Show total messages.",
+        "Show total calls.",
+        "Show open report count.",
+        "Show the last seven days of user growth.",
+        "Show the last seven days of message volume.",
+        "List users with safe profile/account information.",
+        "Search users by name, username or email.",
+        "Set an eligible user's account to Active.",
+        "Suspend an eligible user.",
+        "Ban an eligible user.",
+        "Invalidate old tokens after suspension or banning.",
+        "Prevent an admin from suspending/banning themselves.",
+        "Delete another user and associated account data.",
+        "Prevent self-deletion through the admin delete endpoint.",
+        "List reports with reporter and target context.",
+        "Set report state to Open, Reviewing, Resolved or Dismissed.",
+        "Record security audit events for moderation changes.",
+        "Bootstrap/repair the configured super-admin account at startup."
+      ]
+    },
+    {
+      "title": "Application shell, responsive UI and installation assets",
+      "access": "All users; native browser capabilities vary",
+      "sources": [
+        "client/src/App.jsx",
+        "client/src/components/layout/AppLayout.jsx",
+        "client/src/components/layout/NavRail.jsx",
+        "client/src/components/layout/MobileNav.jsx",
+        "client/src/components/ErrorBoundary.jsx",
+        "client/public/manifest.webmanifest"
+      ],
+      "features": [
+        "Navigate through the desktop rail and mobile bottom navigation.",
+        "Use a desktop conversation-list, message and information-panel layout.",
+        "Use mobile conversation navigation and back controls.",
+        "Open/close the conversation information panel.",
+        "Use responsive modals and mobile control sheets.",
+        "Show loading skeletons while data is being requested.",
+        "Show empty states when a module has no records.",
+        "Show success/error toasts for user actions.",
+        "Recover to an error boundary screen after an uncaught UI error.",
+        "Use accessible labels on icon-only controls and inputs.",
+        "Respect mobile safe-area spacing for bottom controls.",
+        "Retain theme-aware navigation, forms and message surfaces.",
+        "Expose a web app manifest and application icons for browser installation support.",
+        "Register the service worker used for notification handling.",
+        "Run the optional mock/demo mode to explore supported UI without live backend data.",
+        "Keep protected pages behind signed-in account access.",
+        "Route limited guests to their dedicated portal."
+      ]
+    },
+    {
+      "title": "Backend operation, data efficiency and safeguards",
+      "access": "Deployment/operator capabilities; provider configuration may be required",
+      "sources": [
+        "server/server.js",
+        "server/utils/chatCache.js",
+        "server/utils/readCoalescer.js",
+        "server/utils/queue.js",
+        "server/utils/redis.js",
+        "server/routes/index.js"
+      ],
+      "features": [
+        "Expose a health endpoint with database, email readiness and build identity.",
+        "Report boot time and current service time.",
+        "Use authenticated HTTP and Socket.IO access gates.",
+        "Apply configured cross-origin and embedding-origin restrictions.",
+        "Validate identifiers and bounded message/upload inputs.",
+        "Use MongoDB indexes for common message/history and lookup paths.",
+        "Compute chat-list unread totals in a shared aggregation.",
+        "Use optional Redis caching for hot chat lists.",
+        "Invalidate chat-list caches when relevant data changes.",
+        "Coalesce identical concurrent chat-list reads without delaying later requests.",
+        "Separate locked/unlocked and per-user cache scopes.",
+        "Run notification/auto-reply jobs through the queue abstraction.",
+        "Use BullMQ/Redis when configured and the supported inline fallback otherwise.",
+        "Run the scheduled-message dispatcher.",
+        "Run meeting reminder checks.",
+        "Run task reminder checks.",
+        "Run guest-expiry checks.",
+        "Use multi-instance Socket.IO/Redis support when configured.",
+        "Limit auth, public API and webhook ingress traffic.",
+        "Keep secrets and private authentication fields out of client responses.",
+        "Keep local media access authorization separate from ordinary user sessions.",
+        "Use read-receipt deduplication and bounded result/page sizes to reduce repeat work."
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "group": "System",
+      "source": "server/routes/index.js",
+      "handler": "health / readiness"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/embed/config",
+      "group": "/v1/embed",
+      "source": "server/routes/embedRoutes.js",
+      "handler": "getEmbedConfig)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/embed/ice",
+      "group": "/v1/embed",
+      "source": "server/routes/embedRoutes.js",
+      "handler": "protect, getIceServers)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/embed/session",
+      "group": "/v1/embed",
+      "source": "server/routes/embedRoutes.js",
+      "handler": "protect, getEmbedSession)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/send-code",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, sendSignupEmailCode)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/email/verify-code",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, verifySignupEmailCode)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, signup)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify-otp",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, verifyOtp)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/resend-otp",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, resendOtp)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, login)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, logout)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/refresh",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, refresh)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, getMe)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/sessions",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, listSessions)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/sessions/revoke-others",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, revokeOtherSessions)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auth/sessions/:id",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, revokeSession)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/forgot-password",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, forgotPassword)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/reset-password/:token",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "authLimiter, resetPassword)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/auth/change-password",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, changePassword)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/enable",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, enableTwoStep)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/change",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, authLimiter, changeTwoStepPin)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/disable",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, disableTwoStep)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/verify",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, authLimiter, verifyTwoStep)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/forgot",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, authLimiter, requestTwoStepReset)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/two-step/reset",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, authLimiter, resetTwoStepPin)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/turn-credentials",
+      "group": "/auth",
+      "source": "server/routes/authRoutes.js",
+      "handler": "protect, getTurnCredentials)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/search",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "searchUsers)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/me",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "updateProfile)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/me/privacy",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "updatePrivacy)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/me/presence",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "updatePresence)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/users/me/settings",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "updateSettings)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/me/export",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "exportData)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/me",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "deleteAccount)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/me/contacts",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "getContacts)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/me/contacts/:id",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "addContact)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/me/contacts/:id",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "removeContact)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/me/favorites/:id",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "toggleFavorite)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/me/block/:id",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "toggleBlock)"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/users/me/chats/:chatId/theme",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "setChatTheme)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/users/me/chats/:chatId/:action",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "toggleChatFlag)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/:id",
+      "group": "/users",
+      "source": "server/routes/userRoutes.js",
+      "handler": "getUserById)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "getChats)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/locked",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "getLockedChats)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/direct/:userId",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "accessDirectChat)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/:id/lock",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "lockChat)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/:id/unlock",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "unlockChat)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/:id",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "getChatById)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/chats/:id/disappearing",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "setDisappearing)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/chats/:id/clear",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "clearChat)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/chats/:id",
+      "group": "/chats",
+      "source": "server/routes/chatRoutes.js",
+      "handler": "deleteChat)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "sendMessage)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/poll",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "createPoll)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/read",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "markRead)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/starred",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "getStarred)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/schedule",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "scheduleMessage)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/scheduled/:chatId",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "listScheduled)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/scheduled/:id",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "cancelScheduled)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/:chatId",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "getMessages)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/:chatId/search",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "searchMessages)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/:chatId/pins",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "getPins)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/messages/:chatId/context/:messageId",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "getMessageContext)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/messages/:id",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "editMessage)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/:id",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "deleteMessage)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:id/react",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "reactToMessage)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:id/star",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "toggleStar)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:id/pin",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "pinMessage)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messages/:id/pin",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "unpinMessage)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:id/vote",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "votePoll)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/messages/:id/viewed",
+      "group": "/messages",
+      "source": "server/routes/messageRoutes.js",
+      "handler": "markViewed)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "createGroup)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/join/:inviteCode",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "joinByInvite)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/groups/:id",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "updateGroup)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/:id/members",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "addMembers)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/groups/:id/members/:userId",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "removeMember)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/groups/:id/members/:userId/role",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "setMemberRole)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/groups/:id/leave",
+      "group": "/groups",
+      "source": "server/routes/groupRoutes.js",
+      "handler": "leaveGroup)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/calls",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "getCallHistory)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/calls/history",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "getCallHistory)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls/start",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "startDirectCall)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls/end",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "endCall)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls/missed",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "missCall)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls/reject",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "rejectCall)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/calls",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "startCall)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/calls/:id",
+      "group": "/calls",
+      "source": "server/routes/callRoutes.js",
+      "handler": "updateCall)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getMeetings)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meetings",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "createMeeting)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings/code/:code",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getMeetingByCode)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings/code/:code/rtc",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getMeetingRtc)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meetings/code/:code/join",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "joinMeetingByCode)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings/:id/report",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getMeetingReport)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings/:id/notes",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getMeetingNotes)"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/meetings/:id/notes",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "updateMeetingNotes)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meetings/:id/breakouts",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "createBreakouts)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/meetings/:id/breakouts",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "getBreakouts)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/meetings/:id/breakouts",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "endBreakouts)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/meetings/:id",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "updateMeeting)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meetings/:id/rsvp",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "rsvp)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/meetings/:id/invite",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "inviteToMeeting)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/meetings/:id",
+      "group": "/meetings",
+      "source": "server/routes/meetingRoutes.js",
+      "handler": "cancelMeeting)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "getStatusFeed)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/status",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "createStatus)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/status/:id/view",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "viewStatus)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/status/:id/reply",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "replyStatus)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status/:id/viewers",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "getViewers)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/status/:id",
+      "group": "/status",
+      "source": "server/routes/statusRoutes.js",
+      "handler": "deleteStatus)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "group": "/notifications",
+      "source": "server/routes/notificationRoutes.js",
+      "handler": "getNotifications)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/notifications/read",
+      "group": "/notifications",
+      "source": "server/routes/notificationRoutes.js",
+      "handler": "markAllRead)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/notifications/:id/read",
+      "group": "/notifications",
+      "source": "server/routes/notificationRoutes.js",
+      "handler": "markRead)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/contacts/requests",
+      "group": "/contacts",
+      "source": "server/routes/contactRoutes.js",
+      "handler": "getRequests)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/contacts/request/:userId",
+      "group": "/contacts",
+      "source": "server/routes/contactRoutes.js",
+      "handler": "sendRequest)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/contacts/request/:id",
+      "group": "/contacts",
+      "source": "server/routes/contactRoutes.js",
+      "handler": "respondRequest)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/reports",
+      "group": "/reports",
+      "source": "server/routes/reportRoutes.js",
+      "handler": "createReport)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/upload",
+      "group": "/upload",
+      "source": "server/routes/uploadRoutes.js",
+      "handler": "receiveUploads, handleUploadErrors, validateUploadSizes, uploadFiles)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/upload/access",
+      "group": "/upload",
+      "source": "server/routes/uploadRoutes.js",
+      "handler": "getMediaToken)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/stats",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "getStats)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "listUsers)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/users/:id/status",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "setUserStatus)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/users/:id",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "deleteUser)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/reports",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "listReports)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/reports/:id",
+      "group": "/admin",
+      "source": "server/routes/adminRoutes.js",
+      "handler": "updateReport)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/customer/inbox",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "myCustomerThreads)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/:workspaceId/inbox",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "startInboxThread)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me/inbox",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "listInbox)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me/inbox/:id",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "getInboxThread)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/inbox/:id/replies",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "replyInbox)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/me/inbox/:id",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "updateInbox)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/inbox/:id/notes",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "addInboxNote)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me/tasks",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "listTasks)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/tasks",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "createTask)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/me/tasks/:id",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "updateTask)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me/activity",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "listActivity)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me/guests",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "listGuests)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/guests/invites",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "createGuestInvite)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/guests/:id/revoke",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "revokeGuest)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/me",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "getMyWorkspace)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/me",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "updateWorkspace)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/invite/rotate",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "rotateInvite)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/me/transfer",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "transferOwnership)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/me/members/:userId/role",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "setMemberRole)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/me/members/:userId/status",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "setMemberStatus)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspaces/me/members/:userId",
+      "group": "/workspaces",
+      "source": "server/routes/workspaceRoutes.js",
+      "handler": "removeMember)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/push/key",
+      "group": "/push",
+      "source": "server/routes/pushRoutes.js",
+      "handler": "getVapidKey)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/subscribe",
+      "group": "/push",
+      "source": "server/routes/pushRoutes.js",
+      "handler": "subscribe)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/unsubscribe",
+      "group": "/push",
+      "source": "server/routes/pushRoutes.js",
+      "handler": "unsubscribe)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communities",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "createCommunity)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/communities",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "listCommunities)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communities/join/:inviteCode",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "joinCommunity)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/communities/:id",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "getCommunity)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communities/:id/groups",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "addGroupToCommunity)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/communities/:id/leave",
+      "group": "/communities",
+      "source": "server/routes/communityRoutes.js",
+      "handler": "leaveCommunity)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/catalog/mine",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "listMyCatalog)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/catalog",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "createProduct)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/catalog/:id/share",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "shareProduct)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/catalog/:id",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "updateProduct)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/catalog/:id",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "deleteProduct)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/catalog/:workspaceId",
+      "group": "/catalog",
+      "source": "server/routes/catalogRoutes.js",
+      "handler": "listCatalog)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/labels",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "listLabels)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/labels",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "createLabel)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/labels/chat/:chatId",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "getChatLabels)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/labels/:id/apply",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "applyLabel)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/labels/:id",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "deleteLabel)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/quick-replies",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "listQuickReplies)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/quick-replies",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "createQuickReply)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/agent/quick-replies/:id",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "updateQuickReply)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/agent/quick-replies/:id",
+      "group": "/agent",
+      "source": "server/routes/agentRoutes.js",
+      "handler": "deleteQuickReply)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/broadcasts",
+      "group": "/broadcasts",
+      "source": "server/routes/broadcastRoutes.js",
+      "handler": "listBroadcasts)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/broadcasts",
+      "group": "/broadcasts",
+      "source": "server/routes/broadcastRoutes.js",
+      "handler": "createBroadcast)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/broadcasts/:id/send",
+      "group": "/broadcasts",
+      "source": "server/routes/broadcastRoutes.js",
+      "handler": "sendBroadcast)"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/broadcasts/:id",
+      "group": "/broadcasts",
+      "source": "server/routes/broadcastRoutes.js",
+      "handler": "updateBroadcast)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/broadcasts/:id",
+      "group": "/broadcasts",
+      "source": "server/routes/broadcastRoutes.js",
+      "handler": "deleteBroadcast)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/live-location/start",
+      "group": "/live-location",
+      "source": "server/routes/liveLocationRoutes.js",
+      "handler": "startLiveLocation)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/live-location/:chatId/active",
+      "group": "/live-location",
+      "source": "server/routes/liveLocationRoutes.js",
+      "handler": "getActiveLiveLocations)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/live-location/:messageId/update",
+      "group": "/live-location",
+      "source": "server/routes/liveLocationRoutes.js",
+      "handler": "updateLiveLocation)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/live-location/:messageId/stop",
+      "group": "/live-location",
+      "source": "server/routes/liveLocationRoutes.js",
+      "handler": "stopLiveLocation)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/search",
+      "group": "/search",
+      "source": "server/routes/searchRoutes.js",
+      "handler": "globalSearch)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/webhooks",
+      "group": "/webhooks",
+      "source": "server/routes/webhookRoutes.js",
+      "handler": "listWebhooks)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks",
+      "group": "/webhooks",
+      "source": "server/routes/webhookRoutes.js",
+      "handler": "createWebhook)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/webhooks/:id",
+      "group": "/webhooks",
+      "source": "server/routes/webhookRoutes.js",
+      "handler": "deleteWebhook)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/hooks/:token",
+      "group": "/hooks",
+      "source": "server/routes/webhookRoutes.js",
+      "handler": "webhookIngressLimiter, receiveWebhook)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/keys",
+      "group": "/keys",
+      "source": "server/routes/keyRoutes.js",
+      "handler": "listKeys)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/keys",
+      "group": "/keys",
+      "source": "server/routes/keyRoutes.js",
+      "handler": "createKey)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/keys/:id",
+      "group": "/keys",
+      "source": "server/routes/keyRoutes.js",
+      "handler": "revokeKey)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/apps/:id/permanent",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "deleteApp)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/:id/stats",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "appStats)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps/:id/rotate",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "rotateAppSecret)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "listApps"
+    },
+    {
+      "method": "POST",
+      "path": "/api/apps",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "createApp"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/apps/:id",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "updateApp"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/apps/:id",
+      "group": "/apps",
+      "source": "server/routes/appRoutes.js",
+      "handler": "disableApp"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/platform/whoami",
+      "group": "/v1/platform",
+      "source": "server/routes/platformRoutes.js",
+      "handler": "(req, res) => res.json({ success: true, app: { appId: req.app_.appId, name: req.app_.name, features: req.app_.features, limits: req.app_.limits, active: req.app_.active, }, }) )"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/platform/users",
+      "group": "/v1/platform",
+      "source": "server/routes/platformRoutes.js",
+      "handler": "upsertAppUser)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/platform/users",
+      "group": "/v1/platform",
+      "source": "server/routes/platformRoutes.js",
+      "handler": "listAppUsers)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/platform/users/:externalId",
+      "group": "/v1/platform",
+      "source": "server/routes/platformRoutes.js",
+      "handler": "deactivateAppUser)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/platform/tokens",
+      "group": "/v1/platform",
+      "source": "server/routes/platformRoutes.js",
+      "handler": "issueUserToken)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(), (req, res) => res.json({ success: true, user: req.user.toSafeJSON(), scopes: req.apiKey.scopes }) )"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/contacts",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['contacts:read']), getContacts)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/search",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['contacts:read']), searchUsers)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chats",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['chat:read']), getChats)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/chats/direct/:userId",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['chat:write']), accessDirectChat)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/messages/:chatId",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['chat:read']), getMessages)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/messages",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['chat:write']), sendMessage)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/calls",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['calls:write']), startCall)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/meetings",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['meetings:read']), getMeetings)"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/meetings",
+      "group": "/v1",
+      "source": "server/routes/v1Routes.js",
+      "handler": "apiKeyAuth(['meetings:write']), createMeeting)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ice",
+      "group": "Shared ICE",
+      "source": "server/routes/index.js",
+      "handler": "protect, getIceServers"
+    }
+  ],
+  "incomingSocketEvents": [
+    "accept-call",
+    "call-missed",
+    "call-user",
+    "call:accept",
+    "call:answer",
+    "call:busy",
+    "call:cancel",
+    "call:end",
+    "call:ice-candidate",
+    "call:introduce",
+    "call:invite",
+    "call:offer",
+    "call:reject",
+    "call:screen",
+    "disconnect",
+    "end-call",
+    "join-chat",
+    "leave-chat",
+    "meeting:admit",
+    "meeting:chat",
+    "meeting:force-mute",
+    "meeting:hand",
+    "meeting:join",
+    "meeting:leave",
+    "meeting:lower-hand",
+    "meeting:mute-all",
+    "meeting:poll-close",
+    "meeting:poll-create",
+    "meeting:poll-vote",
+    "meeting:presenting",
+    "meeting:qa-answer",
+    "meeting:qa-ask",
+    "meeting:qa-upvote",
+    "meeting:reaction",
+    "meeting:remove",
+    "meeting:signal",
+    "message-reaction",
+    "message-read",
+    "message:delivered",
+    "message:read",
+    "presence:ping",
+    "register-user",
+    "reject-call",
+    "typing-start",
+    "typing-stop",
+    "webrtc-answer",
+    "webrtc-ice-candidate",
+    "webrtc-offer"
+  ],
+  "caveats": [
+    "This catalogue describes features present in the local repository on 20 October 2026. It is not a claim that every feature has been exercised on real devices or deployed.",
+    "Role and access notes describe the relevant module. Individual actions still require their server checks; a visible button is not a grant of permission.",
+    "Meeting recurrence choices are saved, but future recurring instances are not automatically generated. Live captions/transcription and background replacement are not exposed as working features in the current meeting UI.",
+    "Meeting recording is local browser/device recording, not a server recording archive. Device recording, screen capture, output switching and media quality depend on browser and device support.",
+    "Video-note bytes are verified server-side. The local recorder stops at 60 seconds and declared durations above 60 seconds are rejected; local video is not independently decoded to measure actual duration.",
+    "Profile-photo/About/status audience preferences exist. Visibility must be assessed at each consuming surface; saving a preference alone is not proof of universal privacy enforcement.",
+    "Workspace free/pro/business plan values and app limits are product configuration. No payment gateway, checkout, subscription charging or full billing/invoicing module is implemented here.",
+    "Email/OS push, Cloudinary, TURN and LiveKit require their respective deployment configuration. This PDF contains no private environment values, passwords or API secrets."
+  ],
+  "sources": [
+    {
+      "file": "client/public/embed.js",
+      "sha256": "fee1fa56975e107416797146262f73e25813425661ce1e1dd15db12b115c81db"
+    },
+    {
+      "file": "client/public/manifest.webmanifest",
+      "sha256": "168190d1018f3b8fa5d115dd37a00d692d26f275e5ca6935cada4dc4a811f617"
+    },
+    {
+      "file": "client/public/sw.js",
+      "sha256": "244965fa85b75b49b578287fdc89e723f6487f7b1f25766c3c2f2131aa9188cc"
+    },
+    {
+      "file": "client/src/App.jsx",
+      "sha256": "4654381fce43ae40a1d4634db2adb1237895b31bda45ecd80b203d1ad4ca4bdf"
+    },
+    {
+      "file": "client/src/components/ErrorBoundary.jsx",
+      "sha256": "691c6d694bf042c1f0162a98da9947cde6957193428f9a8c9301a0472f9795ed"
+    },
+    {
+      "file": "client/src/components/InviteQrModal.jsx",
+      "sha256": "5eb1c67161ece0981b5b03256f83f4bc68f105600aa1751a8f6099cf380dd240"
+    },
+    {
+      "file": "client/src/components/LockScreen.jsx",
+      "sha256": "092e602aafc047086e200e21270a35fd2c88f7e68b80f578cca1501960b2ca64"
+    },
+    {
+      "file": "client/src/components/PinResetForm.jsx",
+      "sha256": "49b1c655dadb42529c3ae2b757bce1c2bc73cc3f745363db6b407ed870254026"
+    },
+    {
+      "file": "client/src/components/QrScanner.jsx",
+      "sha256": "954c8d93b00a99314ba62bc92d15219fbafd22e2abe5036122b95c0142d4b49a"
+    },
+    {
+      "file": "client/src/components/ScanQrModal.jsx",
+      "sha256": "2318e887babceba19eab0771b920c7209fb7b0d10b89e8c0a45cacc34ac5ca58"
+    },
+    {
+      "file": "client/src/components/chat/ChatHeader.jsx",
+      "sha256": "9fbf901d0fd31eaf39eabda263dfd5bea6351d4b2ecd8cb6abd49d864cd2e08a"
+    },
+    {
+      "file": "client/src/components/chat/ChatSearchResults.jsx",
+      "sha256": "744a76e468aadd02920e426efff40ee889b115e7289806cb14a335e17ac89a35"
+    },
+    {
+      "file": "client/src/components/chat/ChatSidebar.jsx",
+      "sha256": "cad787fd08509784080186ab5f9ff338d59fa0ca4e716652b1d17bdfcec39565"
+    },
+    {
+      "file": "client/src/components/chat/MessageBubble.jsx",
+      "sha256": "e4d1ead7a3f02a189e9b041f0b0cc38ab7b9dd47687fe5583046a30ccbc444a9"
+    },
+    {
+      "file": "client/src/components/chat/MessageComposer.jsx",
+      "sha256": "afc4eb0f6a3bdc99a17942b73930a21e11298336556dc6951653141eea7490c5"
+    },
+    {
+      "file": "client/src/components/chat/MessageList.jsx",
+      "sha256": "ec6b8fe684154d3765abd8ea0e18b7de32a631b8a44b3a10a487c106674b6328"
+    },
+    {
+      "file": "client/src/components/chat/PinnedBanner.jsx",
+      "sha256": "e55eeee16c785a9b82f957b6d510f63d31efa9ed7b7bfd33414c58b438647370"
+    },
+    {
+      "file": "client/src/components/chat/PollCard.jsx",
+      "sha256": "248736ba7a10d508ac63ae61daff9a06e0660dd98a844885ea9732e4e57e39fd"
+    },
+    {
+      "file": "client/src/components/chat/RightPanel.jsx",
+      "sha256": "e0c716eae2d9eb23c50e5714e6e6f891b3e7720f406ef9657d1e53c93a0574ac"
+    },
+    {
+      "file": "client/src/components/layout/AppLayout.jsx",
+      "sha256": "1a6b1dae94f2f29c8aff32bf395e8b47268f8eb589762300bd05a8e2c00f82f9"
+    },
+    {
+      "file": "client/src/components/layout/MobileNav.jsx",
+      "sha256": "0a14795db62119cc98b10629e219de41d32ec87c12aca1477defbc030a876e6e"
+    },
+    {
+      "file": "client/src/components/layout/NavRail.jsx",
+      "sha256": "e936f6d736d3def630507d121225db3311c94d020f51f17c2410cf3a093c40d5"
+    },
+    {
+      "file": "client/src/components/layout/TopBar.jsx",
+      "sha256": "f286394e49a327d2e4f4048363c1776de4221671a6aa86815edfc362d5eb5662"
+    },
+    {
+      "file": "client/src/components/meeting/DeviceCheck.jsx",
+      "sha256": "052f5cd146286dc98664e72e7249beaba6f1bccdd11c687120e535149124de83"
+    },
+    {
+      "file": "client/src/components/meeting/MeetingNotesPanel.jsx",
+      "sha256": "85ea52519d2f1b6dab1ea6a0bf456012e25401d8a43146056c221b6af11301e2"
+    },
+    {
+      "file": "client/src/components/meeting/MeetingPollsPanel.jsx",
+      "sha256": "690d71ecd88a68456744eebb9a22683ead9c306211f24b695556f04c9afa0f43"
+    },
+    {
+      "file": "client/src/components/modals/ModalHost.jsx",
+      "sha256": "6232691f9221a8e6c12fb4aa9f29713774c775f86b0e75e2f4b6504b651abff7"
+    },
+    {
+      "file": "client/src/components/overlays/CallOverlay.jsx",
+      "sha256": "ea38fd408ff6592fe5604f16a96795cab14c4429e8e8de04ee962d6e21b10a3d"
+    },
+    {
+      "file": "client/src/components/search/GlobalSearch.jsx",
+      "sha256": "c8cd10aa900c74d9617d39c52d72744188327d5645e439c99ea6f8eea698830b"
+    },
+    {
+      "file": "client/src/hooks/useLiveKitRoom.js",
+      "sha256": "8b3621a289b2290421d4bc284c62b5eb3d0a257e1605a9c268f77c870dd88400"
+    },
+    {
+      "file": "client/src/hooks/useMeetingRoom.js",
+      "sha256": "efb8112063e7863a7eaf002341d5f084a048367d130c5ab29ec43bf892ce99c3"
+    },
+    {
+      "file": "client/src/hooks/useSocket.js",
+      "sha256": "319b10d7ea88bf5732c5e2033b334847bba219abe5bdba9102501eea2988925e"
+    },
+    {
+      "file": "client/src/hooks/useWebRTC.js",
+      "sha256": "31647bee01d3250278eed2ef3e8263c59f455f241399c55e3db8137673cd36c1"
+    },
+    {
+      "file": "client/src/lib/api.js",
+      "sha256": "de62f140dccb261d94877b6f08152e74c58985df867aea79cda312f77d5b1c6c"
+    },
+    {
+      "file": "client/src/lib/chatReadReceipts.js",
+      "sha256": "e8d9fe750251456bfd113a0d52336c7768f30092d3fbdd18c8dc8ecda63fb42f"
+    },
+    {
+      "file": "client/src/lib/iceServers.js",
+      "sha256": "d7f97101fdb73a9e0c4dd048e079604f99e7e8584bf33a9959a01bb747dbaea6"
+    },
+    {
+      "file": "client/src/lib/invite.js",
+      "sha256": "4b931a2efbdc37b17726127e06a84ddc0aaac7b4cce504de4997ba06aff4d4f2"
+    },
+    {
+      "file": "client/src/lib/wallpapers.js",
+      "sha256": "3a170cba7c48d898131338c1c54d208e620abdeb6f6c1e7a66848252891bcef2"
+    },
+    {
+      "file": "client/src/pages/AdminDashboard.jsx",
+      "sha256": "32068f7dbff85d0c8217c5fb61073522c1400aca8b476df046f255db4bd7dd4b"
+    },
+    {
+      "file": "client/src/pages/BroadcastsPage.jsx",
+      "sha256": "e8c3fc1d04c9e974e2496a60dd1f0fcd16cdfb5b2b7cf5795fd6048be4bd09cc"
+    },
+    {
+      "file": "client/src/pages/BusinessPage.jsx",
+      "sha256": "9e1098602bd0624e62512c8abe8ff2703bf44506b9cd5c5a43402499b159b2d2"
+    },
+    {
+      "file": "client/src/pages/CallsPage.jsx",
+      "sha256": "6d7ca2080314bbb371a4aa7784bb91be600f0771dc802b654f386c2152aef1b1"
+    },
+    {
+      "file": "client/src/pages/CommunitiesPage.jsx",
+      "sha256": "07a467bc072e06c44ac9f3732ed241bf5775270ceaf4bb1e695ddaa047c2bb30"
+    },
+    {
+      "file": "client/src/pages/ContactsPage.jsx",
+      "sha256": "dff0efec1ec7f094fc7c273f61fde380ac7bef2d3a327842fb7b35f47b560379"
+    },
+    {
+      "file": "client/src/pages/DevelopersPage.jsx",
+      "sha256": "716047db8a841bf3b51fbc7f077e247599579ffd48077f81f21c984d893809ef"
+    },
+    {
+      "file": "client/src/pages/GroupsPage.jsx",
+      "sha256": "8144cb167ec0396773ff6bc1dcc34d1447473e6d4eb06ace8eeb0a31efbe724c"
+    },
+    {
+      "file": "client/src/pages/GuestPortal.jsx",
+      "sha256": "ceb9951fddc999a3b8d40da7883b7c08854c97df6e1005866d17d7733e55e559"
+    },
+    {
+      "file": "client/src/pages/JoinInvite.jsx",
+      "sha256": "940c0f65c6ca965a2c6671cfe3bb4fdd029971602daf87cae3acd9e7f8d3b243"
+    },
+    {
+      "file": "client/src/pages/MeetingRoom.jsx",
+      "sha256": "9247511afa88c7b52f97d3366fe6ab95aba1b6b637b5dd5b5d28d3941cfbb933"
+    },
+    {
+      "file": "client/src/pages/MeetingsPage.jsx",
+      "sha256": "6a737ea8223a9def0aa59f68d3e1b17d2aeb3cb5bab241a60b444946cf7396fa"
+    },
+    {
+      "file": "client/src/pages/PlatformPage.jsx",
+      "sha256": "a08564d8d033d34482234b6c10b597b23c8d3d2cea081835aefcd5e8b9370297"
+    },
+    {
+      "file": "client/src/pages/SettingsPage.jsx",
+      "sha256": "bd949e3a35d36dfae30693ee8c9d36bcc404bb10da3201c84df6a110c036f405"
+    },
+    {
+      "file": "client/src/pages/StarredPage.jsx",
+      "sha256": "3a9b28bdba05790285b7b9ad1499290579b7f01991f9ebd795c4ce251c204c04"
+    },
+    {
+      "file": "client/src/pages/StatusPage.jsx",
+      "sha256": "57f5c5e70dbd28b2d19fadf8c614b244dafd27ff409b461c187fcc094cf1e12d"
+    },
+    {
+      "file": "client/src/pages/TeamContactPage.jsx",
+      "sha256": "df80c20620412101daf899d0267408e10b187cd6259ea23fac78e4232f361aa5"
+    },
+    {
+      "file": "client/src/pages/WorkspacePage.jsx",
+      "sha256": "610e90ca17ca736233078a444d17bb6ee98a70b995be4e3dc1e17e3fe5ab0dcb"
+    },
+    {
+      "file": "client/src/pages/auth/ForgotPassword.jsx",
+      "sha256": "c250c178667c5aaf83d8e26dc432cf993848ee245be9cadd61e0283b6a008f0e"
+    },
+    {
+      "file": "client/src/pages/auth/Login.jsx",
+      "sha256": "6e587bca551cc21ecadc18e5f4920e22c3c86aaec827fd792347c05e7d8ab4ca"
+    },
+    {
+      "file": "client/src/pages/auth/ResetPassword.jsx",
+      "sha256": "6fa1d9fe01784ab3295777ffdab614bd909f606f6492ba222195a15c8db48f4c"
+    },
+    {
+      "file": "client/src/pages/auth/Signup.jsx",
+      "sha256": "5bf119d18a45e48f3d74de62546def286e877826952a10ba6becfd2aac912136"
+    },
+    {
+      "file": "client/src/store/useChat.js",
+      "sha256": "7b4e429163b984c79105d40f73f2fd27b4f4d1434200367a540a1fd4156e9f57"
+    },
+    {
+      "file": "packages/node/src/index.js",
+      "sha256": "2c87e1d5028c4e11a224b77c9d8e3dc4ef5259a23c70bae9cd9c3ee7b1783969"
+    },
+    {
+      "file": "packages/react/src/index.d.ts",
+      "sha256": "82f2a675b982ec5996575a17f1f25081550b6f4d080681712a5220d19a8aaabe"
+    },
+    {
+      "file": "server/controllers/adminController.js",
+      "sha256": "7fdd511cff9382ec2055349e068302e393f03399624c9da3840fcc3d5b3b4ae9"
+    },
+    {
+      "file": "server/controllers/agentController.js",
+      "sha256": "8b4a8709c6e46bb39847a5cd7d368ab2c3049ac0d75615d9cd53f77030a0f4a6"
+    },
+    {
+      "file": "server/controllers/apiKeyController.js",
+      "sha256": "33f55d997b0bd5ab1e5c891fe9ea4a812f3bd59b4f368d1ee13f07150f320227"
+    },
+    {
+      "file": "server/controllers/authController.js",
+      "sha256": "2b14a36664c014873702fc88ca49157fa5a784d2760ef07ea3f3961725a56cc4"
+    },
+    {
+      "file": "server/controllers/broadcastController.js",
+      "sha256": "c5177a47c845710e1ac2cf743026661870a92eec156b0dd87e0dda8f5a9603e8"
+    },
+    {
+      "file": "server/controllers/callController.js",
+      "sha256": "07795969b748682e03ed1f71b3283fef5c1fbcbf1977237f0aabe05c13669bc6"
+    },
+    {
+      "file": "server/controllers/catalogController.js",
+      "sha256": "af00ebedd26cdf86bf14847286e57b73525b1325e0fe507ea23a978b2b28c88f"
+    },
+    {
+      "file": "server/controllers/chatController.js",
+      "sha256": "c96b4c1a10c08150e2610f31747da1ba38771647ee0cba095e5f13ac48ee74fe"
+    },
+    {
+      "file": "server/controllers/communityController.js",
+      "sha256": "33290987a5fe39f235370bef20344bf1c5ee46c0c7f07e84edda486ea28ab37d"
+    },
+    {
+      "file": "server/controllers/contactController.js",
+      "sha256": "8f74b877d8ab772c026dba944ecbd8f63dd44df87a0a8d3218b98ca83ba33a30"
+    },
+    {
+      "file": "server/controllers/embedController.js",
+      "sha256": "879524fb80ceda810607dd4bc1f6c04c8954f514a358cae1b212ede286a1d65e"
+    },
+    {
+      "file": "server/controllers/groupController.js",
+      "sha256": "d628ad6438d2615d249a3f58bd23553fb6f5994eb16c51b5bd392843e63b9cc4"
+    },
+    {
+      "file": "server/controllers/liveLocationController.js",
+      "sha256": "3510b19239628789062741070e606a8da3fe789f36c9fc2c07e84302dddea825"
+    },
+    {
+      "file": "server/controllers/meetingController.js",
+      "sha256": "5f5ae9cc03c38e58b4d392b02e85c7c6147be02bc80a175606bd8384883e7f02"
+    },
+    {
+      "file": "server/controllers/messageController.js",
+      "sha256": "d62878c33189f8e7a18667a5bee248069a6d601f82cf6ea2baa517f6c5dee251"
+    },
+    {
+      "file": "server/controllers/notificationController.js",
+      "sha256": "2027db562e42757766029fb5122c7d65eadceddb1e75ccc8e6868a8508b1d1bb"
+    },
+    {
+      "file": "server/controllers/platformController.js",
+      "sha256": "84bd360578f9ae01c90badf43872764d80c8b6c4b347fa1db86ffe4a435dcbc8"
+    },
+    {
+      "file": "server/controllers/pushController.js",
+      "sha256": "b8a37475c1677e85c21b7e0ba0e5d222e59f20b2e06e42f414f14f79e9b6af44"
+    },
+    {
+      "file": "server/controllers/reportController.js",
+      "sha256": "ba5367a5935fcc4594456f91057ea6214bb911c1796f7e9e053500a8e6ea1458"
+    },
+    {
+      "file": "server/controllers/rtpccred.js",
+      "sha256": "301d31410b7bc9aee847803f1b71c386fa7798c087ffb6e7f750bf91d5e7a06e"
+    },
+    {
+      "file": "server/controllers/searchController.js",
+      "sha256": "258fbd7a4e9c1ea97ccf243117b76f9518ecaeca5baaf36458b44a001ce0d08a"
+    },
+    {
+      "file": "server/controllers/statusController.js",
+      "sha256": "43b9514044abf847d925b4bf32f35ee8ce644f39fb1ae27a3a7c86e4142904eb"
+    },
+    {
+      "file": "server/controllers/uploadController.js",
+      "sha256": "b25c6332ef684bff4cf5240759d0843e3f24e44898738d1b0aa2c389c727b355"
+    },
+    {
+      "file": "server/controllers/userController.js",
+      "sha256": "ac82102959f200e36c97a9dda71bfcb35eb0597b5e50dd76a01b4858016bb94c"
+    },
+    {
+      "file": "server/controllers/webhookController.js",
+      "sha256": "4072f6634a615cef700acb7be1649b5cda9fa697d9af62ee6499c7dd83cca699"
+    },
+    {
+      "file": "server/controllers/workspaceController.js",
+      "sha256": "82182e1a64b166b0284655c2ac0db32310020c5e5e08973ba2bcc53e8fd7e803"
+    },
+    {
+      "file": "server/controllers/workspaceToolsController.js",
+      "sha256": "270fc9b6446c91796f49508ab5f16d96301332924fe2c8697075cef025b565aa"
+    },
+    {
+      "file": "server/middleware/auth.js",
+      "sha256": "1380521a87870bfc53b6a50026a7044c1cbd82196666be7baebb4c78c9c5e617"
+    },
+    {
+      "file": "server/middleware/upload.js",
+      "sha256": "0db12e97d26182adad4831dc8b0f0a92bfa935ea114375ee356024060f014500"
+    },
+    {
+      "file": "server/models/App.js",
+      "sha256": "c057e9f80c9cf828f6480118182f1e67648dd21965ec1128e0f58fffe707c265"
+    },
+    {
+      "file": "server/models/Status.js",
+      "sha256": "9d4044167f0d309d50dbaf283fadabf2132bcf92b7ed50ea9efa35fe225ae72d"
+    },
+    {
+      "file": "server/routes/adminRoutes.js",
+      "sha256": "37355269ea551ed63b286fed2fe30a225649ccd7e5fce9a554c79bd8b946343b"
+    },
+    {
+      "file": "server/routes/agentRoutes.js",
+      "sha256": "d868f9602177de00d64c68e95211c295db76786d9d7b4df2b4b4642de14c197a"
+    },
+    {
+      "file": "server/routes/appRoutes.js",
+      "sha256": "c3cad533b33e60bd5062256bd13fec789e7dabf373b2557987861f5a0be7ad61"
+    },
+    {
+      "file": "server/routes/authRoutes.js",
+      "sha256": "84179a0e251ae9ccd9a8c191ce7e2773a643ae70969fa24aef1cdf80f5b4cbc3"
+    },
+    {
+      "file": "server/routes/broadcastRoutes.js",
+      "sha256": "50849cfc79febf5d9fda59f0c29bf684f83341d3be6f690935f9a0c05b2ce351"
+    },
+    {
+      "file": "server/routes/callRoutes.js",
+      "sha256": "cd9bd3d46df727a9efeac198087f7e51541eff16df3d67cbab6c8a41edcf0d6e"
+    },
+    {
+      "file": "server/routes/catalogRoutes.js",
+      "sha256": "b43abf369abcbe2012ad470199335c8ce90d848aa4a3a4fd357853b42551d5b1"
+    },
+    {
+      "file": "server/routes/chatRoutes.js",
+      "sha256": "cd6417cfb781d96cb20bfc344a280b25016113492efde5cc3ea57672208bfb6a"
+    },
+    {
+      "file": "server/routes/communityRoutes.js",
+      "sha256": "05585305b41aeba871aebc5c9c8490af32a9c05c39ba17abeef800579d5f7438"
+    },
+    {
+      "file": "server/routes/contactRoutes.js",
+      "sha256": "bc9c2368d1ccf4c19570ea004089cb3c308572a6759ba603f6b4f9b633e0c6ca"
+    },
+    {
+      "file": "server/routes/embedRoutes.js",
+      "sha256": "48569565296a010ac12ee34d8cb308dd41e828184f007d395ca699e432cdd6e1"
+    },
+    {
+      "file": "server/routes/groupRoutes.js",
+      "sha256": "5b314e440d6e6878b23f360acf54eaa06ab2defed3f5b8d7f12cad697b010ba5"
+    },
+    {
+      "file": "server/routes/index.js",
+      "sha256": "04f2820972f3b93f799ff9ecb349a706f826d764a9ed2bfa28a264414930ad1a"
+    },
+    {
+      "file": "server/routes/keyRoutes.js",
+      "sha256": "e14e19d37d2539c0422decb44b304d1d6886f661a30d34b43770bc5c09329d12"
+    },
+    {
+      "file": "server/routes/liveLocationRoutes.js",
+      "sha256": "49446dc19464519567231c1ba485679ebed476d1d1d4edafd3f04e9ef8f4fc92"
+    },
+    {
+      "file": "server/routes/meetingRoutes.js",
+      "sha256": "911a7772f7f692d7af53bbd59cc50c86e59ea63366efae58149dd26da2d712b9"
+    },
+    {
+      "file": "server/routes/messageRoutes.js",
+      "sha256": "a90233b0839046a578040c1de620746fa59aa9894fe51d0a5bced186f642bf90"
+    },
+    {
+      "file": "server/routes/notificationRoutes.js",
+      "sha256": "845bea5846ad33b7030f50ad8fc19fab890759ab5d6c3cadf0f2bd0c1d1a822d"
+    },
+    {
+      "file": "server/routes/platformRoutes.js",
+      "sha256": "c284a94d3258a9591ae35eb900a1c9c117b3ba94a05dee1c9d84887772f2c100"
+    },
+    {
+      "file": "server/routes/pushRoutes.js",
+      "sha256": "e7416bc56ea4041a81f40ff3d9ff72a0d7a5cd6fe63c3229a6cc473ec608cd75"
+    },
+    {
+      "file": "server/routes/reportRoutes.js",
+      "sha256": "f37327a7a1d2ec5ca7eee7ab8dc9a5fe1f5548b4857d2fa0195424668b26f9df"
+    },
+    {
+      "file": "server/routes/searchRoutes.js",
+      "sha256": "4e9faf26d0553d683df44da5f759e2a93f59430057e49912cfca9cabba78849d"
+    },
+    {
+      "file": "server/routes/statusRoutes.js",
+      "sha256": "6785cf93d6e5110112ed9df4efcfadb132006d67ba5f8a118d66ac27c7c3f420"
+    },
+    {
+      "file": "server/routes/uploadRoutes.js",
+      "sha256": "296b0331bbdff00d3d428a2e4640800d38f5d5148684044274510d342e2e26f2"
+    },
+    {
+      "file": "server/routes/userRoutes.js",
+      "sha256": "9d109a9d1fb51afab36ff806190cf9e60275501b9608d5ab3aeda581d71417bd"
+    },
+    {
+      "file": "server/routes/v1Routes.js",
+      "sha256": "6601b1bc9e1ba766e93df35f330a173bc26a2275ef41bdccb6ac9367411f55b4"
+    },
+    {
+      "file": "server/routes/webhookRoutes.js",
+      "sha256": "24a8ae9905b8f9617f7a522e74d13671dfe15bf9a5af4893df61b67ed6a3ccd0"
+    },
+    {
+      "file": "server/routes/workspaceRoutes.js",
+      "sha256": "1e89f8c96e8d1751d6e2c2f1ddcaecfe4e7ae0c98a51cc072cfab793465c409f"
+    },
+    {
+      "file": "server/server.js",
+      "sha256": "6c07e4a9e0e285d085fbdd3117f0d8d28748a5171113e29f4203eae85e37924d"
+    },
+    {
+      "file": "server/socket/index.js",
+      "sha256": "8d090b04e5252dd7db5edb53844bcf134223c652b7371eb197f58117cd5ab86c"
+    },
+    {
+      "file": "server/utils/autoReply.js",
+      "sha256": "920b18757ba5eb817af7df9d18de1de361018fde0478e4115aa15a0b0e89d17b"
+    },
+    {
+      "file": "server/utils/callService.js",
+      "sha256": "2ed43b7aa24e108196c6b656778051bd587cdae3c5bfa7b567fd1d716ebff6f9"
+    },
+    {
+      "file": "server/utils/chatCache.js",
+      "sha256": "a3090805240e7e70c7897f257f10402a9d9fb58ea2c48ecf71dfd48179caa13d"
+    },
+    {
+      "file": "server/utils/createAdmin.js",
+      "sha256": "a2c767c27f44d6347d1296d4e98010d0f56a4f60f82a4af4d7bf559ae48f9fc7"
+    },
+    {
+      "file": "server/utils/deleteUserAccount.js",
+      "sha256": "f25603b744e070295db468fda0d5a13655ad9bc9ab5d88d4af01930d90cd6c5b"
+    },
+    {
+      "file": "server/utils/iceServers.js",
+      "sha256": "6f2e71c1c7006585b5977ded3354bd8afb645b07e5d6a43acbeba519eaf86402"
+    },
+    {
+      "file": "server/utils/meetingReminders.js",
+      "sha256": "8da1d2e52529a0f371b18d65aafbc8bbe18ef30e12e0bd56c43050660321e09a"
+    },
+    {
+      "file": "server/utils/pins.js",
+      "sha256": "55e01615b21ecbede003db035bd76b04368a0fc8da35c2d9f75d05332d8f75a6"
+    },
+    {
+      "file": "server/utils/presence.js",
+      "sha256": "da14a50f603754b8a35594a1a86024b18b427303dad869fed5c632adca74c0a8"
+    },
+    {
+      "file": "server/utils/privacy.js",
+      "sha256": "3c274de2571b229fa39765002f544635f97ac69359a67ca32dbd0cde0904d2de"
+    },
+    {
+      "file": "server/utils/push.js",
+      "sha256": "d18aaacca067f4eb57480a53a7f66637d89b7af8eb42b0c3d87949500334c0c3"
+    },
+    {
+      "file": "server/utils/queue.js",
+      "sha256": "050a681c1ceee4497538f49f8a8d9f3c2f7ab5e05419d42b5973fca11c076bf2"
+    },
+    {
+      "file": "server/utils/rbac.js",
+      "sha256": "5e9db62c954fd67bf2745aa09e10efedae06dcb81f48162a4dc69c11b954f3a7"
+    },
+    {
+      "file": "server/utils/readCoalescer.js",
+      "sha256": "b5969a797d38712f1a54fe981f94e746a28436e31015a8a7e468ea54faf25772"
+    },
+    {
+      "file": "server/utils/redis.js",
+      "sha256": "2a8958057cd0a66df2a4d3e3f7e91d156e535d7e3ff302e3daf53b1918407b53"
+    },
+    {
+      "file": "server/utils/scheduledDispatcher.js",
+      "sha256": "ab383df44904c3a552f8f46e907ba1fb2a3b966740383e5b7b11f0b556760085"
+    },
+    {
+      "file": "server/utils/session.js",
+      "sha256": "9f6140e17e5c8b383edff0ca5ab1d8962d0068d2bfc3ca8bb4618781edb06cb7"
+    },
+    {
+      "file": "server/utils/uploadMetadata.js",
+      "sha256": "ce175278b1342d412de3113c6a56c804de3b6bcab7fea03272b03aa355eb43b3"
+    },
+    {
+      "file": "server/utils/workspaceGuestExpiry.js",
+      "sha256": "24314b0ee3289d51842dbb6d47272ea312ca20b0d0508c4857c92a64a07ceb10"
+    },
+    {
+      "file": "server/utils/workspaceService.js",
+      "sha256": "8a0e3b7130b87e526f7f1827cc615a2f365980d138f054d0ee94f1fc9b8f511d"
+    },
+    {
+      "file": "server/utils/workspaceTaskReminders.js",
+      "sha256": "c8317a8df607d9b6a96ab3c121c688daa9422222fb2914fa2b0975c6ab92316b"
+    }
+  ]
+}

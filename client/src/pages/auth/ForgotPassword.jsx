@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { Mail, ArrowLeft, ArrowRight, MailCheck, RotateCw, KeyRound, Loader2 } from 'lucide-react';
+import { Mail, ArrowLeft, ArrowRight, RotateCw, KeyRound, Loader2 } from 'lucide-react';
 
 import Button from '@/components/ui/Button';
 import { Input, Field } from '@/components/ui/Input';
@@ -23,9 +23,10 @@ export default function ForgotPassword() {
     try {
       await forgotPassword(email.trim());
       setSubmitted(true);
-      toast.success('If that email exists, a reset link is on its way.');
+      toast('Reset request received. Email delivery is not confirmed.');
     } catch (err) {
-      toast.error(err?.message || 'Could not send the reset link. Please try again.');
+      setSubmitted(false);
+      toast.error(err?.response?.data?.message || err?.message || 'Could not request a reset link. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +96,7 @@ export default function ForgotPassword() {
                 <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
                   {submitting ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" /> Sending link…
+                      <Loader2 size={18} className="animate-spin" /> Requesting link…
                     </>
                   ) : (
                     <>
@@ -126,30 +127,31 @@ export default function ForgotPassword() {
                 initial={{ scale: 0.6, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
-                className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-brand-500/10 text-brand-600 dark:text-brand-300"
               >
-                <MailCheck size={30} />
+                <Mail size={30} />
               </motion.div>
 
-              <h2 className="mt-6 font-display text-2xl font-extrabold tracking-tight text-content">Check your inbox</h2>
+              <h2 className="mt-6 font-display text-2xl font-extrabold tracking-tight text-content">Reset request received</h2>
               <p className="mt-2 text-sm leading-relaxed text-content-muted">
-                We sent a reset link to{' '}
-                <span className="break-all font-semibold text-content">{email.trim()}</span>. Follow it to choose a new password.
+                If{' '}
+                <span className="break-all font-semibold text-content">{email.trim()}</span>{' '}
+                belongs to an account, a reset email has been requested. Email delivery is not confirmed.
               </p>
 
               <div className="mt-7 rounded-2xl neu-inset bg-surface-2/60 px-4 py-3 text-left text-xs text-content-muted">
-                Didn&apos;t get it? Check your spam folder, or resend the link below. Links expire after 30 minutes.
+                Check your inbox and spam folder. If no link arrives, try again below. A reset link expires 30 minutes after it is requested.
               </div>
 
               <div className="mt-6 space-y-3">
                 <Button variant="glass" size="lg" className="w-full" onClick={sendLink} disabled={submitting}>
                   {submitting ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" /> Resending…
+                      <Loader2 size={18} className="animate-spin" /> Requesting link…
                     </>
                   ) : (
                     <>
-                      <RotateCw size={17} /> Resend link
+                      <RotateCw size={17} /> Try again
                     </>
                   )}
                 </Button>

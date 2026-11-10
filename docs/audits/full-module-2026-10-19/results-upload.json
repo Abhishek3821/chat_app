@@ -1,0 +1,9 @@
+[
+  {
+    "suite": "upload-validation",
+    "code": 0,
+    "seconds": 34,
+    "passed": 19,
+    "total": 19
+  }
+]

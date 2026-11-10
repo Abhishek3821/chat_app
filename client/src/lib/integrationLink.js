@@ -1,4 +1,4 @@
-import { IS_EMBED } from './embedSession';
+import { IS_EMBED } from './embedSession.js';
 
 // Share a link back to the host page that knows how to mint the user's session.
 // The link contains only a UI path; it never contains credentials.

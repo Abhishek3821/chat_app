@@ -1,0 +1,9 @@
+[
+  {
+    "suite": "extra-modules",
+    "code": 1,
+    "seconds": 24,
+    "passed": 36,
+    "total": 42
+  }
+]

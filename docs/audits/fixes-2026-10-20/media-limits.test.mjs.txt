@@ -1,0 +1,10 @@
+✔ video-note attachment metadata respects the 10 MB / 60 second boundary (1.1041ms)
+✔ ordinary video retains its existing size and duration behavior (0.1525ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9.0353

@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const attachmentSchema = new mongoose.Schema(
   {
     url: String,
+    uploadProof: String,
     name: String,
     size: Number,
     mime: String,
@@ -41,7 +42,7 @@ const pollSchema = new mongoose.Schema(
 
 const messageSchema = new mongoose.Schema(
   {
-    chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', required: true, index: true },
+    chat: { type: mongoose.Schema.Types.ObjectId, ref: 'Chat', required: true },
     sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     type: {
       type: String,
@@ -116,7 +117,8 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-messageSchema.index({ chat: 1, createdAt: -1 });
+// Covers both the timestamp-only prefix and stable timestamp + ID pagination.
+messageSchema.index({ chat: 1, createdAt: -1, _id: -1 });
 messageSchema.index({ content: 'text' });
 // Media access control looks a file up by its attachment URL on every /uploads
 // request — index it so that check is O(index) instead of a collection scan.
@@ -129,7 +131,7 @@ messageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 // Compound (not just `starredBy`) because the starred list is always sorted
 // newest-first: this way Mongo walks the index in order instead of loading
 // every starred message and sorting them in memory.
-messageSchema.index({ starredBy: 1, createdAt: -1 });
+messageSchema.index({ starredBy: 1, createdAt: -1, _id: -1 });
 
 const Message = mongoose.model('Message', messageSchema);
 export default Message;

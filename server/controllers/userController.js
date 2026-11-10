@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import User from '../models/User.js';
 import { tenantScope, sameTenant } from '../utils/tenancy.js';
 import Chat from '../models/Chat.js';
+import Message from '../models/Message.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { getWorkspaceType } from '../utils/workspaceService.js';
 import { sessionCookieOptions } from '../utils/token.js';

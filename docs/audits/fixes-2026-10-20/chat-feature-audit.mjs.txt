@@ -1,0 +1,30 @@
+PASS Unicode, emoji and multiline text survive sending
+PASS Reply includes the correct original message
+PASS Reply cannot expose a message from another chat
+PASS Scheduled reply also rejects another chat message
+PASS Malformed reply ID returns a validation error
+PASS Nonparticipant cannot read chat history
+PASS Nonparticipant cannot send into a private chat
+PASS Cannot edit another sender message
+PASS Cannot retract another sender message
+PASS image message metadata persists
+PASS video message metadata persists
+PASS videoNote message metadata persists
+PASS audio message metadata persists
+PASS voice message metadata persists
+PASS document message metadata persists
+PASS View-once media is removed after recipient opens it
+PASS Starred message can be removed again
+PASS Jump-to-message cannot restore a message deleted for me
+PASS Cannot reply to a message deleted for me
+PASS Block user request succeeds
+PASS Blocking prevents text through an existing direct chat
+PASS Blocking also prevents poll messages
+PASS Scroll-back retains messages sharing the cursor timestamp
+PASS Search jump includes neighbors with the same timestamp
+PASS Starred pagination retains every message in a timestamp tie
+PASS Search pagination retains every message in a timestamp tie
+PASS Invalid history cursor is rejected
+PASS Disappearing timer stamps the outgoing message expiry
+PASS Clear chat hides history only for the requesting user
+29/29 checks passed

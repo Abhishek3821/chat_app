@@ -39,13 +39,13 @@ export default function StarredPage() {
   const [hasMore, setHasMore] = useState(false);
 
   const load = useCallback(
-    async (before) => {
+    async (before, beforeId) => {
       if (DEMO_MODE) {
         setLoading(false);
         return;
       }
       try {
-        const { data } = await api.get('/messages/starred', { params: { before, limit: 40 } });
+        const { data } = await api.get('/messages/starred', { params: { before, beforeId, limit: 40 } });
         const rows = data.messages || [];
         setMessages((prev) => (before ? [...prev, ...rows] : rows));
         setHasMore(Boolean(data.hasMore));
@@ -67,7 +67,7 @@ export default function StarredPage() {
     const last = messages[messages.length - 1];
     if (!last) return;
     setLoadingMore(true);
-    load(last.createdAt);
+    load(last.createdAt, last._id);
   };
 
   const open = async (m) => {

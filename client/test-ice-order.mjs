@@ -3,7 +3,7 @@
  * Which relay source wins, and when.
  *
  * `src/lib/iceServers.js` decides whether a call gets a relay at all, and it has
- * three possible sources with a strict order between them. Getting that order
+ * server-owned provider ordering and a legacy response shape. Getting that order
  * wrong does not throw — it silently picks the worse source, or none, and the
  * only symptom is a call that connects and carries no audio. Nothing else in the
  * suite covers it, because it is browser code with no backend to assert against.
@@ -100,15 +100,15 @@ check(
 );
 
 /* 2 — the deployment this exists for */
-section('The server has no endpoint yet (404) — the bridge carries the call');
+section('A missing endpoint degrades to STUN without exposing provider keys');
 reset();
 stubServer(() => { const e = new Error('Request failed with status code 404'); e.response = { status: 404 }; throw e; });
 stubFetch(async () => ({ ok: true, json: async () => [relay('fallback.relay')] }));
 m = await loadModule({ VITE_TURN_CREDENTIALS_URL: THIRD_PARTY });
 await m.ensureIceServers();
 check('the server was still tried first', serverCalls === 1, String(serverCalls));
-check('then the build-time URL', fetchCalls === 1 && fetchUrl === THIRD_PARTY, fetchUrl || 'not called');
-check('a relay is loaded', m.hasRelay());
+check('no browser request to the provider', fetchCalls === 0);
+check('no relay is claimed', !m.hasRelay());
 
 /* 3 — deployed, but no provider configured */
 section('The server answers but offers no relay (stun_only)');
@@ -118,11 +118,11 @@ stubFetch(async () => ({ ok: true, json: async () => [relay('fallback.relay')] }
 m = await loadModule({ VITE_TURN_CREDENTIALS_URL: THIRD_PARTY });
 await m.ensureIceServers();
 check(
-  'a STUN-only answer counts as no relay, so the bridge is used',
-  fetchCalls === 1,
+  'STUN-only stays server-controlled without a public provider fallback',
+  fetchCalls === 0,
   `${fetchCalls} — a 200 with no relay is not success`
 );
-check('a relay is loaded', m.hasRelay());
+check('no relay is claimed for STUN-only', !m.hasRelay());
 
 /* 4 — nothing anywhere */
 section('Neither source has anything');
@@ -141,14 +141,14 @@ check(
 );
 
 /* 5 — the explicit override */
-section('A static VITE_TURN_URL is the operator overriding everything');
+section('Obsolete public credentials cannot override server configuration');
 reset();
 stubServer(() => ({ data: { iceServers: [relay('server.relay')], ttlSeconds: 3600 } }));
 stubFetch(async () => ({ ok: true, json: async () => [relay('fallback.relay')] }));
 m = await loadModule({ VITE_TURN_URL: 'turn:static.relay:3478', VITE_TURN_USERNAME: 'u', VITE_TURN_CREDENTIAL: 'c', VITE_TURN_CREDENTIALS_URL: THIRD_PARTY });
 await m.ensureIceServers();
-check('neither source is consulted', serverCalls === 0 && fetchCalls === 0, `server ${serverCalls}, fetch ${fetchCalls}`);
-check('the static relay is what is used', JSON.stringify(m.ICE_SERVERS).includes('static.relay'));
+check('only the authenticated server is consulted', serverCalls === 1 && fetchCalls === 0, `server ${serverCalls}, fetch ${fetchCalls}`);
+check('the server relay is used', JSON.stringify(m.ICE_SERVERS).includes('server.relay') && !JSON.stringify(m.ICE_SERVERS).includes('static.relay'));
 
 /* 6 — the failure that made the ordering matter */
 section('A failed attempt must not be cached as success');
@@ -187,6 +187,27 @@ check(
 );
 
 /* ── done ────────────────────────────────────────────────────────────── */
+
+section('Legacy endpoint compatibility, provider order, caching and concurrent calls');
+reset();
+stubServer(() => ({ data: { ...relay('legacy.relay'), ttlSeconds: 3600 } }));
+m = await loadModule({});
+await Promise.all([m.ensureIceServers(), m.ensureIceServers(), m.ensureIceServers()]);
+check('legacy credential response still loads', m.hasRelay() && JSON.stringify(m.ICE_SERVERS).includes('legacy.relay'));
+check('concurrent callers share one request', serverCalls === 1);
+await m.ensureIceServers();
+check('valid credentials are cached', serverCalls === 1);
+reset();
+stubServer(() => ({ data: { iceServers: [relay('own.relay'), relay('managed.relay')], ttlSeconds: 60 } }));
+m = await loadModule({});
+await m.ensureIceServers();
+check('provider preference order is preserved', m.ICE_SERVERS[1].urls[0].includes('own.relay') && m.ICE_SERVERS[2].urls[0].includes('managed.relay'));
+const now = Date.now;
+try {
+  Date.now = () => now() + 49000;
+  await m.ensureIceServers();
+  check('server TTL triggers refresh before expiry', serverCalls === 2);
+} finally { Date.now = now; }
 
 const passed = results.filter(Boolean).length;
 console.log(`\n${'─'.repeat(56)}\n${passed}/${results.length} checks passed`);

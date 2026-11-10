@@ -1,0 +1,11 @@
+✔ existing images stay capped at 10 MB and regular video/files at 50 MB (1.2045ms)
+✔ video-note size is rejected before any network request (0.328ms)
+✔ video-note uploads declare their stricter server-side limit (16.932ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23.9456

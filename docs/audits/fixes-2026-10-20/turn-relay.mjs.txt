@@ -1,0 +1,132 @@
+
+— With TURN_URL + TURN_SECRET set
+  ✓ boot says the relay is configured
+  ✓ GET /api/v1/ice succeeds for a signed-in user
+  ✓ a relay is offered to the browser
+  ✓ both transports are included (UDP and TLS)
+  ✓ STUN is still offered alongside it
+
+— The credentials are time-limited and correctly signed
+  ✓ username is <unix-expiry>:<scope>
+  ✓ it expires in the future, within a day
+  ✓ credential is HMAC-SHA1(username, secret) — coturn use-auth-secret
+
+— The shared secret never leaves the server
+  ✓ the response does not contain TURN_SECRET
+
+— Credentials are per user, not one shared pair
+  ✓ a different user gets a different username scope
+
+— It requires a session
+  ✓ no token → 401, so relay bandwidth cannot be harvested anonymously
+
+— A pool of relays, one shared secret
+  ✓ boot reports how many relays
+  ✓ one ICE entry per relay group
+  ✓ the shared secret signs both identically
+  ✓ order is preserved, so the nearest relay can be listed first
+  ✓ a group keeps all of its own transports
+
+— Independent secrets per region — one leak does not expose the rest
+  ✓ boot reports three relays
+  ✓ three entries
+  ✓ each is signed with ITS OWN secret, so every coturn accepts its own
+  ✓ the three credentials differ
+  ✓ no secret appears anywhere in the payload
+
+— Mismatched counts drop the group rather than mis-sign it
+  ✓ boot WARNS about the mismatch
+  ✓ the unmatched relay is omitted, never signed with the wrong secret
+
+— Cloudflare TURN alone — for an operator with no relay of their own
+  ✓ boot names the provider
+  ✓ a relay is offered
+  ✓ it carries the credentials the API generated
+  ✓ Cloudflare's own STUN entry is dropped, since STUN is already first
+  ✓ status reports the provider
+
+— The API token is an account credential — it must never travel
+  ✓ the token is not in the response
+  ✓ the key id is not in the response either
+  ✓ the server sent it as a Bearer header
+  ✓ the key id went in the path, as the API requires
+  ✓ a ttl was requested, so the credential expires on its own
+
+— Boot proves the credentials work, instead of the first caller proving it
+  ✓ boot VERIFIES the credentials against the API
+  ✓ so the cache is already warm before anyone calls
+
+— The advertised ttl must not outlive the credential
+  ✓ ttlSeconds never exceeds the life the credential was minted with
+
+— Credentials are cached — not one upstream call per call started
+  ✓ three /ice requests, still one upstream request
+
+— Both providers at once — own relay first, Cloudflare as the fallback
+  ✓ boot names both
+  ✓ two relay entries
+  ✓ the self-hosted relay is tried FIRST — it is yours and it is cheaper
+  ✓ Cloudflare is the second choice, not the first
+  ✓ the self-hosted entry is still a locally-signed HMAC
+  ✓ relayCount counts both providers
+
+— A bad token must not take the call down with it
+  ✓ a bad token is reported AT BOOT, before any user places a call
+  ✓ the endpoint still answers 200, not 500
+  ✓ the self-hosted relay is unaffected by the failing provider
+  ✓ the failure is logged once so the operator can see it
+
+— Cloudflare with NO own relay and a bad token — STUN, honestly
+  ✓ still answers
+  ✓ no relay is invented
+  ✓ STUN is still returned
+
+— The older API shape still works
+  ✓ the new path is tried first
+  ✓ a 404 there falls back to the older path
+  ✓ the single-object response is read the same as the array one
+
+— metered.ca — a managed provider with a different API shape entirely
+  ✓ boot names the provider
+  ✓ boot VERIFIES the key rather than waiting for the first caller
+  ✓ every transport is offered, not just the first
+  ✓ a urls STRING is read the same as an array
+  ✓ ports 80 and 443 survive — the ones restrictive networks allow
+  ✓ credentials are the ones the API generated
+  ✓ metered's own STUN entry is dropped
+  ✓ status reports the provider
+
+— The API key is in the query string, so the URL itself is a secret
+  ✓ the key is not in the response
+  ✓ the subdomain is not in the response
+  ✓ the server did send it upstream, in the query string
+
+— Never promise a lifetime the provider does not control
+  ✓ ttl is capped at what metered can be trusted for, not the 4h requested
+
+— Cached, so a call start is never an upstream request
+  ✓ two more /ice requests, no more upstream calls
+
+— A bad key degrades, it does not fail the call
+  ✓ boot reports it at boot, not at the first call
+  ✓ the endpoint still answers 200
+  ✓ no relay is invented
+  ✓ STUN is still returned
+
+— A full URL pasted into METERED_SUBDOMAIN is called out
+  ✓ boot says which field is wrong instead of looking like an outage
+
+— All three providers at once — order is the routing policy
+  ✓ boot names all three in order
+  ✓ self-hosted is still first
+  ✓ every provider contributed
+  ✓ the shortest ttl across providers wins
+
+— With TURN unset — degrade honestly, never pretend
+  ✓ boot WARNS that there is no relay
+  ✓ the endpoint still answers
+  ✓ no relay is claimed
+  ✓ STUN is still returned so same-network calls work
+
+────────────────────────────────────────────────────────
+79/79 checks passed

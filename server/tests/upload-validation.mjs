@@ -62,11 +62,11 @@ async function getToken() {
   return (await r.json()).token;
 }
 
-async function postFile(token, filename, bytes, type = 'application/octet-stream') {
+async function postFile(token, filename, bytes, type = 'application/octet-stream', purpose = '') {
   const fd = new FormData();
   fd.append('files', new Blob([bytes], { type }), filename);
   try {
-    const res = await fetch(`${API}/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+    const res = await fetch(`${API}/upload${purpose ? '?type=' + encodeURIComponent(purpose) : ''}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
     let data = null; try { data = await res.json(); } catch { /* noop */ }
     return { status: res.status, data };
   } catch (err) {
@@ -101,6 +101,14 @@ async function main() {
   const videoOverImageLimit = await postFile(token, 'eleven-megabytes.webm', new Uint8Array(11 * 1024 * 1024), 'video/webm');
   check('11 MB video remains accepted (50 MB non-image limit)', videoOverImageLimit.status === 201, `got ${videoOverImageLimit.status}`);
 
+  const note = await postFile(token, 'videonote.webm', new Uint8Array(1024), 'video/webm', 'videoNote');
+  check('video note within 10 MB succeeds', note.status === 201, `got ${note.status}`);
+  const exactNote = await postFile(token, 'videonote.webm', new Uint8Array(10 * 1024 * 1024), 'video/webm', 'videoNote');
+  check('video note exactly at 10 MB succeeds', exactNote.status === 201, `got ${exactNote.status}`);
+  const largeNote = await postFile(token, 'videonote.webm', new Uint8Array(11 * 1024 * 1024), 'video/webm', 'videoNote');
+  check('video note over 10 MB is refused (413 or clean reset)', largeNote.status === 413 || largeNote.reset, `got ${largeNote.status}`);
+  check('video-note error names its own 10 MB limit', largeNote.reset || /Video note.*under 10 MB/.test(largeNote.data?.message || ''), largeNote.data?.message);
+
   const badType = await postFile(token, 'payload.exe', new Uint8Array(64));
   check('unsupported type → 400 (not 500)', badType.status === 400, `got ${badType.status}`);
   check('  → message names the reason', badType.data?.message === 'Unsupported file type.', JSON.stringify(badType.data?.message));
@@ -132,6 +140,8 @@ async function main() {
   check('prod: unsupported type → 400', prodBad.status === 400, `got ${prodBad.status}`);
   check('prod: real reason still shown (not "Something went wrong")',
     prodBad.data?.message === 'Unsupported file type.', JSON.stringify(prodBad.data?.message));
+  const prodNote = await postFile(token, 'videonote.webm', new Uint8Array(11 * 1024 * 1024), 'video/webm', 'videoNote');
+  check('prod: video note cap and readable error survive', prodNote.reset || (prodNote.status === 413 && /under 10 MB/.test(prodNote.data?.message || '')));
   const prodBig = await postFile(token, 'huge.png', new Uint8Array(51 * 1024 * 1024), 'image/png');
   check('prod: oversized → 413 with real reason (or a clean reset, never a 500)',
     prodBig.reset || (prodBig.status === 413 && /under 50 MB/.test(prodBig.data?.message || '')),

@@ -370,6 +370,9 @@ async function main() {
   head('Privacy: export + delete account');
   const exp = await http('GET', '/users/me/export', { token: C.token });
   check('data export returns the user bundle', exp.status === 200 && !!exp.data, `${exp.status}`);
+  const ownExport = await http('GET', '/users/me/export', { token: A.token });
+  check('export includes the caller profile and messages', ownExport.status === 200 && ownExport.data?.profile?.email === A.email && ownExport.data?.messages?.length > 0);
+  check('export excludes another user profile and private fields', ownExport.data?.profile?.email !== B.email && !('password' in (ownExport.data?.profile || {})) && !('token' in (ownExport.data || {})));
   const del = await http('DELETE', '/users/me', { token: C.token, body: { password: C.password } });
   check('delete own account', del.status === 200, `${del.status} ${del.data?.message || ''}`);
   const after = await http('GET', '/auth/me', { token: C.token });

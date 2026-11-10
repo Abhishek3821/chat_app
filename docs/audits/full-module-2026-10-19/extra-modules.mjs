@@ -1,0 +1,126 @@
+import {spawn} from 'node:child_process';
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const root=path.resolve(process.cwd(),'..'),require=createRequire(root+'/server/package.json');
+const mongoose=require('mongoose'),{io}=require('socket.io-client');
+const uri=new URL(process.env.MONGO_URI);if(uri.hostname!=='127.0.0.1')throw new Error('Local fixture only');
+uri.pathname='/chatconnect_t_extra_modules';
+const port=5165,api=`http://127.0.0.1:${port}/api`,checks=[],sockets=[];
+const check=(name,pass,detail='')=>{checks.push({name,pass:!!pass,detail:pass?'':detail});console.log(`${pass?'PASS':'FAIL'} ${name}${pass?'':' — '+detail}`);};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));let server;
+async function http(method,route,user,body){const r=await fetch(api+route,{method,headers:{'Content-Type':'application/json',...(user?{Authorization:`Bearer ${user.token}`}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()};}
+let seq=0;
+async function signup(tag,extra={}){const r=await http('POST','/auth/signup',null,{name:'Audit '+tag,email:`audit-${tag}-${Date.now()}@example.invalid`,phone:'+1555'+String(8200000+seq++),password:'Module-Test-123!',confirmPassword:'Module-Test-123!',...extra});if(r.status!==201)throw new Error('Signup fixture '+tag+': '+r.data.message);return {id:r.data.user._id,token:r.data.accessToken||r.data.token,user:r.data.user};}
+async function socket(user){const s=io(`http://127.0.0.1:${port}`,{auth:{token:user.token},transports:['websocket'],reconnection:false});sockets.push(s);await new Promise((resolve,reject)=>{s.once('connect',resolve);s.once('connect_error',reject);});return s;}
+const wait=(s,event)=>new Promise(resolve=>{const done=v=>{clearTimeout(t);s.off(event,done);resolve(v);};const t=setTimeout(()=>done(null),4000);s.once(event,done);});
+async function befriend(a,b){await http('POST',`/contacts/request/${b.id}`,a);const r=await http('GET','/contacts/requests',b);const request=r.data.incoming.find(x=>String(x.from._id)===a.id);await http('PATCH',`/contacts/request/${request._id}`,b,{action:'accept'});}
+try{
+ await mongoose.connect(uri.href);if(mongoose.connection.name!=='chatconnect_t_extra_modules')throw new Error('Wrong fixture DB');await mongoose.connection.dropDatabase();
+ server=spawn(process.execPath,['server.js'],{cwd:root+'/server',env:{...process.env,MONGO_URI:uri.href,PORT:String(port)},stdio:'ignore',windowsHide:true});
+ let ready=false;for(let i=0;i<100;i++){try{if((await fetch(api+'/health')).ok){ready=true;break;}}catch{}await sleep(250);}if(!ready)throw new Error('Fixture server did not start');
+ const owner=await signup('owner',{accountType:'workspace',workspaceName:'Module audit team'});
+ const workspace=(await http('GET','/workspaces/me',owner)).data.workspace;
+ const member=await signup('member',{inviteCode:workspace.inviteCode}),customer=await signup('customer'),outsider=await signup('outsider',{accountType:'workspace',workspaceName:'Other audit team'});
+ check('workspace member joins the invited team',String(member.user.workspace)===String(workspace._id));
+ check('ordinary member cannot rename workspace',(await http('PATCH','/workspaces/me',member,{name:'Denied'})).status===403);
+ await befriend(owner,member);
+ const groupRes=await http('POST','/groups',owner,{name:'Guest-visible team group',members:[member.id]});const group=groupRes.data.chat;
+ if(!group?._id)throw new Error('Group fixture failed: '+groupRes.data.message);
+ const ownSocket=await socket(owner);await sleep(250);
+ const taskEvent=wait(ownSocket,'workspace-task-updated');
+ const task=await http('POST','/workspaces/me/tasks',owner,{title:'Audit task',assignee:member.id,dueAt:new Date(Date.now()+86400000).toISOString()});
+ check('team task creation and assignment',task.status===201,`HTTP ${task.status}`);
+ check('workspace task creation reaches a real socket',!!await taskEvent);
+ check('assigned member can complete the task',(await http('PATCH',`/workspaces/me/tasks/${task.data.task?._id}`,member,{status:'done'})).status===200);
+ check('foreign team cannot update task',(await http('PATCH',`/workspaces/me/tasks/${task.data.task?._id}`,outsider,{status:'open'})).status===404);
+ check('owner can view activity and member cannot',(await http('GET','/workspaces/me/activity',owner)).status===200&&(await http('GET','/workspaces/me/activity',member)).status===403);
+ const inboxEvent=wait(ownSocket,'workspace-inbox-updated');
+ const inbox=await http('POST',`/workspaces/${workspace._id}/inbox`,customer,{text:'Customer message'}),thread=inbox.data.thread;
+ check('customer can explicitly start team inbox thread',inbox.status===201);
+ check('workspace inbox update reaches a real socket',!!await inboxEvent);
+ check('team can add an internal note',(await http('POST',`/workspaces/me/inbox/${thread._id}/notes`,owner,{text:'Internal audit note, never for customer'})).status===201);
+ const customerRead=await http('GET',`/workspaces/me/inbox/${thread._id}`,customer);
+ check('customer GET omits internal notes',customerRead.status===200&&!('notes' in customerRead.data.thread));
+ const secondMessage=await http('POST',`/workspaces/${workspace._id}/inbox`,customer,{text:'Customer followup'});
+ check('customer follow-up response also omits internal notes',secondMessage.status===201&&!secondMessage.data.thread?.notes?.length,`HTTP ${secondMessage.status}; internal notes present=${!!secondMessage.data.thread?.notes?.length}`);
+ check('foreign team cannot read inbox thread',(await http('GET',`/workspaces/me/inbox/${thread._id}`,outsider)).status===404);
+ check('member cannot create guest invitations',(await http('POST','/workspaces/me/guests/invites',member,{chatIds:[group._id],days:7})).status===403);
+ const invite=await http('POST','/workspaces/me/guests/invites',owner,{chatIds:[group._id],days:7});
+ check('owner can create a scoped guest invitation',invite.status===201,invite.data.message);
+ const guestToken=new URL(invite.data.url,'http://localhost').searchParams.get('guest');
+ const guest=await signup('guest',{guestToken});
+ check('guest sees only selected group',(await http('GET','/chats',guest)).data.chats.every(c=>c._id===group._id));
+ check('guest text messages work',(await http('POST','/messages',guest,{chatId:group._id,content:'Guest reply'})).status===201);
+ check('guest cannot upload files',(await http('POST','/upload',guest,{})).status===403);
+ check('guest cannot use team tasks',(await http('GET','/workspaces/me/tasks',guest)).status===403);
+ check('owner revokes guest',(await http('POST',`/workspaces/me/guests/${guest.id}/revoke`,owner)).status===200);
+ check('revoked guest token is rejected',[401,403].includes((await http('GET','/chats',guest)).status));
+ const product=await http('POST','/catalog',owner,{name:'Audit product',price:100,currency:'INR'});
+ check('catalog product can be created',product.status===201);
+ check('ordinary member cannot edit catalog',(await http('PATCH',`/catalog/${product.data.product?._id}`,member,{price:1})).status===403);
+ check('catalog owner can update and delete product',(await http('PATCH',`/catalog/${product.data.product?._id}`,owner,{price:200})).status===200&&(await http('DELETE',`/catalog/${product.data.product?._id}`,owner)).status===200);
+ const profile=await http('PATCH','/workspaces/me',owner,{businessProfile:{description:'Audit storefront',website:'https://example.invalid'}});
+ check('business storefront profile updates',profile.status===200&&profile.data.workspace?.businessProfile?.description==='Audit storefront');
+ await befriend(owner,customer);
+ const customerChat=(await http('POST',`/chats/direct/${owner.id}`,customer)).data.chat;
+ const greetingConfig=await http('PATCH','/workspaces/me',owner,{autoReplies:{greeting:{enabled:true,text:'Audit greeting'},away:{enabled:false}}});
+ check('business greeting can be enabled',greetingConfig.status===200);
+ await http('POST','/messages',customer,{chatId:customerChat._id,content:'Hello business'});
+ let customerHistory=[];
+ for(let i=0;i<30;i++){customerHistory=(await http('GET',`/messages/${customerChat._id}`,customer)).data.messages;if(customerHistory.some(m=>m.autoReplyKind==='greeting'))break;await sleep(100);}
+ check('business greeting is actually dispatched',customerHistory.some(m=>m.autoReplyKind==='greeting'&&m.content==='Audit greeting'));
+ await http('POST','/messages',customer,{chatId:customerChat._id,content:'Second greeting check'});await sleep(350);
+ check('business greeting does not repeat on every message',(await http('GET',`/messages/${customerChat._id}`,customer)).data.messages.filter(m=>m.autoReplyKind==='greeting').length===1);
+ const hour=new Date().getHours();
+ await http('PATCH','/workspaces/me',owner,{autoReplies:{greeting:{enabled:false},away:{enabled:true,text:'Audit away',startHour:(hour+1)%24,endHour:(hour+2)%24}}});
+ await http('POST','/messages',customer,{chatId:customerChat._id,content:'Outside hours'});
+ for(let i=0;i<30;i++){customerHistory=(await http('GET',`/messages/${customerChat._id}`,customer)).data.messages;if(customerHistory.some(m=>m.autoReplyKind==='away'))break;await sleep(100);}
+ check('out-of-hours business reply is actually dispatched',customerHistory.some(m=>m.autoReplyKind==='away'&&m.content==='Audit away'));
+ await http('POST','/messages',customer,{chatId:customerChat._id,content:'Away cooldown check'});await sleep(350);
+ check('away cooldown suppresses duplicate replies',(await http('GET',`/messages/${customerChat._id}`,customer)).data.messages.filter(m=>m.autoReplyKind==='away').length===1);
+ const direct=(await http('POST',`/chats/direct/${member.id}`,owner)).data.chat;
+ const broadcast=(await http('POST','/broadcasts',owner,{name:'Audit broadcast',recipients:[member.id]})).data.list;
+ await http('POST',`/users/me/block/${owner.id}`,member);
+ const blockedText=await http('POST','/messages',owner,{chatId:direct._id,content:'Blocked direct control'});
+ check('blocked peer cannot send a normal direct message',blockedText.status===403);
+ const blockedBroadcast=await http('POST',`/broadcasts/${broadcast._id}/send`,owner,{content:'Blocked broadcast test'});
+ check('broadcast also respects recipient blocking',blockedBroadcast.status===403||blockedBroadcast.data.sent===0,`HTTP ${blockedBroadcast.status}; sent=${blockedBroadcast.data.sent}`);
+ await http('POST',`/users/me/block/${owner.id}`,member);
+ const form=new FormData();form.append('files',new Blob([new Uint8Array(11*1024*1024)],{type:'video/webm'}),'module-audit-note.webm');
+ const uploadResponse=await fetch(api+'/upload',{method:'POST',headers:{Authorization:`Bearer ${owner.token}`},body:form});
+ const uploadData=await uploadResponse.json(),attachment=uploadData.attachments?.[0];
+ if(!attachment)throw new Error('Media fixture upload failed');
+ const forgedNote=await http('POST','/messages',owner,{chatId:direct._id,type:'videoNote',attachments:[{...attachment,size:1,duration:1}]});
+ check('video-note cap cannot be bypassed by relabelling a regular upload',forgedNote.status===400||forgedNote.status===413,`actual upload bytes=${attachment.size}; forged metadata accepted HTTP ${forgedNote.status}`);
+ const uploadedName=path.basename(attachment.url);
+ if(uploadedName.startsWith('module_audit_note-'))fs.unlinkSync(root+'/server/uploads/'+uploadedName);
+ const beforeGroup=(await http('GET',`/chats/${group._id}`,owner)).data.chat;
+ const deletion=await http('DELETE',`/chats/${group._id}`,outsider);
+ const afterGroup=(await http('GET',`/chats/${group._id}`,owner)).data.chat;
+ check('nonparticipant cannot delete or mutate a group via chat endpoint',deletion.status===403,`HTTP ${deletion.status}; updatedAt changed=${beforeGroup.updatedAt!==afterGroup.updatedAt}`);
+ check('workspace ownership can transfer',(await http('POST','/workspaces/me/transfer',owner,{userId:member.id})).status===200);
+ check('former owner becomes admin',(await http('GET','/workspaces/me',owner)).data.myRole==='admin');
+ check('admin cannot transfer ownership again',(await http('POST','/workspaces/me/transfer',owner,{userId:owner.id})).status===403);
+ const sessions=await http('GET','/auth/sessions',owner);
+ check('session/device registry is available',sessions.status===200&&Array.isArray(sessions.data.sessions));
+ const secondLogin=await http('POST','/auth/login',null,{identifier:owner.user.email,password:'Module-Test-123!'});
+ if(secondLogin.status!==200)throw new Error('Second device login fixture failed');
+ const secondDevice={token:secondLogin.data.accessToken||secondLogin.data.token};
+ await http('POST','/auth/sessions/revoke-others',owner);
+ check('revoking other devices rejects their existing tokens',(await http('GET','/auth/me',secondDevice)).status===401);
+ check('revoking other devices preserves current session',(await http('GET','/auth/me',owner)).status===200);
+ // Reproduce the TURN handler without reading/logging any configured secret.
+ const {getTurnCredentials}=await import(pathToFileURL(root+'/server/controllers/rtpccred.js').href);
+ const secret=process.env.TURN_SECRET;delete process.env.TURN_SECRET;let missingSecretThrows=false;
+ try{getTurnCredentials({user:{_id:owner.id}},{json:()=>{}});}catch{missingSecretThrows=true;}finally{process.env.TURN_SECRET=secret||'';}
+ check('unconfigured first-party TURN endpoint fails cleanly',!missingSecretThrows,'handler throws when TURN_SECRET is absent');
+ const previousURL=process.env.TURN_URL;process.env.TURN_SECRET='audit-only-turn-secret';process.env.TURN_URL='turn:audit.example.invalid:3478';let turnResult;
+ try{getTurnCredentials({user:{_id:owner.id}},{json:data=>{turnResult=data;}});}finally{process.env.TURN_SECRET=secret||'';process.env.TURN_URL=previousURL||'';}
+ check('first-party TURN endpoint respects configured relay URL',turnResult?.urls?.includes('turn:audit.example.invalid:3478'),'response uses a hardcoded relay instead');
+ console.log(`${checks.filter(c=>c.pass).length}/${checks.length} checks passed`);
+ fs.writeFileSync(root+'/.tmp/full-module-audit-2026-10-19/extra-findings.json',JSON.stringify(checks,null,2));
+ process.exitCode=checks.every(c=>c.pass)?0:1;
+}catch(error){console.error('FIXTURE ERROR:',error.message);process.exitCode=1;}
+finally{sockets.forEach(s=>s.close());server?.kill();await mongoose.disconnect();}

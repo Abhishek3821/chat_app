@@ -1,21 +1,12 @@
 
-import crypto from "crypto";
+import { resolveIceServers, iceStatus } from '../utils/iceServers.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
 
-export const getTurnCredentials = (req, res) => {
-  const secret = process.env.TURN_SECRET;
-  const expiry = Math.floor(Date.now() / 1000) + 3600;
-  const userId = req.user?._id?.toString() || "guest";
-  const username = `${expiry}:${userId}`;
-  const credential = crypto
-    .createHmac("sha1", secret)
-    .update(username)
-    .digest("base64");
-  return res.json({
-    username,
-    credential,
-    urls: [
-      "turn:turn.aynzenix.com:3478?transport=udp",
-      "turn:turn.aynzenix.com:3478?transport=tcp",
-    ],
-  });
-};
+export const getTurnCredentials = asyncHandler(async (req, res) => {
+  const bundle = await resolveIceServers(String(req.user._id), 3600);
+  // Preserve the original single-relay fields for older clients.
+  const firstRelay = bundle.iceServers.find((server) =>
+    [server.urls].flat().some((url) => /^turns?:/.test(url)));
+  res.set('Cache-Control', 'no-store');
+  res.json({ ...firstRelay, ...bundle, ...iceStatus() });
+});

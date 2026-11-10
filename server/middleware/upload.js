@@ -4,6 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { cloudStorageEnabled } from '../utils/storage.js';
 import { ApiError } from '../utils/asyncHandler.js';
+import { MAX_VIDEO_NOTE_BYTES } from '../utils/mediaLimits.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.join(__dirname, '..', 'uploads');
@@ -53,6 +54,20 @@ export const upload = multer({
   limits: { fileSize: MAX_FILE_BYTES, files: MAX_FILES },
 });
 
+const videoNoteUpload = multer({
+  storage,
+  fileFilter,
+  // Multer reports LIMIT_FILE_SIZE when it reaches the configured threshold;
+  // allow the documented exact 10 MB boundary and reject the next byte.
+  limits: { fileSize: MAX_VIDEO_NOTE_BYTES + 1, files: MAX_FILES },
+});
+const receiveFiles = upload.array('files', MAX_FILES);
+const receiveVideoNote = videoNoteUpload.array('files', MAX_FILES);
+
+export function receiveUploads(req, res, next) {
+  return (req.query?.type === 'videoNote' ? receiveVideoNote : receiveFiles)(req, res, next);
+}
+
 /** Multer has one global byte limit; apply the stricter image rule afterward. */
 export function validateUploadSizes(req, _res, next) {
   const oversizeImage = (req.files || []).find((file) =>
@@ -74,11 +89,12 @@ export function validateUploadSizes(req, _res, next) {
  * Mount directly after the `upload.*()` middleware — multer rejects with a
  * MulterError carrying only a `code`, which would otherwise surface as a 500.
  */
-export function handleUploadErrors(err, _req, _res, next) {
+export function handleUploadErrors(err, req, _res, next) {
   if (!(err instanceof multer.MulterError)) return next(err);
-  const mb = Math.round(MAX_FILE_BYTES / (1024 * 1024));
+  const isVideoNote = req.query?.type === 'videoNote';
+  const mb = Math.round((isVideoNote ? MAX_VIDEO_NOTE_BYTES : MAX_FILE_BYTES) / (1024 * 1024));
   const messages = {
-    LIMIT_FILE_SIZE: `File too large. Each file must be under ${mb} MB.`,
+    LIMIT_FILE_SIZE: `${isVideoNote ? 'Video note' : 'File'} too large. Each file must be under ${mb} MB.`,
     LIMIT_FILE_COUNT: `Too many files. At most ${MAX_FILES} per upload.`,
     LIMIT_UNEXPECTED_FILE: 'Unexpected file field — use "files".',
     LIMIT_PART_COUNT: 'Too many parts in the upload.',

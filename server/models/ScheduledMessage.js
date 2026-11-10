@@ -15,6 +15,7 @@ import mongoose from 'mongoose';
 const attachmentSchema = new mongoose.Schema(
   {
     url: String,
+    uploadProof: String,
     name: String,
     size: Number,
     mime: String,

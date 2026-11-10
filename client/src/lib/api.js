@@ -133,6 +133,7 @@ export function clearMediaToken() {
 /** Mirrors server/middleware/upload.js — keep the three in step. */
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+export const MAX_VIDEO_NOTE_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 export const MAX_UPLOAD_FILES = 10;
 const ALLOWED_UPLOAD_EXT = /\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|txt)$/i;
 
@@ -148,12 +149,15 @@ const prettyMB = (b) => `${(b / (1024 * 1024)).toFixed(b < 10 * 1024 * 1024 ? 1 
  * and gives the real reason. The server still enforces all of this; this is UX,
  * not security.
  */
-function assertUploadable(files) {
+export function assertUploadable(files, { type } = {}) {
   if (!files.length) throw new Error('No file selected.');
   if (files.length > MAX_UPLOAD_FILES) {
     throw new Error(`Too many files — ${MAX_UPLOAD_FILES} at a time.`);
   }
   for (const f of files) {
+    if (type === 'videoNote' && f.size > MAX_VIDEO_NOTE_UPLOAD_BYTES) {
+      throw new Error('Video note is too large. Video notes can be up to 10 MB.');
+    }
     if (/\.(jpeg|jpg|png|gif|webp)$/i.test(f.name || '') && f.size > MAX_IMAGE_UPLOAD_BYTES) {
       throw new Error(`"${f.name}" is too large. Images can be up to 10 MB.`);
     }
@@ -168,12 +172,15 @@ function assertUploadable(files) {
   }
 }
 
-export async function uploadFiles(files) {
+export async function uploadFiles(files, options = {}) {
   const list = [...files];
-  assertUploadable(list);
+  assertUploadable(list, options);
   const form = new FormData();
   list.forEach((f) => form.append('files', f));
-  const { data } = await api.post('/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  const { data } = await api.post('/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    ...(options.type === 'videoNote' ? { params: { type: 'videoNote' } } : {}),
+  });
   await ensureMediaToken(); // make sure we can render the media we just uploaded
   return data.attachments || [];
 }

@@ -1,0 +1,12 @@
+✔ legacy owned cloud note is verified and can subsequently be forwarded without a provider read (1.4027ms)
+✔ legacy provider byte count and duration override forged metadata (0.6121ms)
+✔ untrusted URLs and other cloud accounts never trigger a provider call (0.2281ms)
+✔ new signed cloud uploads require no provider lookup (0.1971ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7.7736

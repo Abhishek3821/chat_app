@@ -1,0 +1,48 @@
+
+ChatKonect new-features check — isolated DB
+
+Server is up. Running tests…
+
+  ✓ signup WITHOUT a verified email is unsuccessful (400)
+  ✓ Verify button sends a code to the email
+  ✓ wrong email code rejected (400)
+  ✓ correct code → email shows as VERIFIED (proof issued)
+  ✓ someone ELSE's email proof is rejected (400)
+  ✓ signup with a verified email succeeds → session + isVerified
+  ✓ duplicate phone number rejected (409)
+  ✓ signup without phone rejected (400)
+  ✓ invalid phone rejected (400)
+  ✓ login by USERNAME issues a session directly
+  ✓ login by PHONE (formatted) issues a session
+  ✓ wrong password still rejected (401)
+  ✓ removed OTP-login endpoint is gone (404)
+  ✓ user found by phone number search
+  ✓ A and B are mutual contacts
+  ✓ API blocks calling yourself (400)
+  ✓ caller receives call:busy when callee is busy
+  ✓ busy call logged as missed in history
+  ✓ call:screen (presenting) relayed to the peer
+  ✓ call:screen off relayed too
+  ✓ meeting created
+  ✓ both joined the meeting room
+  ✓ meeting:presenting broadcast to the room
+  ✓ host joins instantly (no knock)
+  ✓ uninvited guest is told to knock
+  ✓ host receives the knock event
+  ✓ admitted guest receives a signed pass
+  ✓ guest joins after admission with the pass
+  ✓ two-step enable works
+  ✓ forgot-PIN issues an OTP
+  ✓ wrong OTP rejected
+  ✓ reset with correct OTP succeeds
+  ✓ old PIN no longer works
+  ✓ new PIN unlocks
+  ✓ enable cannot silently overwrite an existing PIN
+  ✓ change PIN with wrong current PIN rejected
+  ✓ change PIN to the same PIN rejected
+  ✓ change PIN with correct current PIN succeeds
+  ✓ previous PIN stops working after change
+  ✓ changed PIN unlocks
+
+──────────────────────────────────────────────────
+40/40 checks passed

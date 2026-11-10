@@ -11,6 +11,7 @@ import {
   getCachedLockedChatList,
   setCachedLockedChatList,
   invalidateChatListCache,
+  shareChatListRead,
 } from '../utils/chatCache.js';
 
 // `email` deliberately excluded — nothing in the chat/participant UI reads it
@@ -50,50 +51,53 @@ async function unreadCountsFor(chatIds, userId) {
 // GET /api/chats  — all conversations for the current user (locked chats hidden;
 // they surface only via POST /api/chats/locked after the PIN is entered)
 export const getChats = asyncHandler(async (req, res) => {
-  // Read-through cache: the hottest endpoint in the app (fetched on every load/
-  // reload/reconnect). Short TTL backs up the explicit invalidation calls
-  // sprinkled across every write that can change this response (see
-  // utils/chatCache.js) — most requests are invalidated well before it matters.
-  const cached = await getCachedChatList(req.user._id);
-  if (cached) return res.json({ success: true, chats: cached });
+  const result = await shareChatListRead(req.user, 'list', async (isCurrent) => {
+    // Read-through cache: the hottest endpoint in the app (fetched on every load/
+    // reload/reconnect). Short TTL backs up the explicit invalidation calls
+    // sprinkled across every write that can change this response (see
+    // utils/chatCache.js) — most requests are invalidated well before it matters.
+    const cached = await getCachedChatList(req.user._id);
+    if (cached) return { success: true, chats: cached };
 
-  const locked = (req.user.lockedChats || []).map(String);
-  // .lean(): this response is read-only (never .save()'d), so skip Mongoose
-  // document hydration entirely on the single most-hit endpoint in the app.
-  const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked }, ...(req.user.workspaceRole === 'guest' ? { _id: { $in: req.user.guestAllowedChats || [] }, workspace: req.user.workspace, isGroup: true } : {}) })
-      .sort({ updatedAt: -1 })
-      .lean()
-  );
+    const locked = (req.user.lockedChats || []).map(String);
+    // .lean(): this response is read-only (never .save()'d), so skip Mongoose
+    // document hydration entirely on the single most-hit endpoint in the app.
+    const chats = await populateChat(
+      Chat.find({ 'participants.user': req.user._id, _id: { $nin: locked }, ...(req.user.workspaceRole === 'guest' ? { _id: { $in: req.user.guestAllowedChats || [] }, workspace: req.user.workspace, isGroup: true } : {}) })
+        .sort({ updatedAt: -1 })
+        .lean()
+    );
 
-  // Per-user chat flags (pin / archive / mute) live on the User doc — surface
-  // them on each chat so they persist across reloads and devices.
-  const pinned = new Set((req.user.pinnedChats || []).map(String));
-  const archived = new Set((req.user.archivedChats || []).map(String));
-  const muted = new Set((req.user.mutedChats || []).map(String));
-  // Per-chat wallpaper overrides, same idea (personal, not shared).
-  const themes = new Map((req.user.chatThemes || []).map((t) => [String(t.chat), t]));
+    // Per-user chat flags (pin / archive / mute) live on the User doc — surface
+    // them on each chat so they persist across reloads and devices.
+    const pinned = new Set((req.user.pinnedChats || []).map(String));
+    const archived = new Set((req.user.archivedChats || []).map(String));
+    const muted = new Set((req.user.mutedChats || []).map(String));
+    // Per-chat wallpaper overrides, same idea (personal, not shared).
+    const themes = new Map((req.user.chatThemes || []).map((t) => [String(t.chat), t]));
 
-  const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
-  const withMeta = chats.map((chat) => {
-    const id = String(chat._id);
-    const theme = themes.get(id);
-    // The sidebar's online dots come from these participants — derive them from
-    // the heartbeat, not the stored flag (see utils/presence.js).
-    (chat.participants || []).forEach((p) => applyPresenceFreshness(p.user));
-    return {
-      ...chat,
-      unreadCount: counts.get(id) || 0,
-      pinned: pinned.has(id),
-      archived: archived.has(id),
-      muted: muted.has(id),
-      wallpaper: theme?.wallpaper || '',
-      bubble: theme?.bubble || '',
-    };
+    const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
+    const withMeta = chats.map((chat) => {
+      const id = String(chat._id);
+      const theme = themes.get(id);
+      // The sidebar's online dots come from these participants — derive them from
+      // the heartbeat, not the stored flag (see utils/presence.js).
+      (chat.participants || []).forEach((p) => applyPresenceFreshness(p.user));
+      return {
+        ...chat,
+        unreadCount: counts.get(id) || 0,
+        pinned: pinned.has(id),
+        archived: archived.has(id),
+        muted: muted.has(id),
+        wallpaper: theme?.wallpaper || '',
+        bubble: theme?.bubble || '',
+      };
+    });
+
+    if (isCurrent()) setCachedChatList(req.user._id, withMeta); // best-effort
+    return { success: true, chats: withMeta };
   });
-
-  setCachedChatList(req.user._id, withMeta); // fire-and-forget, best-effort (never throws)
-  res.json({ success: true, chats: withMeta });
+  res.json(result);
 });
 
 // POST /api/chats/direct/:userId — get-or-create a 1:1 chat
@@ -178,19 +182,21 @@ export const unlockChat = asyncHandler(async (req, res) => {
 // POST /api/chats/locked  { pin }  — reveal locked chats after verifying the PIN
 export const getLockedChats = asyncHandler(async (req, res) => {
   if (!(await verifyTwoStepPin(req.user._id, req.body.pin))) throw new ApiError(403, 'Incorrect PIN.');
+  const result = await shareChatListRead(req.user, 'locked', async (isCurrent) => {
+    const cached = await getCachedLockedChatList(req.user._id);
+    if (cached) return { success: true, chats: cached };
 
-  const cached = await getCachedLockedChatList(req.user._id);
-  if (cached) return res.json({ success: true, chats: cached });
+    const locked = (req.user.lockedChats || []).map(String);
+    const chats = await populateChat(
+      Chat.find({ 'participants.user': req.user._id, _id: { $in: locked } }).sort({ updatedAt: -1 }).lean()
+    );
+    const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
+    const withMeta = chats.map((chat) => ({ ...chat, unreadCount: counts.get(String(chat._id)) || 0, locked: true }));
 
-  const locked = (req.user.lockedChats || []).map(String);
-  const chats = await populateChat(
-    Chat.find({ 'participants.user': req.user._id, _id: { $in: locked } }).sort({ updatedAt: -1 }).lean()
-  );
-  const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
-  const withMeta = chats.map((chat) => ({ ...chat, unreadCount: counts.get(String(chat._id)) || 0, locked: true }));
-
-  setCachedLockedChatList(req.user._id, withMeta);
-  res.json({ success: true, chats: withMeta });
+    if (isCurrent()) setCachedLockedChatList(req.user._id, withMeta);
+    return { success: true, chats: withMeta };
+  });
+  res.json(result);
 });
 
 // DELETE /api/chats/:id/clear — clear messages for me only
@@ -210,6 +216,9 @@ export const deleteChat = asyncHandler(async (req, res) => {
   const chat = await Chat.findById(req.params.id);
   if (!chat) throw new ApiError(404, 'Chat not found.');
   const priorParticipants = chat.participants.map((p) => p.user);
+  if (!priorParticipants.some((id) => String(id) === String(req.user._id))) {
+    throw new ApiError(403, 'You are not a participant of this chat.');
+  }
 
   if (chat.isGroup) {
     chat.participants = chat.participants.filter((p) => String(p.user) !== String(req.user._id));

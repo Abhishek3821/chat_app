@@ -30,12 +30,13 @@ const SRC = fs.readFileSync('src/lib/token.js', 'utf8');
  * the module keeps state, and each scenario must start clean.
  */
 async function load(localStorageImpl) {
-  const body = SRC.replace(/export function/g, 'function').replace(/export const/g, 'const');
+  const body = SRC.replace(/^import .*;\r?$/gm, '').replace(/export function/g, 'function').replace(/export const/g, 'const');
   const factory = new Function(
     'localStorage',
+    'IS_EMBED',
     `${body}\nreturn { getToken, setToken, clearToken, canPersistToken };`
   );
-  return factory(localStorageImpl);
+  return factory(localStorageImpl, false);
 }
 
 const workingStore = () => {

@@ -1,0 +1,59 @@
+
+— A creates a group with B and C (contacts in another workspace)
+  ✓ the group is created
+  ✓ B and C are really in the participant list
+  ✓ nobody was silently dropped
+  ✓ B SEES the group on their own account
+  ✓ C SEES the group on their own account
+  ✓ a mixed-workspace group is owned by neither workspace (so no member sweep can gut it)
+
+— C sets "who can add me to groups" = contacts
+  ✓ the setting saves
+  ✓ a STRANGER cannot add C
+  ✓ and the creator is told why, by name
+  ✓ C's chat list does not show the stranger's group
+  ✓ a CONTACT can still add C
+  ✓ C sees the group their contact made
+
+— Adding members to an existing group honours the same rule
+  ✓ the stranger cannot add C to their existing group either
+  ✓ …and is told why
+  ✓ an admin CAN add a default ("everyone") user from another workspace
+  ✓ the newly added member sees the group immediately
+  ✓ the added member is populated in the response (the roster renders without a refetch)
+  ✓ a plain member cannot add anyone
+
+— "everyone" means everyone (global reachability)
+  ✓ the stranger can now add C
+  ✓ C sees it
+
+— A block beats "everyone"
+  ✓ a user who blocked you cannot be pulled into your group
+  ✓ reported as blocked
+  ✓ you cannot add someone you blocked yourself
+
+— A promoted group admin can add members too
+  ✓ the owner can promote a member to group admin
+  ✓ the new role is on the returned roster
+  ✓ the promoted admin can now add a member
+  ✓ the person they added sees the group
+
+— Owner protections hold against a group admin
+  ✓ an admin cannot demote the owner
+  ✓ an admin cannot remove the owner
+  ✓ the owner role cannot be handed out via this endpoint
+
+— Demote and remove
+  ✓ the owner can dismiss an admin
+  ✓ a dismissed admin loses the ability to add
+  ✓ the owner can remove a member
+  ✓ the removed member loses the group from their own list
+
+— Robustness
+  ✓ a group whose members all share one workspace keeps that tag
+  ✓ a malformed / unknown member id is a clean skip, not a 500
+  ✓ both are reported as not_found
+  ✓ duplicate ids and self-adds do not double up the roster
+
+────────────────────────────────────────────────────────
+38/38 checks passed

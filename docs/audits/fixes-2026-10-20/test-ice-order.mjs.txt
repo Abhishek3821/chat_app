@@ -1,0 +1,42 @@
+
+— The server can mint credentials
+  ✓ the server is asked
+  ✓ a relay is loaded
+  ✓ it is the server one
+  ✓ the build-time URL is NOT used when the server works
+
+— A missing endpoint degrades to STUN without exposing provider keys
+  ✓ the server was still tried first
+  ✓ no browser request to the provider
+  ✓ no relay is claimed
+
+— The server answers but offers no relay (stun_only)
+  ✓ STUN-only stays server-controlled without a public provider fallback
+  ✓ no relay is claimed for STUN-only
+
+— Neither source has anything
+  ✓ it resolves rather than rejecting
+  ✓ no relay is claimed
+  ✓ STUN survives, so same-network calls still work
+  ✓ the failure message names the missing relay, not "the network"
+
+— Obsolete public credentials cannot override server configuration
+  ✓ only the authenticated server is consulted
+  ✓ the server relay is used
+
+— A failed attempt must not be cached as success
+  ✓ first attempt found nothing
+  ✓ the next call start tries again instead of staying dead
+
+— Refreshing does not stack duplicate entries
+  ✓ one entry per relay, not one per refresh
+
+— Legacy endpoint compatibility, provider order, caching and concurrent calls
+  ✓ legacy credential response still loads
+  ✓ concurrent callers share one request
+  ✓ valid credentials are cached
+  ✓ provider preference order is preserved
+  ✓ server TTL triggers refresh before expiry
+
+────────────────────────────────────────────────────────
+23/23 checks passed

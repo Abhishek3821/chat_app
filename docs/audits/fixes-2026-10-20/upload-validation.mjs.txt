@@ -1,0 +1,28 @@
+
+Upload validation — development mode
+
+  ✓ valid .png upload succeeds (201)
+  ✓   → returns an attachments array
+  ✓ image over 10 MB → 413
+  ✓   → message names the 10 MB image limit
+  ✓ 11 MB video remains accepted (50 MB non-image limit)
+  ✓ video note within 10 MB succeeds
+  ✓ video note exactly at 10 MB succeeds
+  ✓ video note over 10 MB is refused (413 or clean reset)
+  ✓ video-note error names its own 10 MB limit
+  ✓ unsupported type → 400 (not 500)
+  ✓   → message names the reason
+  ✓ oversized file → 413 or connection reset, never 500
+  ✓   → when a response arrives, it states the 50 MB limit
+  ✓ wrong field name → 400
+  ✓ no files → 400
+
+Upload validation — production mode (message must survive)
+
+  ✓ prod: unsupported type → 400
+  ✓ prod: real reason still shown (not "Something went wrong")
+  ✓ prod: video note cap and readable error survive
+  ✓ prod: oversized → 413 with real reason (or a clean reset, never a 500)
+
+──────────────────────────────────────────────────
+19/19 checks passed

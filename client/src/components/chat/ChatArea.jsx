@@ -10,7 +10,7 @@ import { useAuth } from '../../store/useAuth';
 import { useUI } from '../../store/useUI';
 import { getChatDisplay, chatPeerIds } from '../../lib/chat';
 import { wallpaperStyle } from '../../lib/wallpapers';
-import { emitSocket } from '../../hooks/useSocket';
+import { emitSocket, markChatRead } from '../../hooks/useSocket';
 import { DEMO_MODE } from '../../lib/api';
 
 const DEMO_REPLIES = ['Absolutely! 🙌', 'Sounds perfect.', 'Haha love that 😄', 'On it right now.', "Let's do it 🚀", 'Great idea!', '👍👍'];
@@ -112,7 +112,7 @@ export default function ChatArea({ chat }) {
     setSearch(''); // reset in-chat search when switching conversations
     setSearchState({ results: [], scope: 'none', loading: false, hasMore: false });
     emitSocket('join-chat', chat._id);
-    emitSocket('message:read', { chatId: chat._id }); // opening the chat = read
+    markChatRead(chat._id, messages[messages.length - 1]?._id, true); // opening the chat = read
     return () => emitSocket('leave-chat', chat._id);
   }, [chat._id]);
 
@@ -138,10 +138,16 @@ export default function ChatArea({ chat }) {
     };
   }, [search, chatId, searchInChat]);
 
-  // Re-mark read when new messages land while I'm looking at this chat.
+  // Pagination, local sends and edits do not create unread inbound messages.
+  // The socket listener may already have acknowledged this same message.
+  const latestMessage = messages[messages.length - 1];
+  const latestMessageId = latestMessage?._id;
+  const latestSenderId = latestMessage?.sender?._id || latestMessage?.sender;
   useEffect(() => {
-    if (messages.length) emitSocket('message:read', { chatId: chat._id });
-  }, [messages.length, chat._id]);
+    if (latestMessageId && String(latestSenderId) !== String(currentUser?._id)) {
+      markChatRead(chat._id, latestMessageId);
+    }
+  }, [latestMessageId, latestSenderId, currentUser?._id, chat._id]);
 
   const handleSend = async (payload) => {
     await sendMessage({ chatId: chat._id, ...payload });

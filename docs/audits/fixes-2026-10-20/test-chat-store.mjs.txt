@@ -1,0 +1,17 @@
+✔ rapid sends keep unique identities and deduplicate the socket echo (5.6743ms)
+✔ failed send remains visible as failed (1.8807ms)
+✔ rejected edit restores the original content (0.4225ms)
+✔ rejected deletion restores the message and explains the error (0.4387ms)
+✔ returning from search restores scroll-back availability (0.3883ms)
+✔ reconnect returns to newest history and re-enables scroll-back (0.4066ms)
+✔ failed deletion keeps concurrent incoming messages (0.3754ms)
+✔ scroll-back supplies both timestamp and ID and merges without duplicates (0.526ms)
+✔ safe storage tolerates browser denial and supports normal drafts (0.636ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.8295

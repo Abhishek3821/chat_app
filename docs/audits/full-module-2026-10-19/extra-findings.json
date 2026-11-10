@@ -1,0 +1,212 @@
+[
+  {
+    "name": "workspace member joins the invited team",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "ordinary member cannot rename workspace",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "team task creation and assignment",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "workspace task creation reaches a real socket",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "assigned member can complete the task",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "foreign team cannot update task",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "owner can view activity and member cannot",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "customer can explicitly start team inbox thread",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "workspace inbox update reaches a real socket",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "team can add an internal note",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "customer GET omits internal notes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "customer follow-up response also omits internal notes",
+    "pass": false,
+    "detail": "HTTP 201; internal notes present=true"
+  },
+  {
+    "name": "foreign team cannot read inbox thread",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "member cannot create guest invitations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "owner can create a scoped guest invitation",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "guest sees only selected group",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "guest text messages work",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "guest cannot upload files",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "guest cannot use team tasks",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "owner revokes guest",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "revoked guest token is rejected",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "catalog product can be created",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "ordinary member cannot edit catalog",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "catalog owner can update and delete product",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "business storefront profile updates",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "business greeting can be enabled",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "business greeting is actually dispatched",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "business greeting does not repeat on every message",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "out-of-hours business reply is actually dispatched",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "away cooldown suppresses duplicate replies",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "blocked peer cannot send a normal direct message",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "broadcast also respects recipient blocking",
+    "pass": false,
+    "detail": "HTTP 200; sent=1"
+  },
+  {
+    "name": "video-note cap cannot be bypassed by relabelling a regular upload",
+    "pass": false,
+    "detail": "actual upload bytes=11534336; forged metadata accepted HTTP 201"
+  },
+  {
+    "name": "nonparticipant cannot delete or mutate a group via chat endpoint",
+    "pass": false,
+    "detail": "HTTP 200; updatedAt changed=false"
+  },
+  {
+    "name": "workspace ownership can transfer",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "former owner becomes admin",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "admin cannot transfer ownership again",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "session/device registry is available",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "revoking other devices rejects their existing tokens",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "revoking other devices preserves current session",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "unconfigured first-party TURN endpoint fails cleanly",
+    "pass": false,
+    "detail": "handler throws when TURN_SECRET is absent"
+  },
+  {
+    "name": "first-party TURN endpoint respects configured relay URL",
+    "pass": false,
+    "detail": "response uses a hardcoded relay instead"
+  }
+]

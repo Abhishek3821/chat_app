@@ -21,6 +21,11 @@ const team = async (user) => {
   return ws;
 };
 const cleanText = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+const customerThread = (thread) => {
+  const data = thread.toObject();
+  delete data.notes;
+  return data;
+};
 const threadQuery = (id, user) => validId(id)
   ? { _id: id, $or: [{ workspace: user.workspace }, { customer: user._id }] }
   : { _id: null };
@@ -60,7 +65,7 @@ export const startInboxThread = asyncHandler(async (req, res) => {
     await thread.save();
   }
   await notifyThread(thread);
-  res.status(201).json({ success: true, thread });
+  res.status(201).json({ success: true, thread: customerThread(thread) });
 });
 
 export const myCustomerThreads = asyncHandler(async (req, res) => {
@@ -85,8 +90,7 @@ export const getInboxThread = asyncHandler(async (req, res) => {
   if (!thread) throw new ApiError(404, 'Thread not found.');
   const isCustomer = String(thread.customer._id) === String(req.user._id);
   if (!isCustomer) await team(req.user);
-  const data = thread.toObject();
-  if (isCustomer) delete data.notes;
+  const data = isCustomer ? customerThread(thread) : thread.toObject();
   res.json({ success: true, thread: data });
 });
 

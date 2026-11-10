@@ -1,0 +1,236 @@
+[
+  {
+    "suite": "e2e",
+    "code": 0,
+    "seconds": 12,
+    "passed": 54,
+    "total": 54
+  },
+  {
+    "suite": "new-features",
+    "code": 0,
+    "seconds": 11,
+    "passed": 40,
+    "total": 40
+  },
+  {
+    "suite": "chat-feature-audit",
+    "code": 0,
+    "seconds": 9,
+    "passed": 29,
+    "total": 29
+  },
+  {
+    "suite": "chat-load",
+    "code": 0,
+    "seconds": 4
+  },
+  {
+    "suite": "chat-realtime",
+    "code": 0,
+    "seconds": 8,
+    "passed": 41,
+    "total": 41
+  },
+  {
+    "suite": "search-wallpaper",
+    "code": 0,
+    "seconds": 17,
+    "passed": 30,
+    "total": 30
+  },
+  {
+    "suite": "pinned-messages",
+    "code": 0,
+    "seconds": 10,
+    "passed": 43,
+    "total": 43
+  },
+  {
+    "suite": "group-membership",
+    "code": 0,
+    "seconds": 12,
+    "passed": 38,
+    "total": 38
+  },
+  {
+    "suite": "privacy-settings",
+    "code": 0,
+    "seconds": 16,
+    "passed": 23,
+    "total": 23
+  },
+  {
+    "suite": "presence",
+    "code": 0,
+    "seconds": 24,
+    "passed": 20,
+    "total": 20
+  },
+  {
+    "suite": "status-realtime",
+    "code": 0,
+    "seconds": 20,
+    "passed": 21,
+    "total": 21
+  },
+  {
+    "suite": "meeting-invites",
+    "code": 0,
+    "seconds": 14,
+    "passed": 15,
+    "total": 15
+  },
+  {
+    "suite": "meeting-visibility",
+    "code": 0,
+    "seconds": 16,
+    "passed": 20,
+    "total": 20
+  },
+  {
+    "suite": "meeting-room-realtime",
+    "code": 0,
+    "seconds": 13,
+    "passed": 12,
+    "total": 12
+  },
+  {
+    "suite": "meeting-collab-realtime",
+    "code": 0,
+    "seconds": 16,
+    "passed": 20,
+    "total": 20
+  },
+  {
+    "suite": "meeting-mesh",
+    "code": 0,
+    "seconds": 19,
+    "passed": 28,
+    "total": 28
+  },
+  {
+    "suite": "meeting-capacity",
+    "code": 0,
+    "seconds": 27,
+    "passed": 15,
+    "total": 15
+  },
+  {
+    "suite": "group-call-mesh",
+    "code": 0,
+    "seconds": 19,
+    "passed": 36,
+    "total": 36
+  },
+  {
+    "suite": "call-edges-realtime",
+    "code": 0,
+    "seconds": 18,
+    "passed": 12,
+    "total": 12
+  },
+  {
+    "suite": "platform",
+    "code": 0,
+    "seconds": 20,
+    "passed": 59,
+    "total": 59
+  },
+  {
+    "suite": "platform-calls",
+    "code": 0,
+    "seconds": 17,
+    "passed": 17,
+    "total": 17
+  },
+  {
+    "suite": "embed-dropin",
+    "code": 0,
+    "seconds": 11,
+    "passed": 42,
+    "total": 42
+  },
+  {
+    "suite": "embed-groups",
+    "code": 0,
+    "seconds": 15,
+    "passed": 22,
+    "total": 22
+  },
+  {
+    "suite": "embed-1to1-signalling",
+    "code": 0,
+    "seconds": 31,
+    "passed": 26,
+    "total": 26
+  },
+  {
+    "suite": "embed-host-example",
+    "code": 0,
+    "seconds": 14,
+    "passed": 28,
+    "total": 28
+  },
+  {
+    "suite": "security-embed-origins",
+    "code": 0,
+    "seconds": 10,
+    "passed": 23,
+    "total": 23
+  },
+  {
+    "suite": "super-admin",
+    "code": 0,
+    "seconds": 96,
+    "passed": 36,
+    "total": 36
+  },
+  {
+    "suite": "admin-delete",
+    "code": 0,
+    "seconds": 8
+  },
+  {
+    "suite": "qr-invite",
+    "code": 0,
+    "seconds": 17,
+    "passed": 23,
+    "total": 23
+  },
+  {
+    "suite": "feature-coverage",
+    "code": 0,
+    "seconds": 41,
+    "passed": 83,
+    "total": 83
+  },
+  {
+    "suite": "rest-triggered-realtime",
+    "code": 0,
+    "seconds": 18,
+    "passed": 18,
+    "total": 18
+  },
+  {
+    "suite": "turn-relay",
+    "code": 0,
+    "seconds": 138,
+    "passed": 79,
+    "total": 79
+  },
+  {
+    "suite": "push-pipeline",
+    "code": 0,
+    "seconds": 25,
+    "passed": 11,
+    "total": 11
+  },
+  {
+    "suite": "rate-limit-keying",
+    "code": 0,
+    "seconds": 12,
+    "passed": 9,
+    "total": 9
+  }
+]

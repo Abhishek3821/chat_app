@@ -351,7 +351,7 @@ export default function Signup() {
           <motion.div variants={rise}>
             <Field
               label="Email address"
-              hint={fieldError('email') || (emailStep !== 'verified' ? 'Click Verify — we’ll email you a 6-digit code.' : undefined)}
+              hint={fieldError('email') || (emailStep === 'sent' ? 'Check your inbox and spam folder for the 6-digit code.' : emailStep === 'idle' ? 'Click Verify — we’ll email you a 6-digit code.' : undefined)}
             >
               {/* An <input>'s intrinsic min-width (default size=20) stops flex-1
                   from shrinking, so this row overflowed 320px — hence min-w-0,
@@ -386,7 +386,7 @@ export default function Signup() {
                     disabled={emailBusy || !emailRe.test(form.email)}
                     className="shrink-0"
                   >
-                    {emailBusy && emailStep === 'idle' ? <Loader2 size={15} className="animate-spin" /> : null}
+                    {emailBusy ? <Loader2 size={15} className="animate-spin" /> : null}
                     {emailStep === 'sent' ? 'Resend' : 'Verify'}
                   </Button>
                 )}

@@ -1,0 +1,14 @@
+✔ socket delivery and chat render acknowledge one message only once (1.3137ms)
+✔ a burst of distinct messages keeps every immediate receipt (0.2523ms)
+✔ reopening the same conversation marks it read again (0.178ms)
+✔ reconnect and account changes cannot inherit a suppressed watermark (0.1223ms)
+✔ different chats and legacy reads without a watermark stay independent (0.0995ms)
+✔ a failed emit can be retried immediately (0.237ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9.8219

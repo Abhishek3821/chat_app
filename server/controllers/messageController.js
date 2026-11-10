@@ -2,6 +2,9 @@ import Message from '../models/Message.js';
 import Chat from '../models/Chat.js';
 import User from '../models/User.js';
 import ScheduledMessage from '../models/ScheduledMessage.js';
+import mongoose from 'mongoose';
+import { verifyVideoNoteAttachments } from '../utils/uploadMetadata.js';
+import { MAX_VIDEO_NOTE_BYTES, MAX_VIDEO_NOTE_SECONDS } from '../utils/mediaLimits.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToChat, emitToUser } from '../socket/index.js';
 import { enqueue } from '../utils/queue.js';
@@ -32,6 +35,28 @@ const EDIT_WINDOW_MS = 5 * 60 * 1000;
 // sender can still delete it for themselves, just not retract it for the chat.
 const DELETE_EVERYONE_WINDOW_MS = 5 * 60 * 1000;
 
+// Timestamp + ID form a stable cursor even when a burst shares one millisecond.
+// Keep accepting timestamp-only cursors for existing API consumers.
+function historyBoundary(timestamp, id, after = false) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) throw new ApiError(400, 'Invalid message cursor date.');
+  const op = after ? '$gt' : '$lt';
+  if (!id) return { createdAt: { [op]: date } };
+  if (typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id)) throw new ApiError(400, 'Invalid message cursor ID.');
+  return { $or: [{ createdAt: { [op]: date } }, { createdAt: date, _id: { [op]: id } }] };
+}
+
+async function assertReplyTarget(chatId, senderId, replyTo) {
+  if (!replyTo) return;
+  if (typeof replyTo !== 'string' || !mongoose.isObjectIdOrHexString(replyTo)) {
+    throw new ApiError(400, 'replyTo must be a valid message ID.');
+  }
+  const visible = await Message.exists({
+    _id: replyTo, chat: chatId, isDeleted: { $ne: true }, deletedFor: { $ne: senderId },
+  });
+  if (!visible) throw new ApiError(400, 'Reply message is not available in this chat.');
+}
+
 /** Keep only well-formed attachments whose URL is our own upload or an https URL
  *  (blocks data:/javascript:/relative-path injection that a client could auto-load). */
 function sanitizeAttachments(attachments) {
@@ -48,6 +73,7 @@ function sanitizeAttachments(attachments) {
       width: a.width,
       height: a.height,
       duration: a.duration,
+      uploadProof: a.uploadProof,
     }));
 }
 
@@ -124,7 +150,9 @@ export async function deliverMessage({
   viewOnce = false,
 }) {
   const chatId = String(chat._id);
+  if (type === 'videoNote') await verifyVideoNoteAttachments(attachments);
   if (type !== 'system') await assertDirectChatCanSend(chat, sender);
+  await assertReplyTarget(chatId, sender._id, replyTo);
   // Disappearing messages: stamp an expiry so the TTL index self-deletes it.
   const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
 
@@ -201,6 +229,11 @@ export function validateOutgoing({ type = 'text', content = '', attachments, loc
     throw new ApiError(400, `Message text must be a string under ${MAX_CONTENT} characters.`);
   }
   const safeAttachments = sanitizeAttachments(attachments);
+  if (type === 'videoNote' && safeAttachments?.some((a) =>
+    Number(a.size) > MAX_VIDEO_NOTE_BYTES || Number(a.duration) > MAX_VIDEO_NOTE_SECONDS
+  )) {
+    throw new ApiError(400, 'Video notes can be up to 10 MB and 60 seconds.');
+  }
   if (!content && (!safeAttachments || safeAttachments.length === 0) && !location) {
     throw new ApiError(400, 'Message cannot be empty.');
   }
@@ -275,9 +308,9 @@ export const getMessages = asyncHandler(async (req, res) => {
   const chat = await assertMember(req.params.chatId, req.user._id);
   const limit = Math.min(Number(req.query.limit) || 40, 100);
   const filter = { chat: req.params.chatId, deletedFor: { $ne: req.user._id } };
-  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+  if (req.query.before) Object.assign(filter, historyBoundary(req.query.before, req.query.beforeId));
 
-  const messages = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit).lean());
+  const messages = await populateMessage(Message.find(filter).sort({ createdAt: -1, _id: -1 }).limit(limit).lean());
 
   /* Pins come with the FIRST page only. Two reasons they belong on this
      response at all rather than a second request: the banner has to be there
@@ -430,11 +463,11 @@ export const getStarred = asyncHandler(async (req, res) => {
     isDeleted: false,
   };
   if (locked.length) filter.chat = { $nin: locked };
-  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+  if (req.query.before) Object.assign(filter, historyBoundary(req.query.before, req.query.beforeId));
 
   const messages = await populateMessage(
     Message.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(limit + 1) // one extra row = "is there another page?" without a count()
       .lean()
   ).then((rows) =>
@@ -494,9 +527,9 @@ export const searchMessages = asyncHandler(async (req, res) => {
     isDeleted: false,
     deletedFor: { $ne: req.user._id },
   };
-  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+  if (req.query.before) Object.assign(filter, historyBoundary(req.query.before, req.query.beforeId));
 
-  const rows = await populateMessage(Message.find(filter).sort({ createdAt: -1 }).limit(limit + 1).lean());
+  const rows = await populateMessage(Message.find(filter).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean());
   const hasMore = rows.length > limit;
   res.json({ success: true, messages: hasMore ? rows.slice(0, limit) : rows, hasMore });
 });
@@ -515,16 +548,16 @@ export const getMessageContext = asyncHandler(async (req, res) => {
   await assertIsMember(req.params.chatId, req.user._id);
   const radius = Math.min(Number(req.query.radius) || 20, 50);
 
-  const anchor = await Message.findOne({ _id: req.params.messageId, chat: req.params.chatId }).lean();
+  const anchor = await Message.findOne({ _id: req.params.messageId, chat: req.params.chatId, deletedFor: { $ne: req.user._id } }).lean();
   if (!anchor) throw new ApiError(404, 'Message not found in this chat.');
 
   const base = { chat: req.params.chatId, deletedFor: { $ne: req.user._id } };
   const [before, after] = await Promise.all([
     populateMessage(
-      Message.find({ ...base, createdAt: { $lt: anchor.createdAt } }).sort({ createdAt: -1 }).limit(radius).lean()
+      Message.find({ ...base, ...historyBoundary(anchor.createdAt, String(anchor._id)) }).sort({ createdAt: -1, _id: -1 }).limit(radius).lean()
     ),
     populateMessage(
-      Message.find({ ...base, createdAt: { $gt: anchor.createdAt } }).sort({ createdAt: 1 }).limit(radius).lean()
+      Message.find({ ...base, ...historyBoundary(anchor.createdAt, String(anchor._id), true) }).sort({ createdAt: 1, _id: 1 }).limit(radius).lean()
     ),
   ]);
   const [anchorPopulated] = await populateMessage(Message.find({ _id: anchor._id }).lean());
@@ -567,6 +600,7 @@ export const markViewed = asyncHandler(async (req, res) => {
 export const createPoll = asyncHandler(async (req, res) => {
   const { chatId, question, options, multi } = req.body;
   const chat = await assertMember(chatId, req.user._id);
+  await assertDirectChatCanSend(chat, req.user);
 
   if (chat.isGroup && chat.messagingPolicy === 'admins') {
     const me = chat.participants.find((p) => String(p.user) === String(req.user._id));
@@ -751,6 +785,8 @@ export const scheduleMessage = asyncHandler(async (req, res) => {
   // Same validation as a live send, so a scheduled message can never carry a
   // payload the live path would have rejected.
   const safe = validateOutgoing({ ...req.body, type, content });
+  await assertReplyTarget(chatId, req.user._id, replyTo);
+  if (type === 'videoNote') await verifyVideoNoteAttachments(safe.attachments);
 
   const pending = await ScheduledMessage.countDocuments({ chat: chatId, sender: req.user._id, status: 'pending' });
   if (pending >= MAX_PENDING_PER_CHAT) {

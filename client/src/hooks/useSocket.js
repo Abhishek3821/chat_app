@@ -13,6 +13,7 @@ import { useStatus } from '../store/useStatus';
 import { useMeetings } from '../store/useMeetings';
 import { notifyMessage, messageAlertsAllowed } from '../lib/notify';
 import { playMessageTone } from '../lib/sounds';
+import { emitChatRead, resetChatReads } from '../lib/chatReadReceipts.js';
 
 /** Short preview of a message for notifications. */
 function preview(m) {
@@ -100,6 +101,7 @@ export function useSocket() {
     let refreshedForAuth = false;
     let firstConnect = true;
     socket.on('connect', () => {
+      resetChatReads(socket);
       refreshedForAuth = false;
       if (firstConnect) { firstConnect = false; return; }
       // RECONNECT after a drop: the server-side rooms are gone and every event
@@ -137,7 +139,7 @@ export function useSocket() {
         const viewingThisChat = chat.activeChatId === chatId && document.visibilityState === 'visible';
         if (viewingThisChat) {
           // ...and if I'm actively viewing this chat, mark it read (coloured ✓✓).
-          socket.emit('message:read', { chatId });
+          emitChatRead(socket, chatId, message._id);
         } else {
           // Otherwise surface it in the notification bell.
           useNotifications.getState().pushLocal({
@@ -365,4 +367,8 @@ export function useSocket() {
 /** Emit a socket event from anywhere (safe no-op if not connected). */
 export function emitSocket(event, payload) {
   if (window.__ccSocket) window.__ccSocket.emit(event, payload);
+}
+
+export function markChatRead(chatId, messageId, force = false) {
+  return emitChatRead(window.__ccSocket, chatId, messageId, force);
 }

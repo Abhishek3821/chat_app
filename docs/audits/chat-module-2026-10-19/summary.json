@@ -1,0 +1,86 @@
+{
+  "rows": [
+    {
+      "suite": "call-edges-realtime",
+      "passed": 12,
+      "total": 12
+    },
+    {
+      "suite": "chat-feature-audit",
+      "passed": 29,
+      "total": 29
+    },
+    {
+      "suite": "chat-realtime",
+      "passed": 41,
+      "total": 41
+    },
+    {
+      "suite": "e2e",
+      "passed": 54,
+      "total": 54
+    },
+    {
+      "suite": "embed-groups",
+      "passed": 22,
+      "total": 22
+    },
+    {
+      "suite": "feature-coverage",
+      "passed": 83,
+      "total": 83
+    },
+    {
+      "suite": "group-membership",
+      "passed": 38,
+      "total": 38
+    },
+    {
+      "suite": "new-features",
+      "passed": 40,
+      "total": 40
+    },
+    {
+      "suite": "pinned-messages",
+      "passed": 43,
+      "total": 43
+    },
+    {
+      "suite": "presence",
+      "passed": 20,
+      "total": 20
+    },
+    {
+      "suite": "privacy-settings",
+      "passed": 23,
+      "total": 23
+    },
+    {
+      "suite": "realtime",
+      "passed": 47,
+      "total": 47
+    },
+    {
+      "suite": "relay-delivery",
+      "passed": 13,
+      "total": 13
+    },
+    {
+      "suite": "rest-triggered-realtime",
+      "passed": 18,
+      "total": 18
+    },
+    {
+      "suite": "search-wallpaper",
+      "passed": 30,
+      "total": 30
+    },
+    {
+      "suite": "upload-validation",
+      "passed": 14,
+      "total": 14
+    }
+  ],
+  "passed": 527,
+  "total": 527
+}

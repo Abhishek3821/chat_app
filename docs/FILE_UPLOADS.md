@@ -35,11 +35,14 @@ const ALLOWED = /^\.(jpeg|jpg|png|gif|webp|mp4|webm|mov|mp3|wav|ogg|m4a|pdf|doc|
 |---|---|---|
 | Images | `.jpeg .jpg .png .gif .webp` | 10,485,760 bytes (10 MB) |
 | Video | `.mp4 .webm .mov` | 52,428,800 bytes (50 MB) |
+| Video notes (`?type=videoNote`) | Recorder media, normally `.webm` | 10,485,760 bytes (10 MB); recorder stops at 60 seconds |
 | Audio | `.mp3 .wav .ogg .m4a` | 52,428,800 bytes (50 MB) |
 | Documents | `.pdf .doc .docx .xls .xlsx .ppt .pptx .txt` | 52,428,800 bytes (50 MB) |
 | Archives | `.zip` | 52,428,800 bytes (50 MB) |
 
 Images have a **10 MB per-file** limit. Video, audio, documents and archives retain the **50 MB per-file** limit. Multer enforces the 50 MB global ceiling, and server validation applies the stricter image limit; the client mirrors both rules before uploading. The request cap remains `10` files from `upload.array('files', 10)`. The `express.json`/`urlencoded` `2mb` caps do **not** apply to multipart bodies.
+
+Video-note recordings call the same endpoint with `?type=videoNote`. This selects a **10 MB server byte limit**, including an accepted exact 10 MB boundary, and the browser checks the file before upload. Normal videos still use the ordinary 50 MB route. Message and scheduled-message validation also reject supplied video-note attachment metadata above 10 MB or 60 seconds. Duration is enforced by the recorder and checked against supplied metadata; the server does not decode media to independently measure duration.
 
 Downstream caps worth knowing: `MAX_ATTACHMENTS = 20` per message and `MAX_CONTENT = 10_000` chars (`server/controllers/messageController.js:13-14`); broadcast lists cap attachments at 20 (`broadcastController.js:83`), catalog images at 10 (`catalogController.js:68`).
 
@@ -250,3 +253,16 @@ agentId: af2ec358727d0d549 (use SendMessage with to: 'af2ec358727d0d549', summar
 <usage>subagent_tokens: 169536
 tool_uses: 34
 duration_ms: 490908</usage>
+# Video-note metadata verification (20 October 2026)
+
+Video-note live sends and scheduled sends check local file bytes rather than the
+client's `size`. Cloud upload descriptors now include `uploadProof`; clients must
+preserve it with `url` and `size` when sending, scheduling or forwarding. Message
+and scheduled-message attachments retain this proof. Verification adds no database
+queries. Legacy clips in the configured Cloudinary account are inspected through
+its authenticated resource API if a proof is missing or invalid. Arbitrary external
+video-note URLs cannot bypass verification; upload those clips first. Ordinary
+images, video and documents retain their existing upload behavior.
+
+The recorder stops after 60 seconds and the API rejects declared durations above
+60 seconds. Local media is not decoded to independently measure actual duration.

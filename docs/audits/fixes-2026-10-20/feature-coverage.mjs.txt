@@ -1,0 +1,118 @@
+
+ChatKonect feature-coverage smoke test — isolated DB
+
+── Contact requests ──
+  ✓ request is listed as incoming
+  ✓ malformed action → 400 (not a silent reject)
+  ✓ request survives a malformed attempt
+  ✓ explicit accept still works
+
+── Workspaces ──
+  ✓ GET /workspaces/me returns a workspace
+  ✓ new users land in the shared "personal" workspace
+  ✓ renaming the personal workspace is refused
+
+── Communities ──
+  ✓ create community (201)
+  ✓ community has an inviteCode
+  ✓ community has an announcement group
+  ✓ B joins by invite code
+  ✓ community appears in B's list
+  ✓ admin adds a topic group
+  ✓ non-admin CANNOT add a topic group
+  ✓ B leaves the community
+
+── Chat + message actions ──
+  ✓ open a direct chat
+  ✓ send a message
+  ✓ edit within the window
+  ✓ react to a message
+  ✓ star a message
+  ✓ starred list contains it
+  ✓ pin a message for 6 hours
+  ✓ pin reports its expiry
+  ✓ unpin a message
+  ✓ in-chat search finds it
+  ✓ forwarded message accepted
+  ✓ set disappearing timer
+
+── Chat lock ──
+  ✓ enable two-step PIN
+  ✓ lock a chat
+  ✓ locked chats readable with the PIN
+  ✓ wrong PIN refused
+
+── Scheduled messages ──
+  ✓ refuses a near-term schedule
+  ✓ schedule a message
+  ✓ scheduled list returns it
+  ✓ pending scheduled msg is NOT in chat history
+  ✓ cancel a scheduled message
+  ✓ cannot schedule into a foreign chat
+
+── Status / stories ──
+  ✓ post a status
+  ✓ contact B sees it in the feed
+  ✓ non-contact D does NOT see it
+  ✓ "except" audience hides it from B
+  ✓ owner can read viewers
+  ✓ non-owner CANNOT read viewers
+
+── Broadcast lists ──
+  ✓ create a broadcast list
+  ✓ send to the list
+  ✓ B received it in a 1:1 chat
+  ✓ empty broadcast refused
+
+── Live location ──
+  ✓ start live location
+  ✓ update position
+  ✓ active shares listed
+  ✓ out-of-range latitude refused
+  ✓ stop sharing
+
+── Incoming webhooks ──
+  ✓ create a group
+  ✓ group has both members
+  ✓ create a webhook
+  ✓ creation returns the one-time hook URL
+  ✓ webhook ingress posts a message
+  ✓ the group received it
+  ✓ unknown webhook token rejected
+  ✓ delete the webhook
+
+── Reports ──
+  ✓ file a report
+  ✓ invalid targetType refused
+
+── API keys + public v1 API ──
+  ✓ non-admin creating an API key is refused (adminOnly)
+  ✓ v1 without a key is rejected
+  ✓ v1 with a bogus key is rejected
+
+── Team workspace: catalog, labels, quick replies ──
+  ✓ signup can create a TEAM workspace
+  ✓ owner gets a team workspace
+  ✓ workspace owner creates a product
+  ✓ catalog lists it
+  ✓ personal-workspace user cannot create products
+  ✓ create a label
+  ✓ duplicate label name refused
+  ✓ create a quick reply
+  ✓ quick replies list
+  ✓ leading slashes stripped from shortcut
+
+── Privacy: export + delete account ──
+  ✓ data export returns the user bundle
+  ✓ export includes the caller profile and messages
+  ✓ export excludes another user profile and private fields
+  ✓ delete own account
+  ✓ token is dead after deletion
+
+── Scheduled message dispatch ──
+  ✓ due scheduled message is delivered into the chat
+  ✓ row is marked 'sent'
+  ✓ row links back to the real message
+
+────────────────────────────────────────────────────────
+83/83 checks passed

@@ -20,6 +20,16 @@ export function cloudStorageEnabled() {
   return DRIVER === 'cloudinary' && Boolean(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME);
 }
 
+/** Inspect legacy cloud clips using our authenticated provider, never a user URL. */
+export async function inspectCloudVideo(url) {
+  if (!cloudStorageEnabled()) return null;
+  const match = /^https:\/\/res\.cloudinary\.com\/([^/]+)\/video\/upload\/(?:v\d+\/)?([^?#]+)$/.exec(url);
+  if (!match || match[1] !== cloudinary.config().cloud_name || /[%\\]/.test(match[2])) return null;
+  const publicId = match[2].replace(/\.[^/.]+$/, '');
+  const resource = await cloudinary.api.resource(publicId, { resource_type: 'video' });
+  return { size: resource.bytes, duration: resource.duration };
+}
+
 if (cloudStorageEnabled() && process.env.CLOUDINARY_CLOUD_NAME) {
   // If CLOUDINARY_URL is set, the SDK reads it automatically; this handles the
   // split-variable form.

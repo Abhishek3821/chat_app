@@ -6,7 +6,7 @@
  *   /invite/u/:code   person, keyed by username
  */
 
-import { integrationLink } from './integrationLink';
+import { integrationLink } from './integrationLink.js';
 
 export const inviteUrlForGroup = (inviteCode) =>
   inviteCode ? integrationLink(`/invite/g/${encodeURIComponent(inviteCode)}`) : '';

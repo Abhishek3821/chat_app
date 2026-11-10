@@ -1,0 +1,40 @@
+{
+  "serverSuites": 34,
+  "failedServerSuites": [],
+  "assertionsWithCounters": 973,
+  "passedWithCounters": 973,
+  "extraPassed": 36,
+  "extraTotal": 42,
+  "findings": [
+    {
+      "name": "customer follow-up response also omits internal notes",
+      "pass": false,
+      "detail": "HTTP 201; internal notes present=true"
+    },
+    {
+      "name": "broadcast also respects recipient blocking",
+      "pass": false,
+      "detail": "HTTP 200; sent=1"
+    },
+    {
+      "name": "video-note cap cannot be bypassed by relabelling a regular upload",
+      "pass": false,
+      "detail": "actual upload bytes=11534336; forged metadata accepted HTTP 201"
+    },
+    {
+      "name": "nonparticipant cannot delete or mutate a group via chat endpoint",
+      "pass": false,
+      "detail": "HTTP 200; updatedAt changed=false"
+    },
+    {
+      "name": "unconfigured first-party TURN endpoint fails cleanly",
+      "pass": false,
+      "detail": "handler throws when TURN_SECRET is absent"
+    },
+    {
+      "name": "first-party TURN endpoint respects configured relay URL",
+      "pass": false,
+      "detail": "response uses a hardcoded relay instead"
+    }
+  ]
+}

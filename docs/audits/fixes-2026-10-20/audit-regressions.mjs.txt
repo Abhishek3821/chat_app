@@ -1,0 +1,56 @@
+PASS authenticated ICE endpoint returns controlled STUN-only response when unconfigured
+PASS ICE credentials remain authentication protected
+PASS workspace member joins the invited team
+PASS ordinary member cannot rename workspace
+PASS team task creation and assignment
+PASS workspace task creation reaches a real socket
+PASS assigned member can complete the task
+PASS foreign team cannot update task
+PASS owner can view activity and member cannot
+PASS customer can explicitly start team inbox thread
+PASS workspace inbox update reaches a real socket
+PASS team can add an internal note
+PASS customer GET omits internal notes
+PASS customer follow-up response also omits internal notes
+PASS internal notes remain visible to team staff
+PASS foreign team cannot read inbox thread
+PASS member cannot create guest invitations
+PASS owner can create a scoped guest invitation
+PASS guest sees only selected group
+PASS guest text messages work
+PASS guest cannot upload files
+PASS guest cannot use team tasks
+PASS owner revokes guest
+PASS revoked guest token is rejected
+PASS catalog product can be created
+PASS ordinary member cannot edit catalog
+PASS catalog owner can update and delete product
+PASS business storefront profile updates
+PASS business greeting can be enabled
+PASS business greeting is actually dispatched
+PASS business greeting does not repeat on every message
+PASS out-of-hours business reply is actually dispatched
+PASS away cooldown suppresses duplicate replies
+PASS blocked peer cannot send a normal direct message
+PASS broadcast also respects recipient blocking
+PASS unblocked mutual contacts still receive broadcasts
+PASS broadcast respects sender blocking and reports skipped count
+PASS video-note cap cannot be bypassed by relabelling a regular upload
+PASS scheduled video notes also reject forged sizes
+PASS ordinary video still accepts the same 11 MB upload
+PASS valid note is accepted and actual byte count is stored
+PASS forwarding an existing valid note works
+PASS valid note scheduling works
+PASS nonparticipant cannot delete or mutate a group via chat endpoint
+PASS nonparticipant cannot clear a direct chat
+PASS participant can still clear their own direct chat
+PASS participant can still leave a group
+PASS workspace ownership can transfer
+PASS former owner becomes admin
+PASS admin cannot transfer ownership again
+PASS session/device registry is available
+PASS revoking other devices rejects their existing tokens
+PASS revoking other devices preserves current session
+PASS unconfigured first-party TURN endpoint fails cleanly
+PASS first-party TURN endpoint respects configured relay URL
+55/55 checks passed

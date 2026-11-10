@@ -230,8 +230,10 @@ export async function sendEmail({ to, subject, html, text, attachments }) {
  */
 export function sendEmailWithin(mail, deadlineMs = 800) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ state: 'pending' }), deadlineMs);
-    timer.unref?.();
+    // A null deadline waits for the provider result (signup must never claim
+    // that a code was sent while an SMTP rejection is still in flight).
+    const timer = deadlineMs === null ? null : setTimeout(() => resolve({ state: 'pending' }), deadlineMs);
+    timer?.unref?.();
     sendEmail(mail).then(
       (r) => {
         clearTimeout(timer);

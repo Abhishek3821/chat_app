@@ -88,15 +88,14 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
   );
 
   const emailConfigured = isEmailConfigured();
-  // Wait only long enough to catch a *fast* rejection (bad credentials, refused
-  // recipient). A relay that is merely slow finishes in the background rather
-  // than holding the request open for seconds.
+  // Wait for provider acceptance: a background send may fail after the response,
+  // leaving the user waiting for a code that was never sent.
   const { state, error: sendErr } = await sendEmailWithin({
     to: email,
     subject: 'Verify your email for ChatKonect',
     html: otpEmailTemplate('there', otp),
     text: `Your ChatKonect verification code is ${otp}. It expires in 10 minutes.`,
-  });
+  }, null);
   // SMTP is set up but the send was REJECTED → surface an ACTIONABLE error
   // (which of credentials / connectivity broke), not a mystery.
   if (emailConfigured && state === 'failed') {
@@ -110,7 +109,7 @@ export const sendSignupEmailCode = asyncHandler(async (req, res) => {
           : 'We could not send the verification email right now. Please try again in a moment.'
     );
   }
-  const sent = state === 'sent' || state === 'pending';
+  const sent = state === 'sent';
   // In production a missing mailer is a server misconfiguration — say so
   // plainly instead of returning success with no way to get a code.
   if (!emailConfigured && process.env.NODE_ENV === 'production') {
@@ -471,9 +470,14 @@ export const getMe = asyncHandler(async (req, res) => {
 
 // POST /api/auth/forgot-password
 export const forgotPassword = asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  const user = await User.findOne({ email: cleanEmail(email) });
-  // Always respond success to avoid leaking which emails exist.
+  const email = cleanEmail(req.body.email);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new ApiError(400, 'Please provide a valid email address.');
+  // This deployment-wide check is identical for existing and unknown accounts.
+  if (!isEmailConfigured()) {
+    throw new ApiError(503, 'Password reset email is temporarily unavailable. Please try again later.');
+  }
+  const user = await User.findOne({ email });
+  // Request acknowledgement never confirms delivery or reveals account existence.
   if (user) {
     const resetToken = crypto.randomBytes(32).toString('hex');
     user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
@@ -481,14 +485,21 @@ export const forgotPassword = asyncHandler(async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
-    await sendEmailWithin({
+    const { state } = await sendEmailWithin({
       to: user.email,
       subject: 'Reset your ChatKonect password',
       html: `<p>Reset your password using the link below (valid 30 minutes):</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
       text: `Reset your password: ${resetUrl}`,
     });
+    if (state === 'failed' || state === 'logged') {
+      securityEvent('password.reset.email.unconfirmed', req, { userId: String(user._id) });
+    }
   }
-  res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+  res.json({
+    success: true,
+    deliveryConfirmed: false,
+    message: 'Reset request received. If this email belongs to an account, a reset email has been requested. Email delivery is not confirmed. Check your inbox and spam, or try again if no link arrives.',
+  });
 });
 
 // POST /api/auth/reset-password/:token

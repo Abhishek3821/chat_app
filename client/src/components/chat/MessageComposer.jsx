@@ -9,6 +9,7 @@ import { useWorkspace } from '../../store/useWorkspace';
 import { emitSocket } from '../../hooks/useSocket';
 import { useViewportSize } from '../../hooks/useViewportSize';
 import { uploadFiles, mediaUrl } from '../../lib/api';
+import { safeLocalStorage } from '../../lib/storage';
 import { cn, formatDuration } from '../../lib/utils';
 import Avatar from '../ui/Avatar';
 import Modal from '../ui/Modal';
@@ -78,14 +79,14 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
 
   // ── Draft persistence (per chat, survives navigation & reload) ──
   useEffect(() => {
-    setText(localStorage.getItem(`cc_draft_${chatId}`) || '');
+    setText(safeLocalStorage.getItem(`cc_draft_${chatId}`) || '');
     setMention(null);
   }, [chatId]);
 
   const saveDraft = (val) => {
     clearTimeout(draftTimer.current); // a pending debounced write must not resurrect stale text
-    if (val) localStorage.setItem(`cc_draft_${chatId}`, val);
-    else localStorage.removeItem(`cc_draft_${chatId}`);
+    if (val) safeLocalStorage.setItem(`cc_draft_${chatId}`, val);
+    else safeLocalStorage.removeItem(`cc_draft_${chatId}`);
   };
   // Keystroke path: defer the synchronous localStorage write so typing never
   // stutters on storage I/O. Immediate saveDraft stays for send/insertMention.
@@ -375,10 +376,10 @@ export default function MessageComposer({ chatId, replyTo, onClearReply, onSend,
         const file = new File([new Blob(chunksRef.current, { type: mime })], `videonote-${Date.now()}.webm`, { type: mime });
         setUploading(true);
         try {
-          const attachments = await uploadFiles([file]);
+          const attachments = await uploadFiles([file], { type: 'videoNote' });
           onSend({ content: '', type: 'videoNote', attachments: attachments.map((a) => ({ ...a, duration: seconds })) });
-        } catch {
-          toast.error('Could not send video note.');
+        } catch (err) {
+          toast.error(err?.response?.data?.message || err?.message || 'Could not send video note.');
         } finally {
           setUploading(false);
         }

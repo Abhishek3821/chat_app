@@ -4,6 +4,7 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
 
 const RECIPIENT_FIELDS = 'name username avatar isOnline';
 const MAX_RECIPIENTS = 256;
@@ -11,12 +12,16 @@ const MAX_RECIPIENTS = 256;
 /** Keep only ids that are mutual contacts of the owner (WhatsApp rule: you can
  *  only broadcast to people who have you saved as a contact too). */
 async function keepMutualContacts(owner, ids) {
+  owner = await User.findById(owner._id).select('contacts blockedUsers').lean();
+  if (!owner) return [];
   const unique = [...new Set(ids.map(String))].filter((id) => id !== String(owner._id));
   const mine = new Set((owner.contacts || []).map(String));
-  const candidates = unique.filter((id) => mine.has(id));
+  const blocked = new Set((owner.blockedUsers || []).map(String));
+  const candidates = unique.filter((id) => mine.has(id) && !blocked.has(id));
   if (!candidates.length) return [];
-  const them = await User.find({ _id: { $in: candidates } }).select('contacts');
-  return them.filter((u) => (u.contacts || []).some((c) => String(c) === String(owner._id))).map((u) => u._id);
+  const them = await User.find({ _id: { $in: candidates } }).select('contacts blockedUsers');
+  return them.filter((u) => (u.contacts || []).some((c) => String(c) === String(owner._id)) &&
+    !(u.blockedUsers || []).some((id) => String(id) === String(owner._id))).map((u) => u._id);
 }
 
 async function getOrCreateDirectChat(meId, otherId) {
@@ -103,6 +108,7 @@ export const sendBroadcast = asyncHandler(async (req, res) => {
     chat.lastMessage = message._id;
     // eslint-disable-next-line no-await-in-loop
     await chat.save();
+    invalidateChatListCache([req.user._id, recipientId]);
     // eslint-disable-next-line no-await-in-loop
     message = await Message.findById(message._id).populate('sender', 'name username avatar');
     emitToUser(String(recipientId), 'receive-message', { chatId: String(chat._id), message });

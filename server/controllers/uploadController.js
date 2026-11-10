@@ -1,5 +1,6 @@
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { persistFile } from '../utils/storage.js';
+import { signUpload } from '../utils/uploadMetadata.js';
 
 /**
  * POST /api/upload  (multipart, field: "files")
@@ -11,5 +12,5 @@ export const uploadFiles = asyncHandler(async (req, res) => {
 
   const attachments = await Promise.all(req.files.map((f) => persistFile(f)));
 
-  res.status(201).json({ success: true, attachments });
+  res.status(201).json({ success: true, attachments: attachments.map(signUpload) });
 });

@@ -41,6 +41,9 @@ export function callFailureMessage() {
 }
 
 function extractServers(data) {
+  if (Array.isArray(data?.iceServers)) {
+    return data.iceServers.filter((server) => server && server.urls && server.username && server.credential);
+  }
   if (!data?.urls || !data?.username || !data?.credential) return [];
 
   return [
