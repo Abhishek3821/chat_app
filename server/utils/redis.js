@@ -18,10 +18,25 @@ export function redisEnabled() {
 export function getRedis() {
   if (!redisEnabled()) return null;
   if (!command) {
-    command = new Redis(process.env.REDIS_URL);
+    /* Fail FAST when Redis is unreachable. Every /api request goes through the
+       Redis-backed rate limiter and cache; with ioredis defaults (20 retries per
+       command, unlimited offline queue) a Redis outage made every request —
+       even /health — hang for 25s+. One retry and a 2s command timeout let the
+       limiter / cache fall back (they're fail-open) and the API stays up. */
+    command = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: 1, commandTimeout: 2000 });
     command.on('error', (e) => console.warn('⚠️  Redis:', e.message));
   }
   return command;
+}
+
+/**
+ * True while the command client has LOST its connection (as opposed to still
+ * booting). Hot paths (rate limiter, cache) skip Redis entirely in that state
+ * so a Redis outage costs ~0ms per request instead of a timeout each.
+ */
+export function redisDown() {
+  if (!command) return false;
+  return command.status === 'reconnecting' || command.status === 'end' || command.status === 'close';
 }
 
 /**

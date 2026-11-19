@@ -76,3 +76,12 @@ export const useWorkspace = create((set) => ({
     }));
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useWorkspace.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useWorkspace.setState(initial, true);
+  });
+}

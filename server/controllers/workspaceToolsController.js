@@ -11,7 +11,7 @@ import WorkspaceAudit from '../models/WorkspaceAudit.js';
 import WorkspaceGuestInvite from '../models/WorkspaceGuestInvite.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { logWorkspaceAction } from '../utils/workspaceAudit.js';
-import { emitToUser } from '../socket/index.js';
+import { emitToUser, disconnectUser } from '../socket/index.js';
 
 const validId = (value) => typeof value === 'string' && mongoose.isValidObjectId(value);
 const manager = (user) => ['owner', 'admin'].includes(user.workspaceRole);
@@ -250,6 +250,7 @@ export const revokeGuest = asyncHandler(async (req, res) => {
   guest.guestExpiresAt = new Date();
   guest.tokenVersion += 1;
   await guest.save({ validateBeforeSave: false });
+  disconnectUser(guest._id);
   await logWorkspaceAction(req.user, 'guest.revoke', guest._id, guest.name);
   res.json({ success: true });
 });

@@ -1,4 +1,4 @@
-import { getRedis } from './redis.js';
+import { getRedis, redisDown } from './redis.js';
 
 /**
  * Best-effort JSON cache backed by Redis. Every call is a no-op when Redis is
@@ -11,7 +11,7 @@ import { getRedis } from './redis.js';
  */
 export async function cacheGetJSON(key) {
   const r = getRedis();
-  if (!r) return null;
+  if (!r || redisDown()) return null;
   try {
     const v = await r.get(key);
     return v ? JSON.parse(v) : null;
@@ -22,7 +22,7 @@ export async function cacheGetJSON(key) {
 
 export async function cacheSetJSON(key, value, ttlSeconds = 60) {
   const r = getRedis();
-  if (!r) return;
+  if (!r || redisDown()) return;
   try {
     await r.set(key, JSON.stringify(value), 'EX', ttlSeconds);
   } catch {
@@ -32,7 +32,7 @@ export async function cacheSetJSON(key, value, ttlSeconds = 60) {
 
 export async function cacheDel(...keys) {
   const r = getRedis();
-  if (!r || !keys.length) return;
+  if (!r || !keys.length || redisDown()) return;
   try {
     await r.del(...keys);
   } catch {

@@ -6,6 +6,8 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
 import { cacheGetJSON, cacheSetJSON, cacheDel } from '../utils/cache.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
+import { assertMayPost, assertDirectChatCanSend } from './messageController.js';
 
 // Catalog editing is a business-owner/admin capability.
 const canManageCatalog = (user) => workspaceCan(user, PERMISSIONS.WORKSPACE_SETTINGS);
@@ -124,6 +126,10 @@ export const shareProduct = asyncHandler(async (req, res) => {
   if (!chat.participants.some((p) => String(p.user) === String(req.user._id))) {
     throw new ApiError(403, 'You are not a participant of this chat.');
   }
+  // Same send rules as an ordinary message: admins-only groups, and blocked /
+  // unfriended people can't push product cards into a direct chat.
+  assertMayPost(chat, req.user._id);
+  await assertDirectChatCanSend(chat, req.user);
 
   const price = product.price ? `${product.currency} ${product.price}` : '';
   const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
@@ -146,8 +152,8 @@ export const shareProduct = asyncHandler(async (req, res) => {
     readBy: [{ user: req.user._id, at: new Date() }],
   });
 
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
+  invalidateChatListCache(chat.participants.map((p) => p.user));
   message = await Message.findById(message._id).populate('sender', 'name username avatar');
   for (const p of chat.participants) {
     emitToUser(String(p.user), 'receive-message', { chatId: String(chat._id), message });

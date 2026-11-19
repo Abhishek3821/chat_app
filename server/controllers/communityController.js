@@ -1,6 +1,7 @@
 import Community from '../models/Community.js';
 import Chat from '../models/Chat.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
+import { removeUserFromChatRoom } from '../socket/index.js';
 
 const isMember = (c, uid) => c.members.some((m) => String(m.user) === String(uid));
 const isAdmin = (c, uid) => c.members.some((m) => String(m.user) === String(uid) && m.role === 'admin');
@@ -121,5 +122,6 @@ export const leaveCommunity = asyncHandler(async (req, res) => {
     { _id: community.announcementGroup },
     { $pull: { participants: { user: req.user._id } } }
   );
+  if (community.announcementGroup) removeUserFromChatRoom(req.user._id, community.announcementGroup);
   res.json({ success: true });
 });

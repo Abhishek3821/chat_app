@@ -4,7 +4,7 @@ import Message from '../models/Message.js';
 import Call from '../models/Call.js';
 import Report from '../models/Report.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { onlineUserIds } from '../socket/index.js';
+import { onlineUserIds, disconnectUser } from '../socket/index.js';
 import { securityEvent } from '../utils/securityLog.js';
 import { deleteUserAccount } from '../utils/deleteUserAccount.js';
 
@@ -70,6 +70,8 @@ export const setUserStatus = asyncHandler(async (req, res) => {
   const update = accountStatus === 'active' ? { accountStatus } : { accountStatus, $inc: { tokenVersion: 1 } };
   const user = await User.findByIdAndUpdate(req.params.id, update, { new: true });
   if (!user) throw new ApiError(404, 'User not found.');
+  // Revoking the token isn't enough for a socket that is already open.
+  if (accountStatus !== 'active') disconnectUser(user._id);
   securityEvent('admin.user.status', req, { targetUserId: String(user._id), accountStatus });
   res.json({ success: true, user: user.toSafeJSON() });
 });

@@ -4,11 +4,13 @@ import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { tenantScope } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { emitToChat, emitToUser } from '../socket/index.js';
+import { emitToChat, emitToUser, removeUserFromChatRoom } from '../socket/index.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
 import { invalidateChatListCache } from '../utils/chatCache.js';
 
-const USER_FIELDS = 'name username email avatar bio isOnline lastSeen';
+// No email: group responses go to every member (and broadcast as group-updated),
+// and fellow members aren't necessarily contacts — the UI never shows it anyway.
+const USER_FIELDS = 'name username avatar bio isOnline lastSeen';
 
 /**
  * Turn the ids a caller wants in a group into the users who may actually be
@@ -95,7 +97,7 @@ const requireAdmin = requireGroupPerm; // back-compat alias for existing call si
 
 async function systemMessage(chatId, text, event) {
   const msg = await Message.create({ chat: chatId, type: 'system', content: text, systemEvent: event });
-  await Chat.findByIdAndUpdate(chatId, { lastMessage: msg._id });
+  await Chat.bumpLastMessage(chatId, msg._id);
   emitToChat(String(chatId), 'receive-message', { chatId: String(chatId), message: msg });
 }
 
@@ -205,6 +207,9 @@ export const removeMember = asyncHandler(async (req, res) => {
   const populated = await Chat.findById(chat._id).populate('participants.user', USER_FIELDS);
   // Prior list, so the removed member's own cached list loses the row too.
   await invalidateChatListCache(priorParticipants);
+  // Out of the live room BEFORE the member list goes out, so the removed user
+  // stops receiving this group's realtime traffic immediately.
+  removeUserFromChatRoom(req.params.userId, chat._id);
   emitToUser(req.params.userId, 'chat-updated', { chatId: String(chat._id) });
   emitToChat(String(chat._id), 'group-updated', { chat: populated });
   res.json({ success: true, chat: populated });
@@ -244,6 +249,7 @@ export const leaveGroup = asyncHandler(async (req, res) => {
   }
   const priorParticipants = chat.participants.map((p) => p.user);
   chat.participants = chat.participants.filter((p) => String(p.user) !== String(req.user._id));
+  removeUserFromChatRoom(req.user._id, chat._id);
   if (chat.participants.length === 0) {
     await chat.deleteOne();
     await invalidateChatListCache(priorParticipants);

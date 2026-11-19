@@ -27,8 +27,9 @@ export default function DeviceCheck({ video, onJoin, busy, hasPassword, isHost, 
         if (previewRef.current) previewRef.current.srcObject = stream;
         setDeviceError('');
         setDevices(await navigator.mediaDevices.enumerateDevices());
-        if (stream.getAudioTracks().length && window.AudioContext) {
-          audioContext = new AudioContext();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (stream.getAudioTracks().length && AudioCtx) {
+          audioContext = new AudioCtx();
           const source = audioContext.createMediaStreamSource(stream);
           const analyser = audioContext.createAnalyser();
           analyser.fftSize = 256;
@@ -54,7 +55,9 @@ export default function DeviceCheck({ video, onJoin, busy, hasPassword, isHost, 
 
   const testSpeaker = async () => {
     try {
-      const context = new AudioContext();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const context = new AudioCtx();
       await context.resume();
       const tone = context.createOscillator();
       const gain = context.createGain();

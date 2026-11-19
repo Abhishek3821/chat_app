@@ -105,9 +105,8 @@ export const sendBroadcast = asyncHandler(async (req, res) => {
       deliveredTo: [req.user._id],
       readBy: [{ user: req.user._id, at: new Date() }],
     });
-    chat.lastMessage = message._id;
     // eslint-disable-next-line no-await-in-loop
-    await chat.save();
+    await Chat.bumpLastMessage(chat._id, message._id);
     invalidateChatListCache([req.user._id, recipientId]);
     // eslint-disable-next-line no-await-in-loop
     message = await Message.findById(message._id).populate('sender', 'name username avatar');

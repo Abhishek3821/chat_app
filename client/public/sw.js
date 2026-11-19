@@ -6,8 +6,15 @@
 // (index.html's title, the manifest's name). Installed PWAs hold the old shell
 // until the cache KEY changes, so without this bump a returning user keeps
 // booting into a window still carrying the previous product name.
-const CACHE = 'cc-shell-v4';
-const APP_SHELL = ['/', '/index.html', '/logo.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
+// v5: the runtime cache moved to its own bounded bucket (below), and the old
+// shell cache — which grew without limit — is dropped on activate.
+const CACHE = 'cc-shell-v5';
+// Hashed JS/CSS/images fetched at runtime. Bounded: every deploy brings a fresh
+// set of hashed chunks and nothing ever evicted the old ones, so an installed
+// PWA's cache grew forever.
+const RUNTIME = 'cc-runtime-v1';
+const RUNTIME_MAX_ENTRIES = 150;
+const APP_SHELL = ['/', '/index.html', '/theme-init.js', '/logo.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
 // Chrome will NOT render an SVG as a notification icon — it silently falls back
 // to a generic browser glyph, which is what every push used to show.
 const ICON = '/icon-192.png';
@@ -21,7 +28,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== RUNTIME).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -33,6 +40,17 @@ self.addEventListener('activate', (event) => {
  *    (so the SPA still boots; it then shows its own "reconnecting" states).
  *  - Same-origin static assets (hashed JS/CSS/img) → stale-while-revalidate.
  */
+/** Store in the runtime cache, then evict the oldest entries past the cap. */
+async function putBounded(request, response) {
+  const cache = await caches.open(RUNTIME);
+  await cache.put(request, response);
+  const keys = await cache.keys(); // insertion order — oldest first
+  const excess = keys.length - RUNTIME_MAX_ENTRIES;
+  if (excess > 0) await Promise.all(keys.slice(0, excess).map((k) => cache.delete(k)));
+}
+
+const isHtml = (res) => (res.headers.get('content-type') || '').includes('text/html');
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -42,7 +60,11 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((res) => { caches.open(CACHE).then((c) => c.put('/index.html', res.clone())).catch(() => {}); return res; })
+        .then((res) => {
+          // Only a real page becomes the offline shell — never a 404/5xx/error page.
+          if (res && res.ok && isHtml(res)) caches.open(CACHE).then((c) => c.put('/index.html', res.clone())).catch(() => {});
+          return res;
+        })
         .catch(() => caches.match('/index.html').then((r) => r || caches.match('/')))
     );
     return;
@@ -52,9 +74,11 @@ self.addEventListener('fetch', (event) => {
     caches.match(request).then((cached) => {
       const network = fetch(request)
         .then((res) => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy)).catch(() => {});
+          /* A chunk deleted by a newer deploy comes back as index.html with a 200
+             (the host's SPA fallback). Caching that under the .js URL poisoned it
+             for good — only cache a static asset that isn't an HTML page. */
+          if (res && res.status === 200 && res.type === 'basic' && !isHtml(res)) {
+            putBounded(request, res.clone()).catch(() => {});
           }
           return res;
         })

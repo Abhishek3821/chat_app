@@ -15,6 +15,7 @@ import { normalizePhone } from '../utils/sendSms.js';
 import { createWorkspaceForUser, joinWorkspaceByCode, joinPersonalSpace } from '../utils/workspaceService.js';
 import { securityEvent } from '../utils/securityLog.js';
 import { logWorkspaceAction } from '../utils/workspaceAudit.js';
+import { disconnectUser } from '../socket/index.js';
 
 const EMAIL_VERIFY_ON = process.env.ENABLE_EMAIL_VERIFICATION === 'true';
 
@@ -518,6 +519,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
   await user.save();
   // Kill every tracked session too, then start a fresh one for this device.
   await Session.updateMany({ user: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
+  // A reset is the "someone else may be in my account" path — cut their live sockets too.
+  disconnectUser(user._id);
   securityEvent('password.reset', req, { userId: String(user._id) });
   await sendTokenResponse(req, res, user);
 });

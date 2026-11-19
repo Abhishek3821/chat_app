@@ -79,6 +79,7 @@ export function useWebRTC(call) {
   const timersRef = useRef([]); // primary-call timers
   const legTimersRef = useRef(new Map()); // remoteId -> ring timeout for an added leg
   const closedRef = useRef(false);
+  const mountedRef = useRef(true); // false once the call overlay unmounts
   const connectedAtRef = useRef(null);
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -234,6 +235,21 @@ export function useWebRTC(call) {
     const relay = ensureIceServers();
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     await relay;
+    /* The permission prompt can sit open for a long time. If the call ended
+       (cancelled, declined, hung up) or the overlay unmounted meanwhile, the
+       cleanup already ran against an EMPTY ref — so this stream would never be
+       stopped and the camera light stayed on until a reload. Stop it here. */
+    if (closedRef.current || !mountedRef.current) {
+      stream.getTracks().forEach((t) => t.stop());
+      const closed = new Error('The call ended while media was being opened.');
+      closed.name = 'CallClosedError';
+      throw closed;
+    }
+    // A superseded attempt (double accept, StrictMode's double effect run) may
+    // have left a live stream behind — release it rather than orphan it.
+    if (localStreamRef.current && localStreamRef.current !== stream) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+    }
     localStreamRef.current = stream;
     cameraTrackRef.current = stream.getVideoTracks()[0] || null;
     setLocalStream(stream);
@@ -506,6 +522,9 @@ export function useWebRTC(call) {
         setStatus('demo');
       }
     } catch (err) {
+      // The caller cancelled while our permission prompt was open: the call is
+      // already over, so no error toast and no reject to send.
+      if (err?.name === 'CallClosedError') return;
       failMedia(err);
       // Don't leave the caller ringing against a dead popup.
       if (hasGroup) rosterUsers().forEach((u) => emitSig('call:reject', { to: u._id }));
@@ -895,7 +914,13 @@ export function useWebRTC(call) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createPeer, flushCandidates, closePeer, teardown, peerId, emitSig, isGroupCall, myId]);
 
-  useEffect(() => () => cleanup(), [cleanup]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cleanup();
+    };
+  }, [cleanup]);
 
   /**
    * Ring audibly while the call is ringing, and stop the instant it isn't.

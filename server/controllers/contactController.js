@@ -4,6 +4,7 @@ import { sameTenant } from '../utils/tenancy.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser } from '../socket/index.js';
 import { notifyUser } from '../utils/notify.js';
+import { applyPresencePrivacy } from '../utils/privacy.js';
 
 const USER_FIELDS = 'name username email avatar bio isOnline lastSeen';
 
@@ -74,10 +75,17 @@ export const sendRequest = asyncHandler(async (req, res) => {
 
 // GET /api/contacts/requests
 export const getRequests = asyncHandler(async (req, res) => {
+  // `privacy` rides along so the filter below can honour it, then is stripped.
+  const fields = `${USER_FIELDS} privacy`;
   const [incoming, outgoing] = await Promise.all([
-    ContactRequest.find({ to: req.user._id, status: 'pending' }).populate('from', USER_FIELDS).lean(),
-    ContactRequest.find({ from: req.user._id, status: 'pending' }).populate('to', USER_FIELDS).lean(),
+    ContactRequest.find({ to: req.user._id, status: 'pending' }).populate('from', fields).lean(),
+    ContactRequest.find({ from: req.user._id, status: 'pending' }).populate('to', fields).lean(),
   ]);
+  /* A pending request is by definition NOT a contact yet, so the same rules as
+     search apply: no email/phone, and presence/photo/about per their privacy.
+     Sending someone a request used to return their email and live presence. */
+  incoming.forEach((r) => applyPresencePrivacy(r.from, false));
+  outgoing.forEach((r) => applyPresencePrivacy(r.to, false));
   res.json({ success: true, incoming, outgoing });
 });
 

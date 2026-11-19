@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
-import { getRedis } from '../utils/redis.js';
+import { getRedis, redisDown } from '../utils/redis.js';
 import { rateLimitKey, reportIpResolutionOnce } from '../utils/clientIp.js';
 
 /**
@@ -25,6 +25,9 @@ const keyed = (extra = {}) => ({
      the two checks that assume the default `req.ip` key — they would otherwise
      warn on every request about a trust-proxy setup we deliberately bypass. */
   validate: { trustProxy: false, xForwardedForHeader: false },
+  // A Redis outage must not take the API down with it: on a store error, let the
+  // request through (un-limited) instead of answering 500.
+  passOnStoreError: true,
   ...extra,
 });
 
@@ -36,7 +39,11 @@ const keyed = (extra = {}) => ({
 function makeStore(prefix) {
   const r = getRedis();
   if (!r) return undefined; // express-rate-limit's default MemoryStore
-  return new RedisStore({ sendCommand: (...args) => r.call(...args), prefix });
+  return new RedisStore({
+    // While Redis is down, fail instantly; passOnStoreError lets the request through.
+    sendCommand: (...args) => (redisDown() ? Promise.reject(new Error('Redis unavailable')) : r.call(...args)),
+    prefix,
+  });
 }
 
 /** Generous global limiter. */
@@ -61,6 +68,50 @@ export const authLimiter = rateLimit({
   message: { success: false, message: 'Too many attempts. Try again in a few minutes.' },
 });
 
+/* ── Brute-force limits keyed on WHAT is being guessed, not WHERE from ──────
+   The IP limiters above key on forwarding headers (utils/clientIp.js), which a
+   client can vary per request unless the edge proxy overwrites them. For
+   endpoints that check a secret, add a second limit keyed on the target
+   account / signed-in user: varying headers doesn't change that key, so
+   password and PIN guessing stay capped either way. Only FAILED attempts count
+   (skipSuccessfulRequests), so a user who types it right is never slowed. */
+const secretGuard = (prefix, keyGenerator, message) =>
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: makeStore(prefix),
+    keyGenerator,
+    validate: { trustProxy: false, xForwardedForHeader: false },
+    passOnStoreError: true,
+    message: { success: false, message },
+  });
+
+/** Login: 10 failed attempts per ACCOUNT identifier per 15 minutes. */
+export const loginAccountLimiter = secretGuard(
+  'rl:login-acct:',
+  (req) => {
+    const id = req.body?.identifier ?? req.body?.email;
+    // Normalise so "+1 555-0100" and "+15550100" share one bucket.
+    const norm = typeof id === 'string' ? id.trim().toLowerCase().replace(/[\s()-]/g, '') : '';
+    return norm ? `acct:${norm}` : `ip:${rateLimitKey(req)}`;
+  },
+  'Too many failed sign-in attempts for this account. Try again in 15 minutes.'
+);
+
+/**
+ * PINs and passwords checked for a SIGNED-IN user (two-step PIN, chat-lock PIN,
+ * meeting password, current password). Mount AFTER `protect`. A 4-digit PIN has
+ * only 10,000 values, so this cap is what actually keeps it from being guessed.
+ */
+export const userSecretLimiter = secretGuard(
+  'rl:secret:',
+  (req) => (req.user?._id ? `user:${req.user._id}` : `ip:${rateLimitKey(req)}`),
+  'Too many incorrect attempts. Try again in 15 minutes.'
+);
+
 /**
  * Incoming-webhook ingress (POST /api/hooks/:token) is unauthenticated by
  * design — the token IS the credential — so it must NOT rely on the generic
@@ -83,5 +134,6 @@ export const webhookIngressLimiter = rateLimit({
      the two checks that assume the default `req.ip` key — they would otherwise
      warn on every request about a trust-proxy setup we deliberately bypass. */
   validate: { trustProxy: false, xForwardedForHeader: false },
+  passOnStoreError: true,
   message: { success: false, message: 'This webhook is receiving too many requests. Slow down.' },
 });

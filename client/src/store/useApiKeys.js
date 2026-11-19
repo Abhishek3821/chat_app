@@ -30,3 +30,12 @@ export const useApiKeys = create((set, get) => ({
     set((s) => ({ keys: s.keys.filter((k) => k.id !== id) }));
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useApiKeys.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useApiKeys.setState(initial, true);
+  });
+}

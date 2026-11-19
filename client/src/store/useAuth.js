@@ -8,6 +8,22 @@ import { safeLocalStorage, safeSessionStorage } from '../lib/storage';
 import { ME } from '../lib/demoData';
 import { useUI } from './useUI';
 
+/**
+ * Everything the previous account left in memory goes when its session ends.
+ * There's no page reload between a logout and the next sign-in, so without this
+ * the next account on this tab saw the old one's chat list, cached messages and
+ * PIN-revealed locked chats until each re-fetch landed.
+ *   · freshness — or the next user's first load is skipped as "recently fetched"
+ *   · UI leftovers — an open modal / call overlay belongs to the old account
+ *   · every per-account store resets itself on `cc:session-reset` (see the
+ *     listener at the bottom of each store file)
+ */
+function clearSessionData() {
+  resetFreshness();
+  useUI.setState({ activeModal: null, modalData: null, call: null, busyIncoming: null, rightPanelOpen: false });
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('cc:session-reset'));
+}
+
 export const useAuth = create((set, get) => ({
   user: null,
   loading: true,
@@ -266,6 +282,7 @@ export const useAuth = create((set, get) => ({
     clearToken();
     try { safeLocalStorage.removeItem('cc_demo_authed'); } catch { /* storage denied */ }
     clearMediaToken();
+    clearSessionData();
     set({ user: null, loading: false });
   },
 
@@ -281,9 +298,7 @@ export const useAuth = create((set, get) => ({
     try { safeLocalStorage.removeItem('cc_demo_authed'); } catch { /* storage denied */ }
     try { safeSessionStorage.removeItem('cc_unlocked'); } catch { /* storage denied */ }
     clearMediaToken();
-    // Otherwise the next user to sign in on this browser could have their first
-    // page load skipped as "recently fetched" and see the previous account's list.
-    resetFreshness();
+    clearSessionData();
     useUI.getState().resetAppearance(); // don't leave this user's look on the browser
     set({ user: null });
     if (IS_EMBED) window.dispatchEvent(new Event('cc:embed-logout'));

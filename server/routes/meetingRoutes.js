@@ -18,6 +18,7 @@ import {
 } from '../controllers/meetingController.js';
 import { protect } from '../middleware/auth.js';
 import { requireFeature } from '../utils/appAuth.js';
+import { userSecretLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 router.use(protect);
@@ -30,7 +31,7 @@ router.post('/', createMeeting);
 // Shareable-link (Google-Meet-style) join flow — kept above /:id routes.
 router.get('/code/:code', getMeetingByCode);
 router.get('/code/:code/rtc', getMeetingRtc); // media transport config (LiveKit SFU or mesh)
-router.post('/code/:code/join', joinMeetingByCode);
+router.post('/code/:code/join', userSecretLimiter, joinMeetingByCode);
 router.get('/:id/report', getMeetingReport); // host-only attendance record
 router.get('/:id/notes', getMeetingNotes);
 router.put('/:id/notes', updateMeetingNotes);

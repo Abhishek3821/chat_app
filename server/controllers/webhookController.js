@@ -90,8 +90,7 @@ export const receiveWebhook = asyncHandler(async (req, res) => {
     content: `[${hook.label}] ${text}`,
     type: 'text',
   });
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
   hook.lastUsedAt = new Date();
   await hook.save();
 

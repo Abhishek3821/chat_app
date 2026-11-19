@@ -9,6 +9,8 @@ import { isSessionValid } from '../utils/session.js';
 import { transitionCall, registerCallInvitee, inSameCall } from '../utils/callService.js';
 import { meetingCapacityCheck } from '../utils/meetingCapacity.js';
 import { touchPresence, forgetPresence } from '../utils/presence.js';
+import { markChatRead } from '../utils/readState.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
 
 // Socket payloads DON'T pass through the Express mongoSanitize middleware, so any
 // id used in a Mongo query MUST be validated here — otherwise a client could send
@@ -36,7 +38,6 @@ const WRITE_EVENTS = new Set([
   'message:read',
   'message:delivered',
   'message-read',
-  'message-reaction',
   'meeting:poll-create',
   'meeting:poll-vote',
   'meeting:poll-close',
@@ -88,6 +89,12 @@ let usingAdapter = false; // true once the Redis adapter is attached (multi-inst
 /** userId -> Set<socketId> (THIS instance only) */
 const onlineUsers = new Map();
 
+/* A socket that drops mid-call parks its call legs here (userId -> Map<peerId,
+   callId>) for CALL_RECONNECT_GRACE_MS before they are ended, so a brief
+   network blip doesn't hang up a call whose media never stopped flowing. */
+const parkedCallLegs = new Map();
+const CALL_RECONNECT_GRACE_MS = Number(process.env.CALL_RECONNECT_GRACE_MS) || 20_000;
+
 export function getIO() {
   return ioRef;
 }
@@ -130,6 +137,27 @@ export function emitToUser(userId, event, payload) {
 export function emitToChat(chatId, event, payload) {
   if (!ioRef || !chatId) return;
   ioRef.to(`chat:${String(chatId)}`).emit(event, payload);
+}
+
+/**
+ * Pull every socket of a user (all tabs/devices, on every instance) out of a
+ * chat room. Membership is only checked at `join-chat`, so without this a user
+ * removed from a group kept receiving its live edits, pins, reactions and
+ * locations until they reloaded.
+ */
+export function removeUserFromChatRoom(userId, chatId) {
+  if (!ioRef || !userId || !chatId) return;
+  ioRef.in(`user:${String(userId)}`).socketsLeave(`chat:${String(chatId)}`);
+}
+
+/**
+ * Drop every live socket of a user. Socket auth runs only at the handshake, so
+ * when an account is deleted, banned or has its sessions revoked the already
+ * open sockets must be cut explicitly (their reconnect is then re-authenticated).
+ */
+export function disconnectUser(userId) {
+  if (!ioRef || !userId) return;
+  ioRef.in(`user:${String(userId)}`).disconnectSockets(true);
 }
 
 async function setPresence(userId, online) {
@@ -309,10 +337,11 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       socket.to(`user:${userId}`).emit('message-read', { chatId, messageIds, userId });
     });
 
-    // ── Live reactions (also persisted via REST) ──────────────────
-    socket.on('message-reaction', (payload) => {
-      if (inChat(payload?.chatId)) socket.to(`chat:${payload.chatId}`).emit('message-reaction', payload);
-    });
+    // ── Live reactions ────────────────────────────────────────────
+    // Broadcast ONLY by the REST handler (messageController.reactToMessage) after
+    // it persists the change. There is deliberately no client→server relay: the
+    // old one forwarded the sender's payload verbatim, so any member could paint
+    // an arbitrary reactions list (as other users) onto anyone's message.
 
     // ── Delivery / read receipts (persist + broadcast — drives the ticks) ──
     // delivered: the recipient's device received a specific message → ✓✓ (grey)
@@ -334,12 +363,12 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.on('message:read', async ({ chatId }) => {
       if (!chatId || !(await isChatMember(chatId, userId))) return;
       try {
-        const r = await Message.updateMany(
-          { chat: chatId, sender: { $ne: userId }, 'readBy.user': { $ne: userId } },
-          { $push: { readBy: { user: userId, at: new Date() } } }
-        );
+        // Watermark + receipts on just the newly read messages (utils/readState.js).
+        const modified = await markChatRead(chatId, userId);
+        // This chat's unread count for me just dropped — the cached list must too.
+        invalidateChatListCache(userId);
         // Only surface the read to the sender if this reader allows read receipts.
-        if (r.modifiedCount && socket.readReceipts) emitToChat(chatId, 'message:read', { chatId, userId });
+        if (modified && socket.readReceipts) emitToChat(chatId, 'message:read', { chatId, userId });
       } catch {
         /* ignore */
       }
@@ -385,6 +414,13 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     const callPeers = new Map();
     const trackPeer = (to, callId) => to && callPeers.set(String(to), callId);
     const untrackPeer = (to) => to && callPeers.delete(String(to));
+    // Reconnecting within the grace window? Take over the call legs the dropped
+    // socket left parked, so a later real disconnect still ends them properly.
+    const parked = parkedCallLegs.get(userId);
+    if (parked) {
+      parkedCallLegs.delete(userId);
+      for (const [peerId, callId] of parked) callPeers.set(peerId, callId);
+    }
 
     // Explicit registration ack (presence itself is keyed off the JWT handshake).
     socket.on('register-user', (cb) => {
@@ -652,11 +688,44 @@ export function initSocket(io, { hasAdapter = false } = {}) {
       }
     });
 
-    // Relay an opaque SDP/ICE payload to ONE specific socket, only if the sender
-    // is actually in that room (prevents cross-room signal injection).
+    // Is `sid` a socket id (not a room like `user:x` / `mtg:y`) that is currently
+    // in this meeting's room? Works across instances (Redis adapter). Positive
+    // answers are cached briefly so the burst of ICE candidates after an offer
+    // doesn't each cost an adapter round-trip.
+    const SOCKET_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+    const meetingPeerCache = new Map(); // "meetingId:socketId" -> expiresAt
+    async function isMeetingPeer(meetingId, sid) {
+      if (typeof sid !== 'string' || !SOCKET_ID_RE.test(sid)) return false;
+      const key = `${meetingId}:${sid}`;
+      if ((meetingPeerCache.get(key) || 0) > Date.now()) return true;
+      try {
+        const [peer] = await ioRef.in(sid).fetchSockets();
+        const ok = Boolean(peer && peer.id === sid && peer.rooms.has(meetingRoom(meetingId)));
+        if (ok) meetingPeerCache.set(key, Date.now() + 60_000);
+        else meetingPeerCache.delete(key);
+        return ok;
+      } catch {
+        return false;
+      }
+    }
+
+    // Relay an opaque SDP/ICE payload to ONE specific socket — only when BOTH the
+    // sender and the target are in that meeting's room. Without the target check a
+    // member of any meeting could address `user:<id>` / `mtg:<other>` and receive
+    // a stranger's camera and mic. Relays to each target are chained so an offer
+    // is never overtaken by its own ICE candidates while the check is in flight.
+    const signalChains = new Map(); // target socketId -> Promise
     socket.on('meeting:signal', ({ meetingId, to, data } = {}) => {
-      if (!to || !meetingId || !socket.rooms.has(meetingRoom(meetingId))) return;
-      ioRef.to(to).emit('meeting:signal', { from: socket.id, data });
+      if (!to || !isId(meetingId) || !socket.rooms.has(meetingRoom(meetingId))) return;
+      const prev = signalChains.get(to) || Promise.resolve();
+      const next = prev
+        .then(async () => {
+          if (!socket.rooms.has(meetingRoom(meetingId))) return;
+          if (await isMeetingPeer(meetingId, to)) ioRef.to(to).emit('meeting:signal', { from: socket.id, data });
+        })
+        .catch(() => {});
+      signalChains.set(to, next);
+      next.then(() => { if (signalChains.get(to) === next) signalChains.delete(to); });
     });
 
     // Screen-share announcements: everyone in the room learns who is presenting
@@ -755,12 +824,45 @@ export function initSocket(io, { hasAdapter = false } = {}) {
         if (!poll || poll.closed) return;
         if (!poll.multi) picks.splice(1); // single-choice polls ignore extra picks
         if (picks.some((i) => i >= poll.options.length)) return;
-        // Replace this voter's row rather than pushing another one — that's what
-        // makes a re-vote correct instead of double-counting.
-        poll.votes = poll.votes.filter((v) => String(v.user) !== String(userId));
-        poll.votes.push({ user: userId, choices: picks });
-        await m.save();
-        broadcastPolls(meetingId, m.polls);
+        /* Replace this voter's row rather than pushing another one — that's what
+           makes a re-vote correct instead of double-counting. Done as ONE atomic
+           update: with read-modify-save, people voting at the same moment
+           collided (VersionError, swallowed below) and re-votes were lost. */
+        const me = new mongoose.Types.ObjectId(String(userId));
+        const pid = poll._id;
+        await Meeting.updateOne({ _id: meetingId, polls: { $elemMatch: { _id: pid, closed: { $ne: true } } } }, [
+          {
+            $set: {
+              polls: {
+                $map: {
+                  input: '$polls',
+                  as: 'p',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$p._id', pid] },
+                      {
+                        $mergeObjects: [
+                          '$$p',
+                          {
+                            votes: {
+                              $concatArrays: [
+                                { $filter: { input: { $ifNull: ['$$p.votes', []] }, cond: { $ne: ['$$this.user', me] } } },
+                                [{ user: me, choices: { $literal: picks } }],
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$p',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ]);
+        const fresh = await Meeting.findById(meetingId).select('polls');
+        broadcastPolls(meetingId, fresh?.polls || []);
       } catch {
         /* ignore */
       }
@@ -816,14 +918,48 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     socket.on('meeting:qa-upvote', async ({ meetingId, questionId } = {}) => {
       if (!inRoom(meetingId)) return;
       try {
-        const m = await Meeting.findById(meetingId).select('questions');
-        const q = m?.questions?.id(questionId);
-        if (!q) return;
+        if (!isId(String(questionId || ''))) return;
         // Toggle, and store voter ids so one person can't inflate the count.
-        const had = q.upvotes.some((u) => String(u) === String(userId));
-        q.upvotes = had ? q.upvotes.filter((u) => String(u) !== String(userId)) : [...q.upvotes, userId];
-        await m.save();
-        broadcastQuestions(meetingId, m.questions);
+        // Atomic (see poll-vote above): simultaneous upvotes used to overwrite
+        // each other, leaving 1 of 8 counted.
+        const me = new mongoose.Types.ObjectId(String(userId));
+        const qid = new mongoose.Types.ObjectId(String(questionId));
+        const ups = { $ifNull: ['$$q.upvotes', []] };
+        const r = await Meeting.updateOne({ _id: meetingId, 'questions._id': qid }, [
+          {
+            $set: {
+              questions: {
+                $map: {
+                  input: '$questions',
+                  as: 'q',
+                  in: {
+                    $cond: [
+                      { $eq: ['$$q._id', qid] },
+                      {
+                        $mergeObjects: [
+                          '$$q',
+                          {
+                            upvotes: {
+                              $cond: [
+                                { $in: [me, ups] },
+                                { $filter: { input: ups, cond: { $ne: ['$$this', me] } } },
+                                { $concatArrays: [ups, [me]] },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+                      '$$q',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ]);
+        if (!r.matchedCount) return;
+        const m = await Meeting.findById(meetingId).select('questions');
+        broadcastQuestions(meetingId, m?.questions || []);
       } catch {
         /* ignore */
       }
@@ -848,8 +984,15 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     // Admission verdict for a knocking guest. Admit → the guest gets a signed,
     // short-lived pass and re-joins with it (stateless, works across instances).
     // Deny → they're told the host said no. Other host tabs clear the prompt.
-    socket.on('meeting:admit', ({ meetingId, socketId, userId: guestId, allow } = {}) => {
-      if (!inRoom(meetingId) || !isRoomHost(meetingId) || !socketId || !isId(String(guestId || ''))) return;
+    socket.on('meeting:admit', async ({ meetingId, socketId, userId: guestId, allow } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || typeof socketId !== 'string' || !SOCKET_ID_RE.test(socketId) || !isId(String(guestId || ''))) return;
+      // The verdict goes only to the knocking socket that really belongs to guestId.
+      try {
+        const [guest] = await ioRef.in(socketId).fetchSockets();
+        if (!guest || guest.id !== socketId || String(guest.data.userId) !== String(guestId)) return;
+      } catch {
+        return;
+      }
       if (allow) {
         ioRef.to(socketId).emit('meeting:admitted', { meetingId: String(meetingId), pass: signMeetingPass(guestId, meetingId) });
       } else {
@@ -867,10 +1010,17 @@ export function initSocket(io, { hasAdapter = false } = {}) {
     });
     // `to` is a socketId (mesh) OR `toUser` is a userId (SFU path, tiles keyed by
     // user). Either way the target client just mutes itself.
-    socket.on('meeting:force-mute', ({ meetingId, to, toUser } = {}) => {
-      if (!inRoom(meetingId) || !isRoomHost(meetingId)) return;
-      if (toUser) ioRef.to(`user:${toUser}`).emit('meeting:force-mute', { by: socket.data.name });
-      else if (to) ioRef.to(to).emit('meeting:force-mute', { by: socket.data.name });
+    // Only sockets that are actually IN this meeting can be muted — never an
+    // arbitrary `user:<id>` / room name supplied by the client.
+    socket.on('meeting:force-mute', async ({ meetingId, to, toUser } = {}) => {
+      if (!inRoom(meetingId) || !isRoomHost(meetingId) || (!to && !toUser)) return;
+      try {
+        const roomSockets = await ioRef.in(meetingRoom(meetingId)).fetchSockets();
+        const targets = roomSockets.filter((s) => (toUser ? String(s.data.userId) === String(toUser) : s.id === to));
+        for (const target of targets) ioRef.to(target.id).emit('meeting:force-mute', { by: socket.data.name });
+      } catch {
+        /* best-effort */
+      }
     });
     // Remove a participant: tell them they were removed (their client leaves) and
     // make them leave the socket room so no further media/signal reaches them.
@@ -924,18 +1074,32 @@ export function initSocket(io, { hasAdapter = false } = {}) {
 
     // ── Disconnect / presence ─────────────────────────────────────
     socket.on('disconnect', async () => {
-      // End any live call legs this socket was signaling: notify each peer (so
-      // their UI doesn't hang on a dead connection) and close the Call record.
-      // transitionCall maps end-while-ringing to 'missed', so a caller dying
-      // before an answer is recorded correctly too.
-      for (const [peerId, callId] of callPeers) {
-        const call = await transitionCall(callId, userId, 'end').catch(() => null);
-        const names = call && call.status === 'missed'
-          ? ['call:cancelled', 'call-missed'] // never answered → close the ringing popup
-          : ['call:ended', 'call-ended'];
-        relay(peerId, names, { from: userId, callId, reason: 'peer-disconnected' });
+      /* Live call legs this socket was signaling. The media is peer-to-peer and
+         doesn't need this socket, so a Wi-Fi blip or a mobile network switch
+         used to kill a perfectly good call by ending it here immediately.
+         Park the legs for a grace period instead: if the user reconnects, the
+         new socket adopts them (see parkedCallLegs above) and the call goes on.
+         Only if they're still gone afterwards do we notify each peer and close
+         the Call record (end-while-ringing → 'missed', so a caller dying before
+         an answer is still recorded correctly). */
+      if (callPeers.size) {
+        const legs = new Map(callPeers);
+        callPeers.clear();
+        parkedCallLegs.set(userId, legs);
+        setTimeout(async () => {
+          if (parkedCallLegs.get(userId) !== legs) return; // adopted by a reconnect
+          parkedCallLegs.delete(userId);
+          // Back on another instance (multi-node)? The call is still alive.
+          if (await isUserOnline(userId)) return;
+          for (const [peerId, callId] of legs) {
+            const call = await transitionCall(callId, userId, 'end').catch(() => null);
+            const names = call && call.status === 'missed'
+              ? ['call:cancelled', 'call-missed'] // never answered → close the ringing popup
+              : ['call:ended', 'call-ended'];
+            relay(peerId, names, { from: userId, callId, reason: 'peer-disconnected' });
+          }
+        }, CALL_RECONNECT_GRACE_MS).unref?.();
       }
-      callPeers.clear();
       // Tell every meeting room this socket was in that the peer is gone, and
       // finalize its attendance record.
       if (socket.data.meetings) {

@@ -13,10 +13,34 @@ const TYPING_TTL_MS = 7000;
 // collide on the same temp id (a collision made appendMessage drop the second).
 let tmpSeq = 0;
 
+/**
+ * Lay a freshly fetched newest page over what this device already holds,
+ * keeping what the server page can't know about yet: optimistic sends still in
+ * flight or failed (their text must not vanish), and anything newer that arrived
+ * over the socket while the request was out. Older local rows are dropped — they
+ * belong to history that scroll-back re-fetches.
+ */
+function mergeServerPage(page = [], local = []) {
+  if (!local.length) return page;
+  const seen = new Set(page.map((m) => String(m._id)));
+  const newest = page.length ? new Date(page[page.length - 1].createdAt).getTime() || 0 : 0;
+  const keep = local.filter(
+    (m) =>
+      !seen.has(String(m._id)) &&
+      (m.optimistic || m.status === 'failed' || (new Date(m.createdAt).getTime() || 0) > newest)
+  );
+  return keep.length ? [...page, ...keep] : page;
+}
+
 export const useChat = create((set, get) => ({
   chats: [],
   activeChatId: null,
   messagesByChat: {},
+  // chatId -> true once its history was actually fetched. A message arriving over
+  // the socket creates a messagesByChat entry too, so "has an entry" is not the
+  // same as "has been loaded" — confusing the two left a chat showing only that
+  // one live message, with its history unreachable until a reload.
+  historyLoaded: {},
   loadingOlder: {}, // chatId -> true while a scroll-back page is in flight
   noMoreOlder: {}, // chatId -> true once we've reached the start of the conversation
   typing: {}, // chatId -> array of userIds currently typing
@@ -64,7 +88,10 @@ export const useChat = create((set, get) => ({
         const { data } = await api.get(`/messages/${activeChatId}`);
         const messages = data.messages;
         set((s) => ({
-          messagesByChat: { ...s.messagesByChat, [activeChatId]: messages },
+          // Merge, not replace: a send still in flight (or failed) during the
+          // outage must survive, or its POST resolves into a missing bubble.
+          messagesByChat: { ...s.messagesByChat, [activeChatId]: mergeServerPage(messages, s.messagesByChat[activeChatId]) },
+          historyLoaded: { ...s.historyLoaded, [activeChatId]: true },
           noMoreOlder: { ...s.noMoreOlder, [activeChatId]: false },
           windowedChats: { ...s.windowedChats, [activeChatId]: false },
         }));
@@ -79,17 +106,24 @@ export const useChat = create((set, get) => ({
       activeChatId: chatId,
       chats: s.chats.map((c) => (c._id === chatId ? { ...c, unreadCount: 0 } : c)),
     }));
-    if (get().messagesByChat[chatId]) return;
+    if (get().historyLoaded[chatId]) return;
 
     if (DEMO_MODE) {
-      set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: MESSAGES[chatId] || [] } }));
+      set((s) => ({
+        messagesByChat: { ...s.messagesByChat, [chatId]: s.messagesByChat[chatId] || MESSAGES[chatId] || [] },
+        historyLoaded: { ...s.historyLoaded, [chatId]: true },
+      }));
       return;
     }
-    set({ loadingMessages: true });
+    // Skeleton only when there is nothing to show yet.
+    if (!get().messagesByChat[chatId]?.length) set({ loadingMessages: true });
     try {
       const { data } = await api.get(`/messages/${chatId}`);
       const messages = data.messages;
-      set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
+      set((s) => ({
+        messagesByChat: { ...s.messagesByChat, [chatId]: mergeServerPage(messages, s.messagesByChat[chatId]) },
+        historyLoaded: { ...s.historyLoaded, [chatId]: true },
+      }));
       // Pins ride along on the first page, so the banner is up as the
       // conversation paints.
       if (data.pins) {
@@ -212,6 +246,7 @@ export const useChat = create((set, get) => ({
       const messages = data.messages;
       set((s) => ({
         messagesByChat: { ...s.messagesByChat, [chatId]: messages },
+        historyLoaded: { ...s.historyLoaded, [chatId]: true },
         windowedChats: { ...s.windowedChats, [chatId]: false },
         noMoreOlder: { ...s.noMoreOlder, [chatId]: false },
       }));
@@ -1073,10 +1108,13 @@ export const useChat = create((set, get) => ({
     set((s) => {
       const messagesByChat = { ...s.messagesByChat };
       delete messagesByChat[chatId];
+      const historyLoaded = { ...s.historyLoaded };
+      delete historyLoaded[chatId];
       return {
         chats: s.chats.filter((c) => c._id !== chatId),
         activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
         messagesByChat,
+        historyLoaded,
       };
     });
     if (!DEMO_MODE) {
@@ -1088,3 +1126,13 @@ export const useChat = create((set, get) => ({
     }
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useChat.getState();
+  window.addEventListener('cc:session-reset', () => {
+    Object.keys(typingTimers).forEach((k) => { clearTimeout(typingTimers[k]); delete typingTimers[k]; });
+    useChat.setState(initial, true);
+  });
+}

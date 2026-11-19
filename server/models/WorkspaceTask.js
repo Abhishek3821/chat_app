@@ -16,4 +16,7 @@ const schema = new mongoose.Schema({
 }, { timestamps: true });
 
 schema.index({ workspace: 1, status: 1, dueAt: 1 });
+// The due-reminder sweep (utils/workspaceTaskReminders.js) is cross-workspace,
+// so the index above (workspace-first) can't serve it.
+schema.index({ status: 1, reminderSentAt: 1, dueAt: 1 });
 export default mongoose.model('WorkspaceTask', schema);

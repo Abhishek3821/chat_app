@@ -126,7 +126,8 @@ const eagerImports = [...appSrc.matchAll(/^import\s+\w+\s+from\s+['"]\.\/([^'"]+
 let missingPages = 0;
 for (const spec of [...lazyImports, ...eagerImports]) {
   const p = path.join(SRC, spec);
-  if (!fs.existsSync(p)) {
+  // Vite resolves extensionless imports (./lib/lazyWithRetry → .js), so do the same.
+  if (!['', '.js', '.jsx'].some((ext) => fs.existsSync(p + ext))) {
     hit(`App.jsx imports ./${spec} which does not exist`);
     missingPages += 1;
   }

@@ -112,21 +112,73 @@ if (import.meta.env.PROD && !DEMO_MODE && !import.meta.env.VITE_API_URL) {
 // We fetch one after auth and cache it, then append it to media URLs. The
 // long-lived session JWT is never placed in a URL.
 let mediaToken = null;
+/* The media token is short-lived (the server signs it for 6h) but used to be
+   fetched once and cached forever — so a long-lived tab or installed PWA showed
+   broken images, videos and voice notes after six hours, until a reload. Track
+   its expiry and renew it ahead of time, including when a sleeping/backgrounded
+   tab (whose timers were paused) becomes visible again. */
+let mediaTokenExp = 0; // ms epoch
+let mediaRefreshTimer = null;
+let mediaInFlight = null;
+const MEDIA_REFRESH_EARLY_MS = 10 * 60 * 1000;
+const MEDIA_FALLBACK_TTL_MS = 5 * 60 * 60 * 1000; // if exp can't be read
+
+function jwtExpiryMs(token) {
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = JSON.parse(atob(part.padEnd(part.length + ((4 - (part.length % 4)) % 4), '=')));
+    return json.exp ? json.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+const mediaTokenStale = () => Boolean(mediaToken) && Date.now() > mediaTokenExp - MEDIA_REFRESH_EARLY_MS;
+
+function scheduleMediaRefresh() {
+  clearTimeout(mediaRefreshTimer);
+  if (!mediaToken) return;
+  const delay = Math.max(30_000, mediaTokenExp - MEDIA_REFRESH_EARLY_MS - Date.now());
+  mediaRefreshTimer = setTimeout(() => ensureMediaToken(true), Math.min(delay, 2 ** 31 - 1));
+}
 
 export async function ensureMediaToken(force = false) {
   if (DEMO_MODE) return null;
-  if (mediaToken && !force) return mediaToken;
-  try {
-    const { data } = await api.get('/upload/access');
-    mediaToken = data.token;
-  } catch {
-    /* not fatal — media just won't load until a token is available */
-  }
-  return mediaToken;
+  if (mediaToken && !force && !mediaTokenStale()) return mediaToken;
+  if (mediaInFlight) return mediaInFlight; // one request, however many callers
+  mediaInFlight = (async () => {
+    try {
+      const { data } = await api.get('/upload/access');
+      mediaToken = data.token;
+      mediaTokenExp = jwtExpiryMs(mediaToken) || Date.now() + MEDIA_FALLBACK_TTL_MS;
+      scheduleMediaRefresh();
+      // Lets anything holding a media URL rebuild it with the fresh token.
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('cc:media-token'));
+    } catch {
+      /* not fatal — media just won't load until a token is available; retry soon */
+      if (mediaToken) {
+        clearTimeout(mediaRefreshTimer);
+        mediaRefreshTimer = setTimeout(() => ensureMediaToken(true), 60_000);
+      }
+    } finally {
+      mediaInFlight = null;
+    }
+    return mediaToken;
+  })();
+  return mediaInFlight;
 }
 
 export function clearMediaToken() {
   mediaToken = null;
+  mediaTokenExp = 0;
+  clearTimeout(mediaRefreshTimer);
+  mediaRefreshTimer = null;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && mediaTokenStale()) ensureMediaToken(true);
+  });
 }
 
 /** Upload one or more files (multipart) → returns [{ url, name, size, mime }]. */
@@ -192,6 +244,7 @@ export function mediaUrl(u) {
   const origin = baseURL.replace(/\/api\/?$/, ''); // '' when proxied via '/api'
   const base = `${origin}${u}`;
   if (!mediaToken) return base;
+  if (mediaTokenStale()) ensureMediaToken(true); // renew in the background
   return `${base}${u.includes('?') ? '&' : '?'}token=${encodeURIComponent(mediaToken)}`;
 }
 

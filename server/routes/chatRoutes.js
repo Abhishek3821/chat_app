@@ -11,12 +11,13 @@ import {
   getLockedChats,
 } from '../controllers/chatController.js';
 import { protect } from '../middleware/auth.js';
+import { userSecretLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 router.use(protect);
 
 router.get('/', getChats);
-router.post('/locked', getLockedChats); // reveal locked chats (PIN in body)
+router.post('/locked', userSecretLimiter, getLockedChats); // reveal locked chats (PIN in body)
 router.post('/direct/:userId', accessDirectChat);
 router.post('/:id/lock', lockChat);
 router.post('/:id/unlock', unlockChat);

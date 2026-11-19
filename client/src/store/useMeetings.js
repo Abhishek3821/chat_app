@@ -92,3 +92,12 @@ export const useMeetings = create((set, get) => ({
     return data.report;
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useMeetings.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useMeetings.setState(initial, true);
+  });
+}

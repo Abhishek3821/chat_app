@@ -88,3 +88,12 @@ export const useApps = create((set, get) => ({
       return { revealedSecrets: next };
     }),
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useApps.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useApps.setState(initial, true);
+  });
+}

@@ -73,6 +73,17 @@ const chatSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/**
+ * Point the chat preview at a newly created message — but only if it is newer
+ * than the current one. Two concurrent sends used to race (`chat.lastMessage =
+ * id; chat.save()` is last-writer-wins), so the preview could settle on the
+ * OLDER message. ObjectIds lead with their timestamp, so `$max` keeps the newest.
+ * Also bumps updatedAt (timestamps), which orders the chat list.
+ */
+chatSchema.statics.bumpLastMessage = function bumpLastMessage(chatId, messageId) {
+  return this.updateOne({ _id: chatId }, { $max: { lastMessage: messageId } });
+};
+
 chatSchema.index({ 'participants.user': 1, updatedAt: -1 });
 // The pin sweeper asks "which chats have an expired pin?" every minute. Without
 // this it's a full collection scan on a timer, forever.

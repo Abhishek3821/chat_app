@@ -6,6 +6,7 @@ import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { workspaceCan, PERMISSIONS } from '../utils/rbac.js';
 import { invalidateAutoReplyCache } from '../utils/autoReply.js';
 import { logWorkspaceAction } from '../utils/workspaceAudit.js';
+import { disconnectUser } from '../socket/index.js';
 
 const MEMBER_FIELDS = 'name username avatar isOnline lastSeen workspaceRole accountStatus createdAt';
 
@@ -188,6 +189,7 @@ export const removeMember = asyncHandler(async (req, res) => {
   // Give them their own empty workspace and revoke sessions (forces a re-login).
   await createWorkspaceForUser(member, `${member.name}'s workspace`);
   await User.updateOne({ _id: member._id }, { $inc: { tokenVersion: 1 } });
+  disconnectUser(member._id); // open sockets would otherwise keep the old chat rooms
   await logWorkspaceAction(req.user, 'member.remove', member._id, member.name);
   res.json({ success: true, message: 'Member removed from the workspace.' });
 });

@@ -9,7 +9,12 @@ export async function dispatchMeetingReminders(now = new Date()) {
     status: 'scheduled',
     startAt: { $gt: now, $lte: new Date(now.getTime() + 60 * 60 * 1000) },
     reminderSentAt: null,
-  }).select('title startAt reminderMinutes host participants roomCode').limit(100);
+  })
+    .select('title startAt reminderMinutes host participants roomCode')
+    // Soonest first: with an unsorted limit, 100 not-yet-due meetings could fill
+    // every slot on every tick and starve the ones that ARE due.
+    .sort({ startAt: 1 })
+    .limit(100);
   for (const meeting of candidates) {
     const minutes = Math.max(1, Math.min(60, Number(meeting.reminderMinutes) || 10));
     if (meeting.startAt.getTime() - minutes * 60_000 > now.getTime()) continue;

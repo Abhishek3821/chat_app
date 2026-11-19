@@ -75,6 +75,16 @@ jobs:
       # only symptom is a call that connects and carries no audio.
       - name: ICE source precedence — server first, build-time URL as fallback (18 checks)
         run: node test-ice-order.mjs
+      # Store-level unit tests that existed but were never run anywhere: optimistic
+      # sends, history loading, reconnect resync, logout reset, read receipts.
+      - name: chat store (sends, history, resync, session reset)
+        run: node --test test-chat-store.mjs
+      - name: chat read receipts
+        run: node --test test-chat-read-receipts.mjs
+      - name: forgot-password form
+        run: node --test test-forgot-password.mjs
+      - name: upload size limits
+        run: node --test test-upload-limits.mjs
 
   server-tests:
     runs-on: ubuntu-latest
@@ -87,7 +97,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22: Node 20 is end-of-life, and the module-mock unit tests need
+          # node:test's mock.module (--experimental-test-module-mocks, 22.3+).
+          node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
@@ -258,3 +270,42 @@ jobs:
       - name: real-time behaviour, browser-shaped client (17 checks)
         if: ${{ env.MONGO_URI != '' }}
         run: node tests/realtime-browser.mjs
+
+      # ── Security / correctness regressions (2026-11 audit) ──
+      - name: SECURITY — meeting signals can't reach outside the meeting (16 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/meeting-signal-security.mjs
+      - name: SECURITY — removed/deleted users lose live socket access (18 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/socket-revocation.mjs
+      - name: SECURITY — password/PIN guessing capped despite spoofed IPs (12 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/brute-force-limits.mjs
+      - name: concurrent votes / reactions / Q&A never lose updates (18 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/concurrent-writes.mjs
+      - name: call state transitions are compare-and-set + reconnect grace (11 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/call-state-race.mjs
+      - name: unread counts from read watermarks, no history scan (19 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/unread-counts.mjs
+      - name: account deletion leaves nothing dangling (17 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/account-deletion.mjs
+      - name: scheduled sends are idempotent across a crash (5 checks)
+        if: ${{ env.MONGO_URI != '' }}
+        run: node tests/scheduled-idempotency.mjs
+
+      # Unit tests with no database — these can always run.
+      - name: unit tests (read coalescer, media limits, upload metadata, embed SDK)
+        run: node --test tests/read-coalescer.test.mjs tests/media-limits.test.mjs tests/upload-metadata.test.mjs tests/cloud-upload-metadata.test.mjs tests/embed-sdk.test.mjs
+      - name: unit tests that mock modules (email results, forgot-password, signup email)
+        run: node --experimental-test-module-mocks --test tests/email-send-result.test.mjs tests/forgot-password.test.mjs tests/signup-email.test.mjs
+
+      # Suites drop their database when they START, not when they end; left
+      # behind, ~30 of them exceed the shared cluster's 500-collection cap —
+      # which production shares. Always clean up, even after a failure.
+      - name: drop the throwaway test databases
+        if: ${{ always() && env.MONGO_URI != '' }}
+        run: node tests/cleanup-test-dbs.mjs

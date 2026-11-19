@@ -51,8 +51,7 @@ async function sendAuto(chat, fromUserId, text, kind) {
     deliveredTo: [fromUserId],
     readBy: [{ user: fromUserId, at: new Date() }],
   });
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
   message = await Message.findById(message._id).populate('sender', 'name username avatar');
   for (const p of chat.participants) {
     emitToUser(String(p.user), 'receive-message', { chatId: String(chat._id), message });

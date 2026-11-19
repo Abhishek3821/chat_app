@@ -10,6 +10,14 @@ import { redisEnabled } from './redis.js';
  */
 const handlers = new Map();
 let queue = null;
+let worker = null;
+
+/** Graceful shutdown: let in-flight jobs finish so they aren't re-run as "stalled". */
+export async function closeQueue() {
+  await Promise.allSettled([worker?.close(), queue?.close()]);
+  worker = null;
+  queue = null;
+}
 
 /** Register a processor for a job name. Call before initQueue(). */
 export function registerJob(name, handler) {
@@ -47,13 +55,22 @@ export async function initQueue() {
     return;
   }
   const { Queue, Worker } = await import('bullmq');
-  // BullMQ requires maxRetriesPerRequest: null on its connections.
-  const connection = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
-  queue = new Queue('fanout', { connection });
-  const worker = new Worker('fanout', (job) => runJob(job.name, job.data), {
-    connection: connection.duplicate(),
+  /* Producer: fail fast. With an offline queue, queue.add() never rejects while
+     Redis is down — the inline fallback in enqueue() was unreachable and every
+     job piled up in memory. BullMQ's docs recommend enableOfflineQueue:false on
+     Queue connections for exactly this. */
+  const producer = new Redis(process.env.REDIS_URL, { enableOfflineQueue: false, maxRetriesPerRequest: 1 });
+  producer.on('error', (e) => console.warn('⚠️  Redis(queue):', e.message));
+  queue = new Queue('fanout', { connection: producer });
+  queue.on('error', (e) => console.warn('⚠️  queue:', e.message));
+  // Worker: BullMQ requires maxRetriesPerRequest: null; it waits for Redis to return.
+  const workerConn = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+  workerConn.on('error', (e) => console.warn('⚠️  Redis(worker):', e.message));
+  worker = new Worker('fanout', (job) => runJob(job.name, job.data), {
+    connection: workerConn,
     concurrency: 10,
   });
+  worker.on('error', (e) => console.warn('⚠️  worker:', e.message));
   worker.on('failed', (job, err) => console.warn(`⚠️  job "${job?.name}" failed:`, err?.message));
   console.log('✅ BullMQ worker ready (queue: fanout).');
 }

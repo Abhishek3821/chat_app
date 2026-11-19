@@ -55,3 +55,12 @@ export const useNotifications = create((set, get) => ({
     }
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useNotifications.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useNotifications.setState(initial, true);
+  });
+}

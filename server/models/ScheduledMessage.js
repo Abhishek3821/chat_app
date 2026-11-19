@@ -52,6 +52,9 @@ const scheduledMessageSchema = new mongoose.Schema(
     // Set when a 'sending' claim was taken, so a row orphaned by a process that
     // died mid-dispatch can be reclaimed instead of sticking forever.
     claimedAt: { type: Date },
+    // Pre-assigned on the FIRST claim and reused on every reclaim, so a dispatch
+    // that crashed after creating the message can't create a second copy.
+    messageId: { type: mongoose.Schema.Types.ObjectId },
     sentMessage: { type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
     error: { type: String },
   },

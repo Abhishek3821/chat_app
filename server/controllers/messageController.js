@@ -11,6 +11,7 @@ import { enqueue } from '../utils/queue.js';
 import { notifyUser } from '../utils/notify.js';
 import { groupCan, PERMISSIONS } from '../utils/rbac.js';
 import { invalidateChatListCache } from '../utils/chatCache.js';
+import { markChatRead } from '../utils/readState.js';
 import {
   assertValidDuration,
   assertMayPin,
@@ -112,7 +113,7 @@ export async function assertMember(chatId, userId) {
  * silence them for the whole room. System messages are exempt — they're the
  * app narrating itself, not one user reaching another.
  */
-async function assertDirectChatCanSend(chat, sender) {
+export async function assertDirectChatCanSend(chat, sender) {
   if (chat.isGroup) return;
   const senderId = String(sender?._id || sender);
   const other = (chat.participants || [])
@@ -148,6 +149,7 @@ export async function deliverMessage({
   mentions,
   forwardedFrom,
   viewOnce = false,
+  _id, // optional pre-assigned id (idempotent scheduled sends)
 }) {
   const chatId = String(chat._id);
   if (type === 'videoNote') await verifyVideoNoteAttachments(attachments);
@@ -157,6 +159,7 @@ export async function deliverMessage({
   const expiresAt = chat.disappearingSeconds > 0 ? new Date(Date.now() + chat.disappearingSeconds * 1000) : undefined;
 
   let message = await Message.create({
+    ...(_id ? { _id } : {}),
     chat: chatId,
     sender: sender._id,
     type,
@@ -172,8 +175,7 @@ export async function deliverMessage({
     readBy: [{ user: sender._id, at: new Date() }],
   });
 
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
 
   message = await populateInPlace(message);
   // Every participant's chat-list preview/order/unread count just changed.
@@ -410,20 +412,41 @@ export const deleteMessage = asyncHandler(async (req, res) => {
 // POST /api/messages/:id/react  { emoji }
 export const reactToMessage = asyncHandler(async (req, res) => {
   const { emoji } = req.body;
-  const message = await Message.findById(req.params.id);
-  if (!message) throw new ApiError(404, 'Message not found.');
-  await assertIsMember(message.chat, req.user._id);
+  if (typeof emoji !== 'string' || !emoji.trim() || emoji.length > 32) throw new ApiError(400, 'Invalid reaction.');
+  const found = await Message.findById(req.params.id).select('chat');
+  if (!found) throw new ApiError(404, 'Message not found.');
+  await assertIsMember(found.chat, req.user._id);
 
-  const existing = message.reactions.find((r) => String(r.user) === String(req.user._id));
-  if (existing && existing.emoji === emoji) {
-    message.reactions = message.reactions.filter((r) => String(r.user) !== String(req.user._id));
-  } else if (existing) {
-    existing.emoji = emoji;
-  } else {
-    message.reactions.push({ user: req.user._id, emoji });
-  }
-  await message.save();
+  /* One atomic update (no read-modify-save): with save(), people reacting at the
+     same moment hit a VersionError (500) or overwrote each other. Semantics are
+     unchanged — one reaction per user; the same emoji again removes it. The
+     emoji goes in as a $literal so a value like "$reactions" can never be read
+     as a field path. */
+  const me = new mongoose.Types.ObjectId(String(req.user._id));
+  const all = { $ifNull: ['$reactions', []] };
+  await Message.updateOne({ _id: found._id }, [
+    {
+      $set: {
+        reactions: {
+          $let: {
+            vars: {
+              mine: { $filter: { input: all, cond: { $eq: ['$$this.user', me] } } },
+              rest: { $filter: { input: all, cond: { $ne: ['$$this.user', me] } } },
+            },
+            in: {
+              $cond: [
+                { $in: [{ $literal: emoji }, '$$mine.emoji'] },
+                '$$rest',
+                { $concatArrays: ['$$rest', [{ user: me, emoji: { $literal: emoji } }]] },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ]);
 
+  const message = await Message.findById(found._id);
   const populated = await populateInPlace(message);
   emitToChat(String(message.chat), 'message-reaction', {
     chatId: String(message.chat),
@@ -486,10 +509,8 @@ export const getStarred = asyncHandler(async (req, res) => {
 export const markRead = asyncHandler(async (req, res) => {
   const { chatId } = req.body;
   await assertIsMember(chatId, req.user._id);
-  await Message.updateMany(
-    { chat: chatId, sender: { $ne: req.user._id }, 'readBy.user': { $ne: req.user._id } },
-    { $push: { readBy: { user: req.user._id, at: new Date() } } }
-  );
+  // Watermark + receipts on just the newly read messages (utils/readState.js).
+  await markChatRead(chatId, req.user._id);
   // Respect the reader's read-receipt privacy: don't reveal read state if off.
   if (req.user.privacy?.readReceipts !== false) {
     emitToChat(chatId, 'message-read', { chatId, userId: String(req.user._id) });
@@ -627,8 +648,7 @@ export const createPoll = asyncHandler(async (req, res) => {
     readBy: [{ user: req.user._id, at: new Date() }],
   });
 
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
 
   message = await populateInPlace(message);
   invalidateChatListCache(chat.participants.map((p) => p.user));
@@ -651,23 +671,52 @@ export const votePoll = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Invalid poll option.');
   }
 
-  const uid = String(req.user._id);
-  const votedThis = message.poll.options[idx].votes.some((v) => String(v) === uid);
-  message.poll.options.forEach((opt, i) => {
-    if (message.poll.multi) {
-      // Toggle only the clicked option; leave the others as-is.
-      if (i === idx) {
-        opt.votes = votedThis ? opt.votes.filter((v) => String(v) !== uid) : [...opt.votes, req.user._id];
-      }
-    } else {
-      // Single choice: my vote lives on at most one option (re-click = clear).
-      opt.votes = opt.votes.filter((v) => String(v) !== uid);
-      if (i === idx && !votedThis) opt.votes.push(req.user._id);
-    }
-  });
+  /* One atomic pipeline update, decided against the CURRENT stored votes (not
+     the copy read above). The old read-modify-save lost votes: in a busy group,
+     7 of 8 simultaneous voters got a 500 (VersionError) and only one counted.
+       · multi-choice: toggle me on the clicked option only
+       · single choice: my vote lives on at most one option (re-click = clear) */
+  const me = new mongoose.Types.ObjectId(String(req.user._id));
+  const multi = Boolean(message.poll.multi);
+  const votesOf = { $ifNull: ['$$o.votes', []] };
+  const withoutMe = { $filter: { input: votesOf, cond: { $ne: ['$$this', me] } } };
+  const iHadIt = { $in: [me, votesOf] };
+  const result = await Message.updateOne({ _id: message._id, 'poll.closed': { $ne: true } }, [
+    {
+      $set: {
+        'poll.options': {
+          $map: {
+            input: { $range: [0, { $size: '$poll.options' }] },
+            as: 'i',
+            in: {
+              $let: {
+                vars: { o: { $arrayElemAt: ['$poll.options', '$$i'] } },
+                in: {
+                  $mergeObjects: [
+                    '$$o',
+                    {
+                      votes: {
+                        $cond: [
+                          { $eq: ['$$i', idx] },
+                          // the clicked option: toggle
+                          { $cond: [iHadIt, withoutMe, { $concatArrays: [withoutMe, [me]] }] },
+                          // every other option: untouched (multi) / my vote removed (single)
+                          multi ? votesOf : withoutMe,
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  ]);
+  if (!result.matchedCount) throw new ApiError(400, 'This poll is closed.');
 
-  await message.save();
-  const populated = await populateInPlace(message);
+  const populated = await populateInPlace(await Message.findById(message._id));
   emitToChat(String(message.chat), 'message-updated', { chatId: String(message.chat), message: populated });
   res.json({ success: true, message: populated });
 });

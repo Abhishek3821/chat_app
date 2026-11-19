@@ -11,27 +11,16 @@
       light-mode user got a full dark repaint on every single load: the document
       painted navy, then React mounted, read the stored preference and tore it
       back to mint.
-      Inline and synchronous on purpose — a module script or a React effect both
-      run after the first paint, which is precisely too late.
+      Synchronous (classic, non-module) on purpose — a module script or a React
+      effect both run after the first paint, which is precisely too late. It is
+      an external file, not inline, because the production CSP is
+      `script-src 'self'` and refuses inline scripts.
 
-      theme-color is set here too (it was pinned to the dark navy), so the mobile
+      theme-color is set there too (it was pinned to the dark navy), so the mobile
       browser chrome and the PWA status bar match the app instead of framing a
-      pale-mint UI in navy.
+      pale-mint UI in navy. The same file also starts the web-font load.
     -->
-    <script>
-      (function () {
-        try {
-          var stored = localStorage.getItem('cc_theme') || 'dark';
-          var dark = stored === 'dark' || (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.classList.toggle('dark', dark);
-          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-          var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute('content', dark ? '#071A2B' : '#E4F2EA');
-        } catch (e) {
-          /* private mode / storage blocked — fall through to the default below */
-        }
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
     <meta name="theme-color" content="#071A2B" />
     <meta name="description" content="ChatKonect — a modern, premium real-time messaging platform." />
     <!-- PWA: installable + offline app shell -->
@@ -45,21 +34,16 @@
     <!--
       Non-render-blocking font load (preload + print-media swap trick): the
       fetch starts immediately (preload, high priority) but doesn't block first
-      paint the way a plain `rel="stylesheet"` would — the stylesheet applies
-      once loaded by swapping its media from "print" to "all". `display=swap`
-      (in the URL) means text renders in the fallback font immediately either
-      way, so nothing is ever invisible while this loads.
+      paint the way a plain `rel="stylesheet"` would. The stylesheet itself is
+      added by /theme-init.js, which swaps its media from "print" to "all" once
+      loaded — done from script because an inline `onload=` attribute is blocked
+      by the production CSP. `display=swap` (in the URL) means text renders in
+      the fallback font immediately either way.
     -->
     <link
       rel="preload"
       as="style"
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-      media="print"
-      onload="this.media='all'"
     />
     <noscript>
       <link

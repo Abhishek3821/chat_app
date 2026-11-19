@@ -94,3 +94,53 @@ test('safe storage tolerates browser denial and supports normal drafts',async()=
   allowed.setItem('draft','hello');assert.equal(allowed.getItem('draft'),'hello');
   allowed.removeItem('draft');assert.equal(allowed.getItem('draft'),null);
 });
+test('a live message for an unopened chat does not hide its history',async()=>{
+  const calls=[];
+  const {store}=fixture({get:async path=>{calls.push(path);return {data:{messages:[
+    {_id:'h1',content:'old 1',createdAt:'2026-10-01T00:00:00.000Z'},
+    {_id:'h2',content:'old 2',createdAt:'2026-10-02T00:00:00.000Z'},
+    {_id:'live',content:'just now',createdAt:'2026-10-03T00:00:00.000Z'}]}};}});
+  store.setState({chats:[{_id:'chat'},{_id:'other'}],activeChatId:'other'});
+  store.getState().appendMessage('chat',{_id:'live',content:'just now',createdAt:'2026-10-03T00:00:00.000Z',sender:{_id:'peer'}});
+  await store.getState().setActiveChat('chat');
+  assert.deepEqual(calls,['/messages/chat']);
+  assert.deepEqual(store.getState().messagesByChat.chat.map(m=>m._id),['h1','h2','live']);
+  await store.getState().setActiveChat('chat');
+  assert.equal(calls.length,1,'second open uses the loaded history');
+});
+test('reconnect resync keeps in-flight and failed sends',async()=>{
+  const {store}=fixture({get:async path=>({data:path==='/chats'?{chats:[{_id:'chat'}]}:{messages:[{_id:'s1',content:'saved',createdAt:'2026-10-01T00:00:00.000Z'}]}})});
+  store.setState({messagesByChat:{chat:[
+    {_id:'s1',content:'saved',createdAt:'2026-10-01T00:00:00.000Z'},
+    {_id:'tmp-1',content:'sending',createdAt:'2026-09-30T00:00:00.000Z',optimistic:true},
+    {_id:'tmp-2',content:'did not send',createdAt:'2026-09-30T00:00:00.000Z',optimistic:true,status:'failed'}]}});
+  await store.getState().resync();
+  assert.deepEqual(store.getState().messagesByChat.chat.map(m=>m._id),['s1','tmp-1','tmp-2']);
+});
+test('a send resolving after resync still lands as the saved message',async()=>{
+  let resolvePost;
+  const {store}=fixture({
+    post:()=>new Promise(r=>{resolvePost=r;}),
+    get:async path=>({data:path==='/chats'?{chats:[{_id:'chat'}]}:{messages:[]}}),
+  });
+  const pending=store.getState().sendMessage({chatId:'chat',content:'hello'});
+  await store.getState().resync();
+  resolvePost({data:{message:{_id:'real',content:'hello',sender:{_id:'me'}}}});
+  await pending;
+  assert.deepEqual(store.getState().messagesByChat.chat.map(m=>m._id),['real']);
+});
+test('session reset drops the previous account data',async()=>{
+  globalThis.window=new EventTarget();
+  try{
+    const {store}=fixture();
+    store.setState({messagesByChat:{chat:[{_id:'secret'}]},historyLoaded:{chat:true},lockedChats:[{_id:'locked'}]});
+    window.dispatchEvent(new Event('cc:session-reset'));
+    const s=store.getState();
+    assert.deepEqual(s.chats,[]);
+    assert.deepEqual(s.messagesByChat,{});
+    assert.deepEqual(s.historyLoaded,{});
+    assert.equal(s.activeChatId,null);
+    assert.deepEqual(s.lockedChats,[],'PIN-revealed locked chats are cleared');
+    assert.equal(typeof s.sendMessage,'function','actions survive the reset');
+  }finally{delete globalThis.window;}
+});

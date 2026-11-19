@@ -12,6 +12,10 @@ import { useAuth } from './store/useAuth';
 import { useUI } from './store/useUI';
 import api, { DEMO_MODE, ensureMediaToken } from './lib/api';
 
+// postMessage source tags — must match EMBED / HOST in public/embed.js.
+const EMBED = 'chatkonect-embed';
+const HOST = 'chatkonect-host';
+
 const CallsPage = lazyWithRetry(() => import('./pages/CallsPage.jsx'));
 const MeetingsPage = lazyWithRetry(() => import('./pages/MeetingsPage.jsx'));
 const MeetingRoom = lazyWithRetry(() => import('./pages/MeetingRoom.jsx'));
@@ -48,7 +52,7 @@ export default function EmbedApp() {
   }
   const { appId, parentOrigin } = params.current;
   const post = useCallback((msg) => {
-    if (parentOrigin && window.parent !== window) window.parent.postMessage({ source: 'chatkonect-embed', ...msg }, parentOrigin);
+    if (parentOrigin && window.parent !== window) window.parent.postMessage({ source: EMBED, ...msg }, parentOrigin);
   }, [parentOrigin]);
 
   useEffect(() => {
@@ -80,7 +84,7 @@ export default function EmbedApp() {
     const onMessage = async (event) => {
       if (event.origin !== parentOrigin || event.source !== window.parent) return;
       const msg = event.data;
-      if (!msg || msg.source !== 'chatkonect-host') return;
+      if (!msg || msg.source !== HOST) return;
       if (msg.type === 'auth-error') { completeEmbedRefresh(null); return; }
       if (msg.type === 'auth' && typeof msg.token === 'string' && msg.token) {
         const current = ++generation;

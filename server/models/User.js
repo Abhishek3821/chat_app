@@ -165,6 +165,12 @@ userSchema.index(
   { unique: true, partialFilterExpression: { app: { $type: 'objectId' }, externalId: { $type: 'string' } } }
 );
 
+/* Background sweepers (utils/presence.js, utils/workspaceGuestExpiry.js) run
+   every minute on every instance; without these they collection-scan users.
+   Partial, so only the small online / guest subsets are indexed. */
+userSchema.index({ lastSeen: 1 }, { partialFilterExpression: { isOnline: true } });
+userSchema.index({ guestExpiresAt: 1 }, { partialFilterExpression: { workspaceRole: 'guest' } });
+
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);

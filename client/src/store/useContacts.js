@@ -170,3 +170,12 @@ export const useContacts = create((set, get) => ({
     return data.chat._id;
   },
 }));
+
+// Per-account data: drop it when the session ends (logout / forced logout in
+// useAuth) so the next account signed in on this tab never sees this one's.
+if (typeof window !== 'undefined') {
+  const initial = useContacts.getState();
+  window.addEventListener('cc:session-reset', () => {
+    useContacts.setState(initial, true);
+  });
+}

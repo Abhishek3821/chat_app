@@ -23,7 +23,7 @@ import {
   revokeOtherSessions,
 } from '../controllers/authController.js';
 import { protect } from '../middleware/auth.js';
-import { authLimiter } from '../middleware/rateLimit.js';
+import { authLimiter, loginAccountLimiter, userSecretLimiter } from '../middleware/rateLimit.js';
 import { getTurnCredentials } from '../controllers/rtpccred.js';
 
 const router = Router();
@@ -35,7 +35,7 @@ router.post('/email/verify-code', authLimiter, verifySignupEmailCode);
 router.post('/signup', authLimiter, signup);
 router.post('/verify-otp', authLimiter, verifyOtp);
 router.post('/resend-otp', authLimiter, resendOtp);
-router.post('/login', authLimiter, login);
+router.post('/login', authLimiter, loginAccountLimiter, login);
 router.post('/logout', protect, logout);
 router.post('/refresh', authLimiter, refresh); // authenticated by the refresh cookie
 router.get('/me', protect, getMe);
@@ -46,14 +46,14 @@ router.post('/sessions/revoke-others', protect, revokeOtherSessions);
 router.delete('/sessions/:id', protect, revokeSession);
 router.post('/forgot-password', authLimiter, forgotPassword);
 router.post('/reset-password/:token', authLimiter, resetPassword);
-router.patch('/change-password', protect, changePassword);
+router.patch('/change-password', protect, userSecretLimiter, changePassword);
 
 // Two-step verification (app-lock PIN). Verify is rate-limited (brute force).
 router.post('/two-step/enable', protect, enableTwoStep);
 // Changing the PIN requires the current PIN (rate-limited: guessing surface).
-router.post('/two-step/change', protect, authLimiter, changeTwoStepPin);
-router.post('/two-step/disable', protect, disableTwoStep);
-router.post('/two-step/verify', protect, authLimiter, verifyTwoStep);
+router.post('/two-step/change', protect, authLimiter, userSecretLimiter, changeTwoStepPin);
+router.post('/two-step/disable', protect, authLimiter, userSecretLimiter, disableTwoStep);
+router.post('/two-step/verify', protect, authLimiter, userSecretLimiter, verifyTwoStep);
 // Forgot PIN → reset it with an email OTP (both rate-limited).
 router.post('/two-step/forgot', protect, authLimiter, requestTwoStepReset);
 router.post('/two-step/reset', protect, authLimiter, resetTwoStepPin);

@@ -14,11 +14,6 @@ function isInvolved(call, userId) {
   );
 }
 
-function setParticipant(call, userId, patch) {
-  const p = call.participants.find((x) => String(x.user) === String(userId));
-  if (p) Object.assign(p, patch);
-}
-
 /**
  * Single place where a call record changes state, shared by the REST API and
  * the Socket.IO signaling handlers so history stays consistent no matter which
@@ -28,47 +23,72 @@ function setParticipant(call, userId, patch) {
  * actions: 'accept' | 'reject' | 'missed' | 'end'
  * Returns the updated call, or null when callId is unknown/foreign/not an ObjectId.
  */
-export async function transitionCall(callId, userId, action, { duration } = {}) {
+export async function transitionCall(callId, userId, action, { duration } = {}, attempt = 0) {
   if (!mongoose.isValidObjectId(callId)) return null;
   const call = await Call.findById(callId);
   if (!call || !isInvolved(call, userId)) return null;
   if (TERMINAL.has(call.status)) return call;
 
+  const from = call.status;
   const now = new Date();
+  const set = {};
+  let participant = null; // { user, patch } — this user's row on the participants list
   switch (action) {
     case 'accept':
-      if (call.status !== 'ringing') break;
-      call.status = 'accepted';
-      call.answeredAt = now;
-      setParticipant(call, userId, { status: 'joined', joinedAt: now });
+      if (from !== 'ringing') return call;
+      set.status = 'accepted';
+      set.answeredAt = now;
+      participant = { user: userId, patch: { status: 'joined', joinedAt: now } };
       break;
     case 'reject':
-      call.status = 'rejected';
-      call.endedAt = now;
-      setParticipant(call, userId, { status: 'rejected' });
+      set.status = 'rejected';
+      set.endedAt = now;
+      participant = { user: userId, patch: { status: 'rejected' } };
       break;
     case 'missed':
       // Only a never-answered call can be missed.
-      call.status = call.status === 'ringing' ? 'missed' : call.status;
-      call.endedAt = call.endedAt || now;
-      if (call.status === 'missed' && call.receiver) setParticipant(call, call.receiver, { status: 'missed' });
+      if (from === 'ringing') {
+        set.status = 'missed';
+        set.endedAt = call.endedAt || now;
+        if (call.receiver) participant = { user: call.receiver, patch: { status: 'missed' } };
+      } else if (!call.endedAt) {
+        set.endedAt = now;
+      } else {
+        return call;
+      }
       break;
     case 'end': {
-      const wasLive = call.status === 'accepted' || call.status === 'ongoing';
-      call.status = wasLive ? 'completed' : 'missed'; // hang-up while still ringing = cancelled → missed
-      call.endedAt = now;
+      const wasLive = from === 'accepted' || from === 'ongoing';
+      set.status = wasLive ? 'completed' : 'missed'; // hang-up while still ringing = cancelled → missed
+      set.endedAt = now;
       if (wasLive) {
         const computed = call.answeredAt ? Math.max(0, Math.round((now - call.answeredAt) / 1000)) : 0;
-        call.duration = Number.isFinite(Number(duration)) && Number(duration) >= 0 ? Math.round(Number(duration)) : computed;
-        setParticipant(call, userId, { status: 'left', leftAt: now });
+        set.duration = Number.isFinite(Number(duration)) && Number(duration) >= 0 ? Math.round(Number(duration)) : computed;
+        participant = { user: userId, patch: { status: 'left', leftAt: now } };
       }
       break;
     }
     default:
       return call;
   }
-  await call.save();
-  return call;
+
+  /* Compare-and-set on the status we decided from. Read-modify-save let an
+     `accept` and the caller's `end` both act on the same "ringing" read — the
+     loser's save then wrote "missed" over a call that had actually connected
+     (answeredAt set). If the status moved underneath us, re-decide from the
+     fresh state (bounded). The participant row is patched positionally so a
+     concurrent "add person" isn't overwritten by a stale array. */
+  const update = { $set: { ...set } };
+  const options = {};
+  if (participant) {
+    for (const [k, v] of Object.entries(participant.patch)) update.$set[`participants.$[me].${k}`] = v;
+    options.arrayFilters = [{ 'me.user': new mongoose.Types.ObjectId(String(participant.user)) }];
+  }
+  const r = await Call.updateOne({ _id: call._id, status: from }, update, options);
+  if (!r.matchedCount) {
+    return attempt < 3 ? transitionCall(callId, userId, action, { duration }, attempt + 1) : Call.findById(callId);
+  }
+  return Call.findById(callId);
 }
 
 /**

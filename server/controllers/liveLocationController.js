@@ -2,6 +2,8 @@ import Message from '../models/Message.js';
 import Chat from '../models/Chat.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { emitToUser, emitToChat } from '../socket/index.js';
+import { invalidateChatListCache } from '../utils/chatCache.js';
+import { assertMayPost, assertDirectChatCanSend } from './messageController.js';
 
 const MAX_DURATION = 60 * 60 * 8; // 8 hours, like WhatsApp's longest option
 
@@ -22,6 +24,9 @@ export const startLiveLocation = asyncHandler(async (req, res) => {
   const { chatId, lat, lng } = req.body;
   if (!isCoord(lat, 90) || !isCoord(lng, 180)) throw new ApiError(400, 'Valid lat/lng are required.');
   const chat = await assertMember(chatId, req.user._id);
+  // Same send rules as an ordinary message (admins-only groups, block/unfriend).
+  assertMayPost(chat, req.user._id);
+  await assertDirectChatCanSend(chat, req.user);
   const durationSecs = Math.max(60, Math.min(Math.floor(Number(req.body.durationSecs) || 3600), MAX_DURATION));
   const expiresAt = new Date(Date.now() + durationSecs * 1000);
 
@@ -34,8 +39,8 @@ export const startLiveLocation = asyncHandler(async (req, res) => {
     deliveredTo: [req.user._id],
     readBy: [{ user: req.user._id, at: new Date() }],
   });
-  chat.lastMessage = message._id;
-  await chat.save();
+  await Chat.bumpLastMessage(chat._id, message._id);
+  invalidateChatListCache(chat.participants.map((p) => p.user));
   message = await Message.findById(message._id).populate('sender', 'name username avatar');
   for (const p of chat.participants) {
     emitToUser(String(p.user), 'receive-message', { chatId: String(chatId), message });

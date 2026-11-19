@@ -2,9 +2,10 @@ import Chat from '../models/Chat.js';
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
-import { emitToChat } from '../socket/index.js';
+import { emitToChat, removeUserFromChatRoom } from '../socket/index.js';
 import { verifyTwoStepPin } from './userController.js';
 import { applyPresenceFreshness } from '../utils/presence.js';
+import { unreadCountsFor } from '../utils/readState.js';
 import {
   getCachedChatList,
   setCachedChatList,
@@ -26,27 +27,8 @@ function populateChat(query) {
     .populate({ path: 'lastMessage', populate: { path: 'sender', select: 'name username avatar' } });
 }
 
-/**
- * Unread counts for MANY chats in a SINGLE aggregation (was an N+1: one
- * countDocuments per chat). Returns a Map<chatId, count>. On a 50-chat list
- * this collapses 50 round-trips into one.
- */
-async function unreadCountsFor(chatIds, userId) {
-  if (!chatIds.length) return new Map();
-  const rows = await Message.aggregate([
-    {
-      $match: {
-        chat: { $in: chatIds },
-        sender: { $ne: userId },
-        isDeleted: false,
-        'readBy.user': { $ne: userId },
-        deletedFor: { $ne: userId },
-      },
-    },
-    { $group: { _id: '$chat', count: { $sum: 1 } } },
-  ]);
-  return new Map(rows.map((r) => [String(r._id), r.count]));
-}
+/* Unread counts: see utils/readState.js — a per-user read watermark, so the
+   count is a short index range instead of a scan of every chat's history. */
 
 // GET /api/chats  — all conversations for the current user (locked chats hidden;
 // they surface only via POST /api/chats/locked after the PIN is entered)
@@ -76,7 +58,7 @@ export const getChats = asyncHandler(async (req, res) => {
     // Per-chat wallpaper overrides, same idea (personal, not shared).
     const themes = new Map((req.user.chatThemes || []).map((t) => [String(t.chat), t]));
 
-    const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
+    const counts = await unreadCountsFor(chats, req.user._id);
     const withMeta = chats.map((chat) => {
       const id = String(chat._id);
       const theme = themes.get(id);
@@ -190,7 +172,7 @@ export const getLockedChats = asyncHandler(async (req, res) => {
     const chats = await populateChat(
       Chat.find({ 'participants.user': req.user._id, _id: { $in: locked } }).sort({ updatedAt: -1 }).lean()
     );
-    const counts = await unreadCountsFor(chats.map((c) => c._id), req.user._id);
+    const counts = await unreadCountsFor(chats, req.user._id);
     const withMeta = chats.map((chat) => ({ ...chat, unreadCount: counts.get(String(chat._id)) || 0, locked: true }));
 
     if (isCurrent()) setCachedLockedChatList(req.user._id, withMeta);
@@ -222,6 +204,7 @@ export const deleteChat = asyncHandler(async (req, res) => {
 
   if (chat.isGroup) {
     chat.participants = chat.participants.filter((p) => String(p.user) !== String(req.user._id));
+    removeUserFromChatRoom(req.user._id, chat._id);
     if (chat.participants.length === 0) await chat.deleteOne();
     else await chat.save();
   } else {

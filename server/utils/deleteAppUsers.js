@@ -22,6 +22,7 @@ import WorkspaceTask from '../models/WorkspaceTask.js';
 import WorkspaceInboxThread from '../models/WorkspaceInboxThread.js';
 import WorkspaceGuestInvite from '../models/WorkspaceGuestInvite.js';
 import WorkspaceAudit from '../models/WorkspaceAudit.js';
+import ChatRead from '../models/ChatRead.js';
 import { getIO } from '../socket/index.js';
 import { invalidateChatListCache } from './chatCache.js';
 
@@ -89,6 +90,7 @@ export async function deleteAppUsers(appId) {
     WorkspaceGuestInvite.deleteMany({ $or: [{ createdBy: uid }, { claimedBy: uid }] }),
     WorkspaceGuestInvite.updateMany({ chats: chatMatch }, { $pull: { chats: chatMatch } }),
     WorkspaceAudit.deleteMany({ actor: uid }),
+    ChatRead.deleteMany({ $or: [{ user: uid }, { chat: chatMatch }] }),
     User.updateMany({ $or: [
       { contacts: uid }, { favorites: uid }, { blockedUsers: uid },
       { pinnedChats: chatMatch }, { archivedChats: chatMatch }, { mutedChats: chatMatch },

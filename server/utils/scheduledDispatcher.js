@@ -1,6 +1,8 @@
 import ScheduledMessage from '../models/ScheduledMessage.js';
 import Chat from '../models/Chat.js';
 import User from '../models/User.js';
+import Message from '../models/Message.js';
+import mongoose from 'mongoose';
 import { deliverMessage } from '../controllers/messageController.js';
 import { emitToUser } from '../socket/index.js';
 
@@ -33,12 +35,34 @@ async function claimNext(now) {
         { status: 'sending', claimedAt: { $lte: new Date(now.getTime() - CLAIM_STALE_MS) } },
       ],
     },
-    { $set: { status: 'sending', claimedAt: now } },
+    // Pipeline update so the message id is assigned once and then kept: a
+    // reclaim after a crash reuses it, which is what makes the send idempotent.
+    [{ $set: { status: 'sending', claimedAt: now, messageId: { $ifNull: ['$messageId', new mongoose.Types.ObjectId()] } } }],
     { new: true, sort: { sendAt: 1 } }
   );
 }
 
+async function markSent(row, messageId) {
+  row.status = 'sent';
+  row.sentMessage = messageId;
+  row.error = undefined;
+  await row.save();
+  // Let the author's own devices drop it from their "scheduled" list.
+  emitToUser(String(row.sender), 'scheduled-message', {
+    id: String(row._id),
+    chatId: String(row.chat),
+    status: 'sent',
+  });
+}
+
 async function dispatchOne(row) {
+  /* A previous attempt may have created the message and then died before
+     marking the row sent (crash, deploy, DB blip on the save). The row was
+     reclaimed after CLAIM_STALE_MS — without this check it was sent AGAIN. */
+  if (row.messageId && (await Message.exists({ _id: row.messageId }))) {
+    await markSent(row, row.messageId);
+    return;
+  }
   // Re-resolve chat + sender at send time, not schedule time: the user may have
   // left the group, been removed, or the chat may be gone.
   const chat = await Chat.findById(row.chat);
@@ -58,19 +82,10 @@ async function dispatchOne(row) {
     location: row.location,
     replyTo: row.replyTo,
     mentions: row.mentions?.length ? row.mentions : undefined,
+    _id: row.messageId,
   });
 
-  row.status = 'sent';
-  row.sentMessage = message._id;
-  row.error = undefined;
-  await row.save();
-
-  // Let the author's own devices drop it from their "scheduled" list.
-  emitToUser(String(row.sender), 'scheduled-message', {
-    id: String(row._id),
-    chatId: String(row.chat),
-    status: 'sent',
-  });
+  await markSent(row, message._id);
 }
 
 async function tick() {
@@ -110,6 +125,8 @@ export function startScheduledDispatcher() {
   }, TICK_MS);
   // Don't hold the process open on shutdown.
   timer.unref?.();
+  // And don't make anything already due wait a full tick after a (re)start.
+  tick().catch(() => null);
 }
 
 export function stopScheduledDispatcher() {

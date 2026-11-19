@@ -24,7 +24,7 @@ import { serveUpload } from './controllers/mediaController.js';
 import { verifyEmailTransport, closeEmailTransport, isEmailConfigured } from './utils/sendEmail.js';
 import { initSocket, getIO } from './socket/index.js';
 import { getAdapterPair, redisEnabled } from './utils/redis.js';
-import { initQueue } from './utils/queue.js';
+import { initQueue, closeQueue } from './utils/queue.js';
 import { registerFanoutJobs } from './utils/jobs.js';
 import { sweepStaleCalls } from './utils/callService.js';
 import { startScheduledDispatcher } from './utils/scheduledDispatcher.js';
@@ -241,7 +241,12 @@ async function start() {
   });
 }
 
-start();
+start().catch((err) => {
+  // A failed boot (DB unreachable, bad config) must not leave a process that is
+  // "up" but never listening — exit non-zero so the platform restarts/alerts.
+  console.error('❌ Startup failed:', err?.message || err);
+  process.exit(1);
+});
 
 // ── Lifecycle ───────────────────────────────────────────────────
 // Graceful shutdown: on deploys/restarts the platform sends SIGTERM. Stop
@@ -256,14 +261,21 @@ async function shutdown(signal) {
   const deadline = setTimeout(() => process.exit(1), 10000);
   deadline.unref();
   try {
-    await new Promise((resolve) => server.close(resolve)); // stop new HTTP conns
-    io.close(); // disconnect sockets (clients auto-reconnect to the new instance)
+    /* Sockets FIRST. http's server.close() waits for every open connection, and
+       upgraded WebSockets never end by themselves — closing HTTP before Socket.IO
+       meant this always hit the 10s deadline. io.close() disconnects the sockets
+       (clients auto-reconnect to the new instance) and then closes the HTTP server. */
+    await new Promise((resolve) => {
+      io.close(() => resolve());
+      server.closeIdleConnections?.(); // drop idle keep-alive sockets right away
+    });
+    await closeQueue(); // let in-flight jobs finish instead of being re-run as stalled
     closeEmailTransport(); // release pooled SMTP sockets
     await mongoose.connection.close();
   } catch (err) {
     console.error('Shutdown error:', err?.message || err);
   }
-  process.exit(0);
+  process.exit(signal === 'uncaughtException' ? 1 : 0);
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

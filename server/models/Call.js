@@ -42,6 +42,9 @@ callSchema.virtual('callType').get(function callType() {
 callSchema.index({ initiator: 1, createdAt: -1 });
 callSchema.index({ caller: 1, createdAt: -1 });
 callSchema.index({ receiver: 1, createdAt: -1 });
+// sweepStaleCalls (utils/callService.js) runs every minute: status + age.
+callSchema.index({ status: 1, createdAt: 1 });
+callSchema.index({ status: 1, updatedAt: 1 });
 
 const Call = mongoose.model('Call', callSchema);
 export default Call;

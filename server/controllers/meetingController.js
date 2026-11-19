@@ -10,7 +10,9 @@ import { sendEmail, classifySendError } from '../utils/sendEmail.js';
 import { livekitEnabled, livekitUrl, createLivekitToken } from '../utils/livekit.js';
 import { verifyToken, signMeetingPasswordPass } from '../utils/token.js';
 
-const USER_FIELDS = 'name username avatar email';
+// No email: anyone holding a meeting link can load it, and would otherwise get
+// every participant's address. Invite mails use their own query (select email).
+const USER_FIELDS = 'name username avatar';
 
 function populate(query) {
   return query.populate('host', USER_FIELDS).populate('participants.user', USER_FIELDS);
