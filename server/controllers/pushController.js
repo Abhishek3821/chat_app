@@ -1,6 +1,8 @@
 import PushSubscription from '../models/PushSubscription.js';
+import DeviceToken from '../models/DeviceToken.js';
 import { asyncHandler, ApiError } from '../utils/asyncHandler.js';
 import { pushEnabled, vapidPublicKey, isAllowedPushEndpoint } from '../utils/push.js';
+import { fcmEnabled } from '../utils/fcm.js';
 
 const MAX_SUBS_PER_USER = 20;
 
@@ -44,5 +46,55 @@ export const subscribe = asyncHandler(async (req, res) => {
 export const unsubscribe = asyncHandler(async (req, res) => {
   const endpoint = req.body?.endpoint;
   if (endpoint) await PushSubscription.deleteOne({ endpoint, user: req.user._id });
+  res.json({ success: true });
+});
+
+// ── Firebase Cloud Messaging (native Android / iOS app) ──────────────────────
+
+const FCM_PLATFORMS = new Set(['android', 'ios', 'web']);
+
+// GET /api/push/fcm/status — lets the app know whether the server can push.
+export const fcmStatus = asyncHandler(async (req, res) => {
+  res.json({ success: true, enabled: fcmEnabled() });
+});
+
+// POST /api/push/fcm/register  { token, platform?: 'android'|'ios'|'web', appId?, deviceId? }
+// Call after login and whenever FirebaseMessaging.onNewToken fires.
+export const registerFcmToken = asyncHandler(async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!token || token.length > 4096) throw new ApiError(400, 'A valid FCM token is required.');
+  const platform = FCM_PLATFORMS.has(req.body?.platform) ? req.body.platform : 'android';
+  const str = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+
+  const existing = await DeviceToken.findOne({ token }).select('_id');
+  if (!existing && (await DeviceToken.countDocuments({ user: req.user._id })) >= MAX_SUBS_PER_USER) {
+    throw new ApiError(429, 'Too many registered devices. Remove one and try again.');
+  }
+  // One install = one token. If the same physical device registers a new
+  // token, drop its old one so it doesn't get duplicate notifications.
+  const deviceId = str(req.body?.deviceId);
+  if (deviceId) await DeviceToken.deleteMany({ user: req.user._id, deviceId, token: { $ne: token } });
+
+  // Upsert by token — re-assigns the device to the current user if it changed hands.
+  await DeviceToken.findOneAndUpdate(
+    { token },
+    {
+      user: req.user._id,
+      token,
+      platform,
+      appId: str(req.body?.appId),
+      deviceId,
+      userAgent: str(req.headers['user-agent'], 500),
+      lastSeenAt: new Date(),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  res.status(201).json({ success: true, enabled: fcmEnabled() });
+});
+
+// POST /api/push/fcm/unregister  { token } — call on logout.
+export const unregisterFcmToken = asyncHandler(async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (token) await DeviceToken.deleteOne({ token, user: req.user._id });
   res.json({ success: true });
 });

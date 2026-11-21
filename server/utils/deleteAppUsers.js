@@ -9,6 +9,7 @@ import Report from '../models/Report.js';
 import ContactRequest from '../models/ContactRequest.js';
 import Session from '../models/Session.js';
 import PushSubscription from '../models/PushSubscription.js';
+import DeviceToken from '../models/DeviceToken.js';
 import ScheduledMessage from '../models/ScheduledMessage.js';
 import BroadcastList from '../models/BroadcastList.js';
 import Community from '../models/Community.js';
@@ -78,6 +79,7 @@ export async function deleteAppUsers(appId) {
     Call.deleteMany({ $or: [{ initiator: uid }, { caller: uid }, { receiver: uid }, { 'participants.user': uid }] }),
     Report.deleteMany({ $or: [{ reporter: uid }, { targetUser: uid }, { targetChat: chatMatch }, { targetMessage: messageIds }] }),
     PushSubscription.deleteMany({ user: uid }),
+    DeviceToken.deleteMany({ user: uid }),
     ScheduledMessage.deleteMany({ $or: [{ sender: uid }, { chat: chatMatch }] }),
     BroadcastList.deleteMany({ owner: uid }),
     ApiKey.deleteMany({ owner: uid }),

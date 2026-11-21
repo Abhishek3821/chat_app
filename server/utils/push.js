@@ -1,12 +1,13 @@
 import webpush from 'web-push';
 import PushSubscription from '../models/PushSubscription.js';
 import User from '../models/User.js';
+import { sendFcmToUser, fcmEnabled } from './fcm.js';
 
 /**
  * Web Push (VAPID) delivery. Lets messages reach a user whose tab/app is closed
  * — no held socket required, which is both a UX and a scaling win. Push is
- * disabled gracefully until VAPID keys are configured; FCM/APNs can be added as
- * extra transports behind the same sendPushToUser() entry point later.
+ * disabled gracefully until VAPID keys are configured. Native apps get the same
+ * notification through FCM (utils/fcm.js) from the same sendPushToUser() call.
  */
 const PUBLIC = process.env.VAPID_PUBLIC_KEY || '';
 const PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -22,6 +23,7 @@ if (PUBLIC && PRIVATE) {
   }
 }
 
+/** True when browser Web Push (VAPID) is configured. */
 export function pushEnabled() {
   return configured;
 }
@@ -59,7 +61,7 @@ export function vapidPublicKey() {
  * returns 0 when push isn't configured or the user has no subscriptions.
  */
 export async function sendPushToUser(userId, payload) {
-  if (!configured || !userId) return 0;
+  if ((!configured && !fcmEnabled()) || !userId) return 0;
   // Do-Not-Disturb and per-chat mute: the in-app bell still records the
   // notification, but we don't ping the user's devices.
   try {
@@ -72,8 +74,13 @@ export async function sendPushToUser(userId, payload) {
   } catch {
     /* if the lookup fails, fall through and deliver */
   }
+  // Native apps (Android/iOS) via Firebase Cloud Messaging, in parallel with
+  // browser Web Push below. Never lets an FCM failure block Web Push.
+  const fcmSent = sendFcmToUser(userId, payload).catch(() => 0);
+
+  if (!configured) return fcmSent;
   const subs = await PushSubscription.find({ user: userId }).lean();
-  if (!subs.length) return 0;
+  if (!subs.length) return fcmSent;
 
   const body = JSON.stringify(payload);
   let sent = 0;
@@ -89,5 +96,5 @@ export async function sendPushToUser(userId, payload) {
     })
   );
   if (dead.length) await PushSubscription.deleteMany({ endpoint: { $in: dead } }).catch(() => {});
-  return sent;
+  return sent + (await fcmSent);
 }
