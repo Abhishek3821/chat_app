@@ -19,6 +19,8 @@ import AppLayout from './components/layout/AppLayout.jsx';
 import ChatsPage from './pages/ChatsPage.jsx';
 
 const Signup = lazyWithRetry(() => import('./pages/auth/Signup.jsx'));
+const PrivacyPolicy = lazyWithRetry(() => import('./pages/legal/PrivacyPolicy.jsx'));
+const DeleteAccount = lazyWithRetry(() => import('./pages/legal/DeleteAccount.jsx'));
 const ForgotPassword = lazyWithRetry(() => import('./pages/auth/ForgotPassword.jsx'));
 const ResetPassword = lazyWithRetry(() => import('./pages/auth/ResetPassword.jsx'));
 const VerifyOtp = lazyWithRetry(() => import('./pages/auth/VerifyOtp.jsx'));
@@ -198,6 +200,8 @@ export default function App() {
       <Routes>
           {/* Public */}
           <Route path="/login" element={<Login />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/delete-account" element={<DeleteAccount />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:token" element={<ResetPassword />} />

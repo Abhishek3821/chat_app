@@ -20,6 +20,7 @@ import { Input, Field } from '@/components/ui/Input';
 import { LogoFull } from '@/components/brand/Logo';
 import { useAuth } from '@/store/useAuth';
 import { DEMO_MODE } from '@/lib/api';
+import { LegalLinks } from '@/pages/legal/LegalPage';
 
 /* Shared animation presets ------------------------------------------------- */
 export const pageMotion = {
@@ -163,6 +164,7 @@ export function AuthPanel({ children }) {
         className="glass-strong relative w-full max-w-md rounded-3xl p-5 shadow-soft-lg xs:p-7 sm:p-10 2xl:max-w-lg 2xl:p-12"
       >
         {children}
+        <LegalLinks className="mt-6 border-t border-border pt-3" />
       </motion.div>
     </div>
   );

@@ -18,6 +18,15 @@ node_modules/
 server/.env.*
 !server/.env.example
 
+# Firebase credentials — service account private keys and app config files
+# must never be committed (the server reads the key from FIREBASE_SERVICE_ACCOUNT).
+*-firebase-adminsdk-*.json
+*firebase*service*account*.json
+serviceAccount*.json
+service-account*.json
+google-services*.json
+GoogleService-Info*.plist
+
 # Build output
 client/dist/
 client/.vite/
